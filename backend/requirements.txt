@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pony
+psycopg2-binary
+python-decouple
+pydantic
+certifi

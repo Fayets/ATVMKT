@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Brand — ATV: Black + Red */
+  --red: #E63946;
+  --red-glow: rgba(230, 57, 70, 0.12);
+  --red-faint: rgba(230, 57, 70, 0.06);
+  --red-light: #FF4D5A;
+  --red-dark: #B71C1C;
+
+  /* Accent */
+  --accent: #E63946;
+  --accent-glow: rgba(230, 57, 70, 0.14);
+  --accent-faint: rgba(230, 57, 70, 0.06);
+
+  /* Surfaces — deep black layered depth */
+  --bg: #050505;
+  --bg2: #0C0C0E;
+  --bg3: #141416;
+  --bg4: #1E1E22;
+
+  /* Borders */
+  --border: rgba(255, 255, 255, 0.05);
+  --border2: rgba(255, 255, 255, 0.08);
+  --border-red: rgba(230, 57, 70, 0.20);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(230, 57, 70, 0.04);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(230, 57, 70, 0.06);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(230, 57, 70, 0.08);
+
+  /* Text hierarchy */
+  --text: #FAFAFA;
+  --text2: #A1A1AA;
+  --text3: #52525B;
+
+  /* Semantic */
+  --green: #22C55E;
+  --amber: #F59E0B;
+}
+
+@layer base {
+  body {
+    @apply bg-[var(--bg)] text-[var(--text)] antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    letter-spacing: -0.01em;
+  }
+
+  ::selection {
+    background: rgba(230, 57, 70, 0.3);
+    color: #fff;
+  }
+
+  ::-webkit-scrollbar {
+    width: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+@layer components {
+  /* ── Dark Glass with Red Accent ── */
+  .glass-card {
+    background: linear-gradient(
+      145deg,
+      rgba(230, 57, 70, 0.06) 0%,
+      rgba(10, 10, 12, 0.7) 30%,
+      rgba(10, 10, 12, 0.75) 70%,
+      rgba(230, 57, 70, 0.04) 100%
+    );
+    border: 1px solid rgba(230, 57, 70, 0.18);
+    border-radius: 16px;
+    backdrop-filter: blur(40px) saturate(1.6);
+    -webkit-backdrop-filter: blur(40px) saturate(1.6);
+    box-shadow:
+      0 0 0 0.5px rgba(230, 57, 70, 0.08) inset,
+      0 1px 0 0 rgba(230, 57, 70, 0.06) inset,
+      0 4px 16px rgba(0, 0, 0, 0.35),
+      0 1px 3px rgba(0, 0, 0, 0.2);
+    transition: box-shadow 0.4s ease, border-color 0.4s ease;
+    position: relative;
+  }
+  /* Subtle red sheen on top edge */
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      180deg,
+      rgba(230, 57, 70, 0.08) 0%,
+      transparent 15%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* Spotlight glow — follows cursor with local coords set by JS */
+  .glass-card::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background: radial-gradient(
+      300px circle at var(--mx, -500px) var(--my, -500px),
+      rgba(230, 57, 70, 0.25),
+      transparent 50%
+    );
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  /* JS adds this class on pointermove over the card */
+  .glass-card.glass-card--hover::after {
+    opacity: 1;
+  }
+  .glass-card:hover {
+    border-color: rgba(230, 57, 70, 0.35);
+    box-shadow:
+      0 0 0 0.5px rgba(230, 57, 70, 0.2) inset,
+      0 1px 0 0 rgba(230, 57, 70, 0.1) inset,
+      0 8px 32px rgba(0, 0, 0, 0.4),
+      0 0 25px -5px rgba(230, 57, 70, 0.2);
+  }
+
+  /* Glass surface — lighter variant */
+  .glass-surface {
+    background: rgba(230, 57, 70, 0.03);
+    border: 1px solid rgba(230, 57, 70, 0.1);
+    border-radius: 12px;
+    backdrop-filter: blur(24px) saturate(1.5);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  }
+
+  /* Accent line on top of cards */
+  .accent-top::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), transparent 70%);
+    border-radius: 12px 12px 0 0;
+  }
+
+  /* Font mono for numbers */
+  .font-mono-num {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    letter-spacing: -0.04em;
+  }
+}
