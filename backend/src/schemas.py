@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -84,6 +84,12 @@ class ReelsSyncResponse(BaseModel):
     new: int = 0
     updated: int = 0
     detail: str | None = None
+
+
+class ReelsMetricsOut(BaseModel):
+    chats_del_mes: int
+    piezas_publicadas: int
+    sin_clasificar: int
 
 
 class ManychatChatResponse(BaseModel):
@@ -244,3 +250,60 @@ class BioViaOptionsResponse(BaseModel):
     """Valores únicos del campo Vía en la tabla de leads (Airtable)."""
 
     options: list[str] = Field(default_factory=list)
+
+
+class StorySlideIn(BaseModel):
+    order_index: int
+    image_url: str | None = None
+    dolor: str | None = None
+    angulo: str | None = None
+    cta_text: str | None = None
+
+
+class StorySequenceIn(BaseModel):
+    sequence_date: date
+    title: str | None = None
+    dolor: str | None = None
+    angulo: str | None = None
+    cta_text: str | None = None
+    cash_generado: int | None = None
+    has_cta: bool = False
+    chats: int | None = None
+    slides: list[StorySlideIn] = Field(default_factory=list)
+
+
+class StorySlideOut(BaseModel):
+    id: int
+    order_index: int
+    image_url: str | None = None
+    dolor: str | None = None
+    angulo: str | None = None
+    cta_text: str | None = None
+    instagram_media_id: str | None = None
+    reach: int | None = None
+    like_count: int | None = None
+    replies: int | None = None
+    navigation: int | None = None
+    profile_visits: int | None = None
+    synced_at: str | None = None
+
+
+class StorySequenceOut(BaseModel):
+    id: int
+    sequence_date: str
+    title: str | None = None
+    dolor: str | None = None
+    angulo: str | None = None
+    cta_text: str | None = None
+    cash_generado: int = 0
+    has_cta: bool
+    chats: int
+    slides: list[StorySlideOut] = Field(default_factory=list)
+    created_at: str
+
+
+class StoriesMetricsOut(BaseModel):
+    chats_del_mes: int
+    secuencias_con_cta: int
+    secuencias_sin_cta: int
+    stories_sincronizadas: int

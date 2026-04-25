@@ -2,10 +2,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsSyncRequest, ReelsSyncResponse
+from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsMetricsOut
 from src.services.reels_services import ReelsServices
 
-router = APIRouter(prefix="/reels", tags=["reels"])
+router = APIRouter(prefix="/api/reels", tags=["reels"], redirect_slashes=False)
 service = ReelsServices()
 
 
@@ -49,14 +49,38 @@ def patch_reel(
         raise HTTPException(status_code=500, detail="Error inesperado al actualizar el reel.")
 
 
-@router.post("/sync-apify", response_model=ReelsSyncResponse)
-def sync_apify(
-    body: ReelsSyncRequest,
+@router.post("/sync")
+async def sync_instagram(
     user_id: Annotated[str, Depends(require_user_id)],
-) -> ReelsSyncResponse:
+) -> dict[str, int]:
     try:
-        return service.sync_apify(user_id=user_id, limit_override=body.limit)
+        return await service.sync_instagram(user_id)
     except HTTPException as e:
         raise e
     except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels con Apify.")
+        raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels con Instagram.")
+
+
+@router.get("/sync-status")
+def get_sync_status(
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> dict[str, str | None]:
+    try:
+        return service.get_sync_status(user_id)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al obtener estado de sync de reels.")
+
+
+@router.get("/metrics", response_model=ReelsMetricsOut)
+def get_metrics(
+    user_id: Annotated[str, Depends(require_user_id)],
+    month: str | None = Query(default=None, description="Formato YYYY-MM"),
+) -> ReelsMetricsOut:
+    try:
+        return service.get_metrics(user_id, month)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al obtener métricas de reels.")

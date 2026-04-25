@@ -2,36 +2,105 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
-import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
 import { useSupabase } from '@/shared/hooks/use-supabase'
-import { getMonthRange, formatCash } from '@/shared/lib/supabase/queries'
-import { Bar, Line } from '@/shared/components/charts'
+import { formatCash } from '@/shared/lib/supabase/queries'
+import { Line } from '@/shared/components/charts'
+import { apiFetch } from '@/lib/api'
+import { LineChart, Line as ReLine, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 type StorySlide = {
-  id: string; metrics: Record<string, number | string>; published_at: string | null; url: string | null
+  id: number
+  order_index: number
+  image_url: string | null
+  dolor: string | null
+  angulo: string | null
+  cta_text: string | null
+  instagram_media_id: string | null
+  reach: number | null
+  like_count: number | null
+  replies: number | null
+  navigation: number | null
+  profile_visits: number | null
+  synced_at: string | null
+}
+
+type StorySequence = {
+  id: number
+  sequence_date: string
+  title: string | null
+  dolor: string | null
+  angulo: string | null
+  cta_text: string | null
+  cash_generado: number
+  has_cta: boolean
+  chats: number
+  slides: StorySlide[]
+  created_at: string
+}
+
+type StoriesMetrics = {
+  chats_del_mes: number
+  secuencias_con_cta: number
+  secuencias_sin_cta: number
+  stories_sincronizadas: number
 }
 
 type Secuencia = {
-  fecha: string; slides: StorySlide[]; totalViews: number; totalReplies: number
-  metaId?: string; dolor: string; angulos: string[]; cta: string; chats: number; cash: number; notes: string; secuenciaDesc: string
+  id: number
+  fecha: string
+  slides: StorySlide[]
+  totalViews: number
+  totalReplies: number
+  dolor?: string
+  angulo?: string
+  cta_text?: string
+  chats: number
+  cash_generado: number
+  notes: string
+  secuenciaDesc: string
+  hasSync: boolean
 }
 
 type YTVideo = { id: string; title: string }
 const UNDO_DURATION = 6000
+const getImageUrl = (url: string | null | undefined) => {
+  if (!url) return ''
+  if (url.startsWith('/media/')) {
+    return `${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}${url}`
+  }
+  return url
+}
+const toNumber = (v: unknown) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0
+  if (typeof v === 'string') {
+    const n = Number(v.replace(/,/g, '').trim())
+    return Number.isFinite(n) ? n : 0
+  }
+  return 0
+}
 
 export default function HistoriasPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
-  const [rawStories, setRawStories] = useState<StorySlide[]>([])
-  const [secuenciaMetas, setSecuenciaMetas] = useState<Record<string, { id: string; classification: Record<string, unknown>; chats: number; cash: number; notes: string; thumbnails: string[] }>>({})
+  const { ready, userId } = useSupabase()
+  const [sequences, setSequences] = useState<StorySequence[]>([])
+  const [metrics, setMetrics] = useState<StoriesMetrics>({
+    chats_del_mes: 0,
+    secuencias_con_cta: 0,
+    secuencias_sin_cta: 0,
+    stories_sincronizadas: 0,
+  })
   const [ytVideos, setYtVideos] = useState<YTVideo[]>([])
   const [loading, setLoading] = useState(true)
   const [masterLists, setMasterLists] = useState<{ dolores: string[]; angulos: string[]; ctas: string[] }>({ dolores: [], angulos: [], ctas: [] })
   const [syncing, setSyncing] = useState(false)
-  const [syncStatus, setSyncStatus] = useState('')
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [syncMessage, setSyncMessage] = useState('')
+  const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; next_sync: string | null } | null>(null)
+  const [countdown, setCountdown] = useState<string>('')
+  const [expanded, setExpanded] = useState<number | null>(null)
+  const [detailSecuencia, setDetailSecuencia] = useState<Secuencia | null>(null)
+  const [monthMode, setMonthMode] = useState<'current' | 'comparison'>('current')
   const [form, setForm] = useState<Record<string, string>>({ chats: '0', cash: '0' })
   const [formAngulos, setFormAngulos] = useState<string[]>([])
   const [formSlides, setFormSlides] = useState<string[]>([])
@@ -39,6 +108,17 @@ export default function HistoriasPage() {
   const [formSelected, setFormSelected] = useState<Set<number>>(new Set())
   const [analyzing, setAnalyzing] = useState(false)
   const [showManualForm, setShowManualForm] = useState(false)
+  const authHeaders = () => {
+    const token = typeof window !== 'undefined' ? sessionStorage.getItem('evoluciona_token') : null
+    const headers: Record<string, string> = {}
+    if (token) headers.Authorization = `Bearer ${token}`
+    if (userId) headers['X-User-Id'] = userId
+    return headers
+  }
+  const now = new Date()
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const comparisonMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
 
   // Undo
   const [undoAction, setUndoAction] = useState<{ label: string; execute: () => Promise<void> } | null>(null)
@@ -56,31 +136,53 @@ export default function HistoriasPage() {
   const handleUndo = async () => { if (!undoAction) return; if (undoTimerRef.current) clearTimeout(undoTimerRef.current); if (undoIntervalRef.current) clearInterval(undoIntervalRef.current); await undoAction.execute(); setUndoAction(null); toast('Revertido'); fetchData() }
 
   const fetchData = useCallback(async () => {
-    if (!ready) return; setLoading(true)
-    const { start, end } = getMonthRange(month)
-    const [storiesRes, secRes, listsRes, ytRes] = await Promise.all([
-      supabase.from('content_items').select('id, metrics, published_at, url').in('content_type', ['story']).eq('platform', 'instagram').gte('published_at', start).lte('published_at', end).order('published_at', { ascending: true }),
-      supabase.from('content_items').select('id, classification, chats, cash, notes, metrics, published_at').eq('content_type', 'historia').eq('platform', 'instagram').gte('published_at', start).lte('published_at', end),
-      supabase.from('master_lists').select('category, items'),
-      supabase.from('content_items').select('id, title').eq('content_type', 'video').eq('platform', 'youtube').order('published_at', { ascending: false }).limit(50),
-    ])
-    setRawStories((storiesRes.data as StorySlide[]) || [])
-    setYtVideos((ytRes.data as YTVideo[]) || [])
-    const metas: Record<string, { id: string; classification: Record<string, unknown>; chats: number; cash: number; notes: string; thumbnails: string[] }> = {}
-    ;(secRes.data || []).forEach((r: Record<string, unknown>) => {
-      const fecha = String(r.published_at || '').split('T')[0]
-      const metrics = (r.metrics as Record<string, unknown>) || {}
-      const thumbs = Array.isArray(metrics.thumbnails) ? metrics.thumbnails as string[] : []
-      if (fecha) metas[fecha] = { id: r.id as string, classification: (r.classification as Record<string, unknown>) || {}, chats: Number(r.chats) || 0, cash: Number(r.cash) || 0, notes: String(r.notes || ''), thumbnails: thumbs }
-    })
-    setSecuenciaMetas(metas)
-    const lists: Record<string, string[]> = {}
-    ;(listsRes.data || []).forEach((r: { category: string; items: unknown }) => { lists[r.category] = Array.isArray(r.items) ? r.items as string[] : [] })
-    setMasterLists({ dolores: lists.dolores || [], angulos: lists.angulos || [], ctas: lists.ctas || [] })
-    setLoading(false)
-  }, [month, ready, supabase])
+    if (!ready) return
+    setLoading(true)
+    try {
+      const [seqRes, metricsRes] = await Promise.all([
+        apiFetch(`/stories/sequences?month=${encodeURIComponent(month)}`, {
+          headers: authHeaders(),
+        }),
+        apiFetch(`/stories/metrics?month=${encodeURIComponent(month)}`, {
+          headers: authHeaders(),
+        }),
+      ])
+      const seqData = await seqRes.json().catch(() => [])
+      const metricsData = await metricsRes.json().catch(() => ({}))
+      if (seqRes.ok && Array.isArray(seqData)) {
+        setSequences(seqData as StorySequence[])
+      } else {
+        setSequences([])
+      }
+      if (metricsRes.ok) {
+        setMetrics({
+          chats_del_mes: Number(metricsData.chats_del_mes || 0),
+          secuencias_con_cta: Number(metricsData.secuencias_con_cta || 0),
+          secuencias_sin_cta: Number(metricsData.secuencias_sin_cta || 0),
+          stories_sincronizadas: Number(metricsData.stories_sincronizadas || 0),
+        })
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [month, ready])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  const fetchSyncStatus = useCallback(async () => {
+    if (!ready) return
+    const res = await apiFetch('/stories/sync-status', { headers: authHeaders() })
+    const data = await res.json().catch(() => ({ last_sync: null, next_sync: null }))
+    if (res.ok) {
+      setSyncStatus({
+        last_sync: data.last_sync || null,
+        next_sync: data.next_sync || null,
+      })
+    }
+  }, [ready, userId])
+
+  useEffect(() => { fetchData(); fetchSyncStatus() }, [fetchData, fetchSyncStatus])
+  useEffect(() => {
+    setMonth(monthMode === 'current' ? currentMonth : comparisonMonth)
+  }, [monthMode, setMonth, currentMonth, comparisonMonth])
 
   // Auto-classify unclassified secuencias on page load (once per session)
   const [autoClassified, setAutoClassified] = useState(false)
@@ -96,49 +198,71 @@ export default function HistoriasPage() {
 
   // Group stories by date -> secuencias (includes manual secuencias without Metricool stories)
   const secuencias: Secuencia[] = useMemo(() => {
-    const byDate: Record<string, StorySlide[]> = {}
-    rawStories.forEach(s => {
-      const fecha = s.published_at?.split('T')[0] || 'unknown'
-      if (!byDate[fecha]) byDate[fecha] = []
-      byDate[fecha].push(s)
-    })
-    Object.keys(secuenciaMetas).forEach(fecha => { if (!byDate[fecha]) byDate[fecha] = [] })
-    return Object.entries(byDate).sort(([a], [b]) => b.localeCompare(a)).map(([fecha, slides]) => {
-      const meta = secuenciaMetas[fecha]
-      const cls = (meta?.classification || {}) as Record<string, unknown>
+    return sequences.map((seq) => {
+      const angulos = Array.from(new Set(seq.slides.map((s) => s.angulo || '').filter(Boolean)))
+      const dolor = seq.dolor || seq.slides.find((s) => s.dolor)?.dolor || ''
+      const ctaText = seq.cta_text || seq.slides.find((s) => s.cta_text)?.cta_text || ''
       return {
-        fecha, slides,
-        totalViews: slides.reduce((s, sl) => s + (Number(sl.metrics?.views) || Number(sl.metrics?.impressions) || 0), 0),
-        totalReplies: slides.reduce((s, sl) => s + (Number(sl.metrics?.replies) || 0), 0),
-        metaId: meta?.id, dolor: String(cls.dolor || ''),
-        angulos: Array.isArray(cls.angulos) ? cls.angulos as string[] : [],
-        cta: String(cls.cta || ''), chats: meta?.chats || 0, cash: meta?.cash || 0,
-        notes: meta?.notes || '', secuenciaDesc: String(cls.secuencia || ''),
+        id: seq.id,
+        fecha: seq.sequence_date,
+        slides: seq.slides,
+        totalViews: seq.slides.reduce((acc, s) => acc + toNumber(s.reach), 0),
+        totalReplies: seq.slides.reduce((acc, s) => acc + toNumber(s.replies), 0),
+        dolor,
+        angulo: seq.angulo || angulos[0] || '',
+        cta_text: ctaText,
+        chats: toNumber(seq.chats),
+        cash_generado: toNumber(seq.cash_generado),
+        notes: seq.title || '',
+        secuenciaDesc: (seq.title || '').trim(),
+        hasSync: seq.slides.some((s) => Boolean(s.instagram_media_id)),
       }
     })
-  }, [rawStories, secuenciaMetas])
+  }, [sequences])
 
-  // Sync Metricool
+  // Sync Instagram
   const handleSync = async () => {
-    const { data: conn } = await supabase.from('api_connections').select('credentials').eq('platform', 'metricool').maybeSingle()
-    const creds = conn?.credentials as Record<string, string> | null
-    if (!creds?.user_token || !creds?.user_id || !creds?.blog_id) { toast('Configura Metricool en Conexiones API'); return }
-    const [y, m] = month.split('-').map(Number)
-    setSyncing(true); setSyncStatus('Conectando...')
+    setSyncing(true)
+    setSyncMessage('Sincronizando...')
     try {
-      const res = await fetch('/api/sync/metricool', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ userToken: creds.user_token, userId: creds.user_id, blogId: creds.blog_id, startDate: `${y}-${String(m).padStart(2, '0')}-01`, endDate: `${y}-${String(m).padStart(2, '0')}-${new Date(y, m, 0).getDate()}` }) })
-      const data = await res.json()
-      if (data.error) { setSyncStatus(`Error: ${data.error}`) }
-      else {
-        setSyncStatus(`${data.posts} reels + ${data.stories} stories + ${data.secuencias || 0} secuencias. ${data.new} nuevos.`)
-        toast('Sync completado'); await fetchData()
-        setSyncStatus(prev => prev + ' Clasificando con IA...')
-        await autoClassify()
-        setSyncStatus(prev => prev.replace('Clasificando con IA...', 'Clasificacion completada'))
+      const res = await apiFetch('/stories/sync', {
+        method: 'POST',
+        headers: authHeaders(),
+      })
+      const result = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setSyncMessage(`Error: ${result.detail || 'No se pudo sincronizar Instagram'}`)
+      } else {
+        const okText = `Sincronizadas: ${Number(result.synced || 0)} | Sin match: ${Number(result.not_matched || 0)}`
+        setSyncMessage(okText)
+        toast(okText)
+        await fetchData()
+        await fetchSyncStatus()
       }
-    } catch (e) { setSyncStatus(`Error: ${(e as Error).message}`) }
+    } catch (e) {
+      setSyncMessage(`Error: ${(e as Error).message}`)
+    }
     setSyncing(false)
   }
+
+  useEffect(() => {
+    if (!syncStatus?.next_sync) return
+    const interval = setInterval(() => {
+      const now = new Date()
+      const next = new Date(syncStatus.next_sync as string)
+      const diff = next.getTime() - now.getTime()
+      if (diff <= 0) {
+        handleSync().then(() => fetchSyncStatus())
+        setCountdown('Sincronizando...')
+        clearInterval(interval)
+        return
+      }
+      const minutes = Math.floor(diff / 60000)
+      const seconds = Math.floor((diff % 60000) / 1000)
+      setCountdown(`${minutes}:${seconds.toString().padStart(2, '0')}`)
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [syncStatus?.next_sync])
 
   // Auto-classify all unclassified secuencias via server-side Vision API
   const autoClassify = async () => {
@@ -213,63 +337,100 @@ export default function HistoriasPage() {
 
   // Save new secuencia (manual)
   const saveNewSecuencia = async () => {
-    if (!userId || !form.fecha) { toast('Pone la fecha'); return }
-    const selectedDescs = formSlides.filter((_, i) => formSelected.has(i + 1)).filter(s => s.trim())
-    if (selectedDescs.length === 0) { toast('Selecciona al menos una story'); return }
-    const secuenciaStr = selectedDescs.join(' -> ')
+    if (!form.fecha) { toast('Pone la fecha'); return }
+    const selectedSlides = formSlides
+      .map((desc, idx) => ({ desc, idx }))
+      .filter((x) => formSelected.has(x.idx + 1))
+      .filter((x) => x.desc.trim().length > 0)
+    if (selectedSlides.length === 0) { toast('Selecciona al menos una story'); return }
+    const tieneCTA = Boolean((form.cta || '').trim())
+    const titulo = form.secuenciaDesc || `Secuencia ${form.fecha}`
     const selectedThumbs = formSlideThumbs.filter((_, i) => formSelected.has(i + 1))
-    const { error } = await supabase.from('content_items').insert({
-      user_id: userId, content_type: 'historia', platform: 'instagram',
-      title: `Secuencia ${form.fecha} (${selectedDescs.length} stories)`,
-      classification: { dolor: form.dolor || '', angulos: formAngulos, cta: form.cta || '', secuencia: secuenciaStr },
-      chats: Number(form.chats) || 0, cash: Number(form.cash) || 0, metrics: { thumbnails: selectedThumbs },
-      published_at: `${form.fecha}T12:00:00`, notes: secuenciaStr,
+    const res = await apiFetch('/stories/sequences', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        sequence_date: form.fecha,
+        title: titulo || null,
+        has_cta: tieneCTA,
+        chats: Number(form.chats) || 0,
+        slides: selectedSlides.map((s, i) => ({
+          order_index: i + 1,
+          image_url: selectedThumbs[i] || null,
+          dolor: form.dolor || null,
+          angulo: formAngulos[0] || null,
+          cta_text: form.cta || null,
+        })),
+      }),
     })
-    if (error) { toast(`Error al guardar: ${error.message}`); return }
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) { toast(`Error al guardar: ${body.detail || 'No se pudo guardar'}`); return }
     toast('Secuencia agregada')
     setForm({ chats: '0', cash: '0' }); setFormAngulos([]); setFormSlides([]); setFormSlideThumbs([]); setFormSelected(new Set()); setShowManualForm(false)
-    fetchData()
+    await fetchData()
   }
 
   // Save secuencia metadata (inline edit)
-  const saveSecuencia = async (fecha: string) => {
-    if (!userId) return
-    const existing = secuenciaMetas[fecha]
-    const row = {
-      classification: { dolor: form.dolor || '', angulos: formAngulos, cta: form.cta || '', secuencia: form.secuenciaDesc || '' },
-      chats: Number(form.chats) || 0, cash: Number(form.cash) || 0, notes: form.notes || '',
-      published_at: `${fecha}T12:00:00`, updated_at: new Date().toISOString(),
-    }
-    if (existing) {
-      const snap = { ...existing }
-      await supabase.from('content_items').update(row).eq('id', existing.id)
-      showUndo('Secuencia editada', async () => { await supabase.from('content_items').update({ classification: snap.classification, chats: snap.chats, cash: snap.cash, notes: snap.notes, updated_at: new Date().toISOString() }).eq('id', snap.id) })
-    } else {
-      await supabase.from('content_items').insert({ ...row, user_id: userId, content_type: 'historia', platform: 'instagram', metrics: {} })
+  const saveSecuencia = async (sec: Secuencia, overrides?: Partial<{
+    dolor: string
+    angulo: string
+    cta_text: string
+    cash_generado: number
+    chats: number
+  }>) => {
+    const dolor = overrides?.dolor ?? form.dolor ?? sec.dolor ?? ''
+    const angulo = overrides?.angulo ?? formAngulos[0] ?? sec.angulo ?? ''
+    const ctaText = overrides?.cta_text ?? form.cta ?? sec.cta_text ?? ''
+    const cashGenerado = overrides?.cash_generado ?? (Number(form.cash) || sec.cash_generado || 0)
+    const chats = overrides?.chats ?? (Number(form.chats) || sec.chats || 0)
+    const res = await apiFetch(`/stories/sequences/${sec.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({
+        sequence_date: sec.fecha,
+        title: form.secuenciaDesc || sec.notes || null,
+        dolor: dolor || null,
+        angulo: angulo || null,
+        cta_text: ctaText || null,
+        cash_generado: cashGenerado,
+        has_cta: Boolean((form.cta || '').trim()),
+        chats,
+        slides: sec.slides.map((s, i) => ({
+          order_index: i + 1,
+          image_url: s.image_url || null,
+          dolor: form.dolor || s.dolor || null,
+          angulo: formAngulos[0] || s.angulo || null,
+          cta_text: ctaText || s.cta_text || null,
+        })),
+      }),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      toast(`Error al guardar: ${body.detail || 'No se pudo actualizar'}`)
+      return
     }
     toast('Secuencia guardada')
     setExpanded(null); setForm({ chats: '0', cash: '0' }); setFormAngulos([])
-    fetchData()
+    await fetchData()
   }
 
   const startEdit = (sec: Secuencia) => {
-    setExpanded(sec.fecha)
-    setForm({ dolor: sec.dolor, cta: sec.cta, chats: String(sec.chats), cash: String(sec.cash), notes: sec.notes, secuenciaDesc: sec.secuenciaDesc })
-    setFormAngulos(sec.angulos)
+    setExpanded(sec.id)
+    setForm({ dolor: sec.dolor || '', cta: sec.cta_text || '', chats: String(sec.chats), cash: String(sec.cash_generado), notes: sec.notes, secuenciaDesc: sec.secuenciaDesc })
+    setFormAngulos(sec.angulo ? [sec.angulo] : [])
   }
 
   // Master list creators
   const addToList = async (category: 'dolores' | 'angulos' | 'ctas', value: string) => {
-    if (!value.trim() || !userId) return
+    if (!value.trim()) return
     const updated = [...masterLists[category], value.trim()]
-    await supabase.from('master_lists').upsert({ user_id: userId, category, items: updated, updated_at: new Date().toISOString() }, { onConflict: 'user_id,category' })
     setMasterLists(prev => ({ ...prev, [category]: updated }))
     toast('Creado')
   }
 
-  const totalChats = secuencias.reduce((s, sec) => s + sec.chats, 0)
-  const conCTA = secuencias.filter(s => s.cta).length
-  const sinCTA = secuencias.filter(s => !s.cta).length
+  const totalChats = metrics.chats_del_mes
+  const conCTA = metrics.secuencias_con_cta
+  const sinCTA = metrics.secuencias_sin_cta
 
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -277,7 +438,20 @@ export default function HistoriasPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-semibold tracking-tight">Historias</h2>
-        <MonthSelector month={month} options={options} onChange={setMonth} />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMonthMode('current')}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'current' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+          >
+            MES ACTUAL
+          </button>
+          <button
+            onClick={() => setMonthMode('comparison')}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'comparison' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+          >
+            MES DE COMPARACION
+          </button>
+        </div>
       </div>
 
       {/* Stats row — 4 cards */}
@@ -296,14 +470,14 @@ export default function HistoriasPage() {
         </div>
         <div className="glass-card p-5">
           <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Stories sincronizadas</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold">{rawStories.length}</div>
+          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.stories_sincronizadas}</div>
         </div>
       </div>
 
       {/* Sync + manual add */}
       <div className="mb-4 flex items-center gap-3">
         <button onClick={handleSync} disabled={syncing} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
-          {syncing ? 'Sincronizando...' : 'Sincronizar Metricool'}
+          {syncing ? 'Sincronizando...' : 'SINCRONIZAR INSTAGRAM'}
         </button>
         {!showManualForm && (
           <button onClick={() => setShowManualForm(true)} className="rounded-lg border border-[var(--border2)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]">
@@ -311,7 +485,19 @@ export default function HistoriasPage() {
           </button>
         )}
       </div>
-      {syncStatus && <div className={`mb-4 text-[12px] ${syncStatus.startsWith('Error') ? 'text-[var(--red)]' : 'text-[var(--text3)]'}`}>{syncStatus}</div>}
+      {syncMessage && <div className={`mb-4 text-[12px] ${syncMessage.startsWith('Error') ? 'text-[var(--red)]' : 'text-[var(--text3)]'}`}>{syncMessage}</div>}
+      {syncStatus?.last_sync && (
+        <div className="mb-4 flex items-center gap-4 text-sm text-zinc-400">
+          <span>
+            Último sync: {new Date(syncStatus.last_sync).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+          </span>
+          {countdown && (
+            <span className="text-zinc-300">
+              Próximo en: <span className="font-mono text-white">{countdown}</span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Manual secuencia form (overlay section) */}
       {showManualForm && (
@@ -403,16 +589,14 @@ export default function HistoriasPage() {
 
       {/* Secuencias list */}
       {secuencias.length === 0 ? (
-        <div className="py-12 text-center text-[13px] text-[var(--text3)]">No hay historias este mes. Apreta &quot;Sincronizar Metricool&quot; para importar.</div>
+        <div className="py-12 text-center text-[13px] text-[var(--text3)]">No hay historias este mes. Apreta &quot;SINCRONIZAR INSTAGRAM&quot; para importar.</div>
       ) : (
         <div className="space-y-4">
           {secuencias.map(sec => {
-            const isExpanded = expanded === sec.fecha
-            const cpc = sec.chats > 0 ? sec.cash / sec.chats : 0
-            const metaThumbs = secuenciaMetas[sec.fecha]?.thumbnails || []
+            const isExpanded = expanded === sec.id
+            const cpc = sec.chats > 0 ? sec.cash_generado / sec.chats : 0
             const hasSlides = sec.slides.length > 0
-            const hasThumbs = metaThumbs.length > 0
-            const slideCount = hasSlides ? sec.slides.length : hasThumbs ? metaThumbs.length : 0
+            const slideCount = hasSlides ? sec.slides.length : 0
 
             return (
               <div key={sec.fecha} className={`glass-card p-5 transition-all ${isExpanded ? 'border-[var(--accent)]' : 'cursor-pointer hover:border-[var(--border2)]'}`}
@@ -422,27 +606,24 @@ export default function HistoriasPage() {
                   <div className="flex items-center gap-4">
                     <div className="text-[14px] font-semibold">{sec.fecha}</div>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">VISITAS: {sec.totalViews.toLocaleString()}</span>
-                    <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash)}</span>
+                    <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash_generado)}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CHATS: {sec.chats}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CPC: {formatCash(cpc)}</span>
+                    {sec.hasSync
+                      ? <span className="rounded bg-[rgba(34,197,94,0.15)] px-2 py-1 text-[10px] text-[var(--green)] font-medium">SINCRONIZADO</span>
+                      : <span className="rounded bg-[rgba(161,161,170,0.15)] px-2 py-1 text-[10px] text-[var(--text3)] font-medium">Sin sincronizar</span>}
                   </div>
                   <div className="flex items-center gap-2">
-                    {sec.metaId && !isExpanded && (
+                    {!isExpanded && (
                       <button onClick={async (e) => {
                         e.stopPropagation()
                         if (!confirm(`Eliminar secuencia del ${sec.fecha}?`)) return
-                        const snap = { ...sec }
-                        await supabase.from('content_items').delete().eq('id', sec.metaId!)
-                        toast('Secuencia eliminada')
-                        showUndo('Secuencia eliminada', async () => {
-                          await supabase.from('content_items').insert({
-                            id: snap.metaId, user_id: userId, content_type: 'historia', platform: 'instagram',
-                            classification: { dolor: snap.dolor, angulos: snap.angulos, cta: snap.cta, secuencia: snap.secuenciaDesc },
-                            chats: snap.chats, cash: snap.cash, notes: snap.notes, metrics: {},
-                            published_at: `${snap.fecha}T12:00:00`,
-                          })
+                        await apiFetch(`/stories/sequences/${sec.id}`, {
+                          method: 'DELETE',
+                          headers: authHeaders(),
                         })
-                        if (expanded === sec.fecha) setExpanded(null)
+                        toast('Secuencia eliminada')
+                        if (expanded === sec.id) setExpanded(null)
                         fetchData()
                       }} className="text-[var(--text3)] hover:text-[var(--red)] text-[13px]" title="Eliminar">✕</button>
                     )}
@@ -456,23 +637,14 @@ export default function HistoriasPage() {
                 {!isExpanded && hasSlides ? (
                   <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
                     {sec.slides.map((slide, i) => {
-                      const thumb = slide.metrics?.thumbnail as string
+                      const thumb = getImageUrl(slide.image_url)
                       return (
-                        <div key={slide.id} className="flex-shrink-0 w-20 h-36 rounded-lg bg-[var(--bg4)] border border-[var(--border)] overflow-hidden relative">
-                          {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)] text-[10px]">{i + 1}</div>}
+                        <div key={slide.id} className="flex-shrink-0 w-[120px] h-[200px] rounded-lg bg-[var(--bg4)] border border-[var(--border)] overflow-hidden relative cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailSecuencia(sec) }}>
+                          {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover rounded-lg" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)] text-[10px]">{i + 1}</div>}
                           <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[8px] text-white py-0.5">{i + 1}/{slideCount}</div>
                         </div>
                       )
                     })}
-                  </div>
-                ) : !isExpanded && hasThumbs ? (
-                  <div className="flex gap-2 overflow-x-auto pb-2 mb-3">
-                    {metaThumbs.map((thumb, i) => (
-                      <div key={i} className="flex-shrink-0 w-20 h-36 rounded-lg bg-[var(--bg4)] border border-[var(--border)] overflow-hidden relative">
-                        <img src={thumb} alt={`Slide ${i + 1}`} className="w-full h-full object-cover" />
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[8px] text-white py-0.5">{i + 1}/{slideCount}</div>
-                      </div>
-                    ))}
                   </div>
                 ) : !isExpanded ? (
                   <div className="mb-3 text-[11px] text-[var(--text3)] italic">Secuencia manual — sin preview</div>
@@ -481,31 +653,22 @@ export default function HistoriasPage() {
                 {/* Classification tags (collapsed view) */}
                 {!isExpanded && (
                   <div className="flex flex-wrap gap-2 items-center">
-                    {sec.dolor && <span className="rounded bg-[rgba(230,57,70,0.15)] px-2.5 py-1 text-[10px] text-[var(--red)] font-medium">DOLOR: {sec.dolor}</span>}
-                    {sec.angulos.map(a => <span key={a} className="rounded bg-[rgba(245,158,11,0.15)] px-2.5 py-1 text-[10px] text-[var(--amber)] font-medium">ANGULO: {a}</span>)}
-                    {sec.cta && <span className="rounded bg-[rgba(59,130,246,0.15)] px-2.5 py-1 text-[10px] text-[var(--blue)] font-medium">CTA: {sec.cta}</span>}
-                    {!sec.dolor && !sec.cta && sec.angulos.length === 0 && <span className="text-[11px] text-[var(--text3)] italic">Sin clasificar — click para editar</span>}
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setDetailSecuencia(sec) }} className="rounded bg-[rgba(230,57,70,0.15)] px-2.5 py-1 text-[10px] text-[var(--red)] font-medium">DOLOR: {sec.dolor || '—'}</button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setDetailSecuencia(sec) }} className="rounded bg-[rgba(245,158,11,0.15)] px-2.5 py-1 text-[10px] text-[var(--amber)] font-medium">ANGULO: {sec.angulo || '—'}</button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setDetailSecuencia(sec) }} className="rounded bg-[rgba(59,130,246,0.15)] px-2.5 py-1 text-[10px] text-[var(--blue)] font-medium">CTA: {sec.cta_text || '—'}</button>
                   </div>
                 )}
 
                 {/* Expanded: full detail view */}
                 {isExpanded && (() => {
                   // Build slide data from Metricool stories OR base64 thumbnails
-                  const slideMetrics = hasSlides
-                    ? sec.slides.map((s, i) => ({
-                        idx: i + 1,
-                        views: Number(s.metrics?.views || s.metrics?.impressions || 0),
-                        likes: Number(s.metrics?.replies || 0),
-                        reach: Number(s.metrics?.reach || 0),
-                        thumb: (s.metrics?.thumbnail as string) || null,
-                      }))
-                    : metaThumbs.map((t, i) => ({
-                        idx: i + 1,
-                        views: 0,
-                        likes: 0,
-                        reach: 0,
-                        thumb: t,
-                      }))
+                  const slideMetrics = sec.slides.map((s, i) => ({
+                    idx: i + 1,
+                    views: Number(s.reach || 0),
+                    likes: Number(s.replies || 0),
+                    reach: Number(s.reach || 0),
+                    thumb: getImageUrl(s.image_url) || null,
+                  }))
                   const maxViews = Math.max(...slideMetrics.map(s => s.views), 1)
                   const retentionData = slideMetrics.map(s => maxViews > 0 ? (s.views / maxViews) * 100 : 100)
                   const hasMetrics = slideMetrics.some(s => s.views > 0)
@@ -635,7 +798,7 @@ export default function HistoriasPage() {
 
                     {/* Save / Close */}
                     <div className="flex gap-3">
-                      <button onClick={() => saveSecuencia(sec.fecha)} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90">Guardar</button>
+                      <button onClick={() => saveSecuencia(sec)} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90">Guardar</button>
                       <button onClick={() => { setExpanded(null); setForm({ chats: '0', cash: '0' }); setFormAngulos([]) }} className="rounded-lg border border-[var(--border2)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text3)]">Cerrar</button>
                     </div>
                   </div>
@@ -658,6 +821,132 @@ export default function HistoriasPage() {
           <div className="h-[3px] bg-[var(--bg4)]"><div className="h-full bg-[var(--accent)] transition-[width] duration-[50ms] ease-linear" style={{ width: `${undoProgress}%` }} /></div>
         </div>
       )}
+
+      {detailSecuencia && (
+        <StorySequenceDetail
+          sequence={detailSecuencia}
+          onClose={() => setDetailSecuencia(null)}
+          onSave={async (payload) => {
+            await saveSecuencia(detailSecuencia, payload)
+            setDetailSecuencia(null)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function StorySequenceDetail({
+  sequence,
+  onClose,
+  onSave,
+}: {
+  sequence: Secuencia
+  onClose: () => void
+  onSave: (payload: { dolor: string; angulo: string; cta_text: string; cash_generado: number; chats: number }) => Promise<void>
+}) {
+  const [cash, setCash] = useState<number>(sequence.cash_generado || 0)
+  const [chats, setChats] = useState<number>(sequence.chats || 0)
+  const [dolor, setDolor] = useState<string>(sequence.dolor || '')
+  const [angulo, setAngulo] = useState<string>(sequence.angulo || '')
+  const [ctaText, setCtaText] = useState<string>(sequence.cta_text || '')
+  const cashPorChat = chats > 0 ? cash / chats : 0
+  const firstReach = toNumber(sequence.slides[0]?.reach)
+  const retentionData = sequence.slides
+    .map((s, i) => {
+      const reach = toNumber(s.reach)
+      if (firstReach <= 0) return null
+      return { slide: i + 1, retention: Math.max(0, Number(((reach / firstReach) * 100).toFixed(1))) }
+    })
+    .filter(Boolean) as { slide: number; retention: number }[]
+
+  return (
+    <div className="fixed inset-0 z-[500] bg-black/70 flex items-stretch justify-end" onClick={onClose}>
+      <div className="h-full w-full max-w-[920px] bg-[var(--bg2)] border-l border-[var(--border)] p-6 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-[14px] font-semibold">Detalle secuencia {sequence.fecha}</h3>
+          <button className="text-[var(--text3)]" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash generado</div>
+            <input type="number" value={cash} onChange={(e) => setCash(Number(e.target.value) || 0)} className="w-full bg-transparent text-center font-mono-num text-2xl font-bold text-[var(--green)] outline-none" />
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
+            <input type="number" value={chats} onChange={(e) => setChats(Number(e.target.value) || 0)} className="w-full bg-transparent text-center font-mono-num text-2xl font-bold text-[var(--text)] outline-none" />
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash por chat</div>
+            <div className="font-mono-num text-2xl font-bold">{formatCash(cashPorChat)}</div>
+          </div>
+        </div>
+
+        <div className="mb-5">
+          <div className="flex items-end overflow-x-auto pb-2 gap-3">
+            {sequence.slides.map((slide, i) => {
+              const prevReach = i > 0 ? toNumber(sequence.slides[i - 1]?.reach) : 0
+              const currentReach = toNumber(slide.reach)
+              const dropoff = i === 0 || prevReach <= 0 ? '—' : `${(((prevReach - currentReach) / prevReach) * 100).toFixed(1)}%`
+              const thumb = getImageUrl(slide.image_url)
+              return (
+                <div key={slide.id} className="w-[120px] flex-shrink-0">
+                  <div className="h-[200px] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)]">
+                    {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover rounded-lg" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)]">{i + 1}</div>}
+                  </div>
+                  <div className="mt-2 text-[10px] text-[var(--text3)]">VISTAS: <span className="text-[var(--text)]">{toNumber(slide.reach) || '—'}</span></div>
+                  <div className="text-[10px] text-[var(--text3)]">LIKES: <span className="text-[var(--text)]">{toNumber(slide.like_count) || '—'}</span></div>
+                  <div className="text-[10px] text-[var(--text3)]">PERFIL: <span className="text-[var(--text)]">{toNumber(slide.profile_visits) || '—'}</span></div>
+                  <div className="text-[10px] text-[var(--text3)]">DROPOFF: <span className="text-[var(--text)]">{dropoff}</span></div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Dolor</label>
+            <input value={dolor} onChange={(e) => setDolor(e.target.value)} className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] outline-none" />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Angulo</label>
+            <input value={angulo} onChange={(e) => setAngulo(e.target.value)} className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] outline-none" />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">CTA</label>
+            <input value={ctaText} onChange={(e) => setCtaText(e.target.value)} className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] outline-none" />
+          </div>
+        </div>
+
+        {retentionData.length > 0 && (
+          <div className="mb-5">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">Grafico de Retencion</div>
+            <div className="h-56 w-full rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={retentionData}>
+                  <CartesianGrid stroke="rgba(255,255,255,0.08)" />
+                  <XAxis dataKey="slide" />
+                  <YAxis domain={[0, 100]} />
+                  <Tooltip />
+                  <ReLine type="monotone" dataKey="retention" stroke="#E63946" strokeWidth={2} dot />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => onSave({ dolor, angulo, cta_text: ctaText, cash_generado: cash, chats })}
+            className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90"
+          >
+            Guardar
+          </button>
+          <button onClick={onClose} className="rounded-lg border border-[var(--border2)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text3)]">Cerrar</button>
+        </div>
+      </div>
     </div>
   )
 }

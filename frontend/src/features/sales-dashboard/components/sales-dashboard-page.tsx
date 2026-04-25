@@ -6,11 +6,8 @@ import { MonthSelector } from '@/shared/components/month-selector'
 import { useSupabase } from '@/shared/hooks/use-supabase'
 import { formatCash } from '@/shared/lib/supabase/queries'
 import { Bar, Line } from '@/shared/components/charts'
-import { getLeadsAnalytics, distribute, type LeadsAnalytics } from '@/features/leads/services/leads-analytics'
-
-type VDData = LeadsAnalytics & {
-  agendasByWeek: number[]; conversacionesByWeek: number[]; showsByWeek: number[]; cierresByWeek: number[]; ingresosByWeek: number[]; noShowsByWeek: number[]
-}
+import { getLeadsAnalytics } from '@/features/leads/services/leads-analytics'
+import type { VDData } from '@/features/sales-dashboard/sales-dashboard-vd'
 
 function fP(v: number) { return v.toFixed(1) + '%' }
 function fN(v: number) { return Math.round(v).toLocaleString('es-AR') }
@@ -166,7 +163,7 @@ function MensualView({ curr, prev, delta }: { curr: VDData; prev: VDData; delta:
         <div className="flex gap-12">
           <div>
             <div className="text-[11px] text-[var(--text3)]">Facturacion</div>
-            <div className="font-mono-num text-3xl font-bold mt-1">{formatCash(curr.ingresos)}</div>
+            <div className="font-mono-num text-3xl font-bold mt-1">{formatCash(curr.facturacion)}</div>
           </div>
           <div>
             <div className="text-[11px] text-[var(--text3)]">Cash Collected</div>

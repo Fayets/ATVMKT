@@ -97,6 +97,23 @@ const PLATFORMS: PlatformDef[] = [
     },
   },
   {
+    key: 'instagram', label: 'Instagram', icon: '📸', subtitle: 'Sincroniza insights de stories directo con Instagram Graph API',
+    fields: [
+      { key: 'access_token', label: 'Access Token', placeholder: 'EAAG...', type: 'password' },
+      { key: 'instagram_user_id', label: 'Instagram User ID', placeholder: '1784...' },
+    ],
+    guide: {
+      title: 'Como configurar Instagram',
+      steps: [
+        'Abri Meta for Developers y conecta tu app con Instagram Graph API',
+        'Genera un Access Token con permisos para leer stories e insights',
+        'Copia el Instagram User ID de la cuenta que queres sincronizar',
+        'Pegá ambos datos y tocá Guardar',
+        'En Historias, usa el boton "SINCRONIZAR INSTAGRAM" para traer metricas',
+      ],
+    },
+  },
+  {
     key: 'metricool', label: 'Metricool', icon: '📊', subtitle: 'Importa reels e historias automaticamente desde tu cuenta de Metricool',
     fields: [
       { key: 'user_token', label: 'User Token', placeholder: 'Tu token de API de Metricool', type: 'password' },

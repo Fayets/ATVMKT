@@ -44,7 +44,8 @@ Esto instala Next.js, React, Supabase, Chart.js y todo lo necesario. Tarda ~30 s
 ## Paso 3: Configurar variables de entorno
 
 ```bash
-cp .env.local.example .env.local
+cd frontend
+cp .env.example .env.local
 ```
 
 Abrir `.env.local` con tu editor y pegar las keys que te manda Thiago:

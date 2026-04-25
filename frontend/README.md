@@ -28,7 +28,8 @@ npm install
 ### 3. Configurar variables de entorno
 
 ```bash
-cp .env.local.example .env.local
+cd frontend
+cp .env.example .env.local
 ```
 
 Abrir `.env.local` y pegar las keys que te mando Thiago:

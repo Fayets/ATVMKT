@@ -1,17 +1,23 @@
+import asyncio
 import json
 import ssl
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+import uuid
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import certifi
 from fastapi import HTTPException
 from pony.orm import ObjectNotFound, db_session
 
-from src.models import ApiConnection, ReelContent
-from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsSyncResponse
+from src.models import ApiConnection, ReelContent, db
+from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse
+
+AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+_sync_lock = asyncio.Lock()
+_last_sync_times: dict[str, datetime] = {}
 
 
 class ReelsServices:
@@ -77,43 +83,44 @@ class ReelsServices:
             row.updated_at = now
             return self._to_response(row)
 
-    def _get_apify_credentials(self, user_id: str) -> tuple[str, str, int]:
+    def _resolve_instagram_conn(self, user_id: str) -> tuple[str, str]:
         with db_session:
             conn = next(
                 (
                     c
                     for c in list(ApiConnection.select())
-                    if c.user_id == user_id and c.platform == "apify"
+                    if c.user_id == user_id and c.platform == "instagram"
                 ),
                 None,
             )
             if conn is None:
                 raise HTTPException(
                     status_code=400,
-                    detail="No hay conexión de Apify configurada. Configúrala en Conexiones API.",
+                    detail="No hay conexión de Instagram configurada. Configúrala en Conexiones API.",
                 )
             creds = conn.credentials if isinstance(conn.credentials, dict) else {}
-            token = str(creds.get("api_token") or "").strip()
-            handle = str(creds.get("ig_handle") or "").strip().replace("@", "")
-            limit_raw = str(creds.get("limit") or "20").strip()
-            try:
-                limit = max(1, min(int(limit_raw), 100))
-            except ValueError:
-                limit = 20
-            if not token or not handle:
+            token = str(creds.get("access_token") or "").strip()
+            ig_user_id = str(creds.get("instagram_user_id") or "").strip()
+            if not token or not ig_user_id:
                 raise HTTPException(
                     status_code=400,
-                    detail="Faltan api_token o ig_handle en la conexión de Apify.",
+                    detail="Faltan access_token o instagram_user_id en la conexión de Instagram.",
                 )
-            return token, handle, limit
+            return token, ig_user_id
 
-    def _http_json(self, url: str, method: str = "GET", body: dict | None = None) -> dict:
+    def _http_json(
+        self,
+        url: str,
+        method: str = "GET",
+        body: dict | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict:
         data = None
-        headers = {}
+        req_headers = dict(headers or {})
         if body is not None:
             data = json.dumps(body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+            req_headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=req_headers)
         ssl_ctx = ssl.create_default_context(cafile=certifi.where())
         try:
             with urllib.request.urlopen(req, timeout=60, context=ssl_ctx) as response:
@@ -124,16 +131,6 @@ class ReelsServices:
                 err_raw = e.read().decode("utf-8")
             except Exception:
                 err_raw = ""
-            err_lower = err_raw.lower()
-            if "monthly usage hard limit exceeded" in err_lower or "platform-feature-disabled" in err_lower:
-                raise HTTPException(
-                    status_code=402,
-                    detail=(
-                        "Apify bloqueó la ejecución por límite mensual alcanzado. "
-                        "Subí el plan o aumentá el límite mensual en Apify Console > Billing, "
-                        "y luego reintentá la sincronización."
-                    ),
-                ) from e
             raise HTTPException(
                 status_code=502,
                 detail=f"Error HTTP en proveedor externo ({e.code}): {err_raw[:220]}",
@@ -141,138 +138,232 @@ class ReelsServices:
         except Exception as e:  # pragma: no cover
             raise HTTPException(status_code=502, detail=f"Error al llamar proveedor externo: {str(e)}") from e
 
-    def sync_apify(self, user_id: str, limit_override: int | None = None) -> ReelsSyncResponse:
-        token, handle, limit = self._get_apify_credentials(user_id)
-        if limit_override is not None:
-            limit = max(1, min(int(limit_override), 100))
+    def get_sync_status(self, user_id: str) -> dict[str, str | None]:
+        last = _last_sync_times.get(user_id)
+        if last is None:
+            return {"last_sync": None, "next_sync": None}
+        return {
+            "last_sync": last.isoformat(),
+            "next_sync": (last + timedelta(hours=24)).isoformat(),
+        }
 
-        actor_url = (
-            "https://api.apify.com/v2/acts/apify~instagram-reel-scraper/runs?token="
-            + urllib.parse.quote(token)
-        )
-        ig_url = f"https://www.instagram.com/{handle}/"
+    @db_session
+    def get_metrics(self, user_id: str, month: str | None) -> dict[str, int]:
+        rows = [r for r in list(ReelContent.select()) if r.user_id == user_id]
 
-        start_data = self._http_json(
-            actor_url,
-            method="POST",
-            body={
-                "username": [ig_url],
-                "resultsLimit": limit,
-                "includeTranscript": True,
-                "skipPinnedPosts": False,
-            },
-        )
+        if month:
+            try:
+                year, month_num = map(int, month.split("-"))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail="El parámetro month debe tener formato YYYY-MM.") from e
 
-        run_id = ((start_data.get("data") or {}).get("id")) if isinstance(start_data, dict) else None
-        dataset_id = ((start_data.get("data") or {}).get("defaultDatasetId")) if isinstance(start_data, dict) else None
-        if not run_id or not dataset_id:
-            raise HTTPException(status_code=502, detail="Apify no devolvió run_id/dataset_id.")
+            rows = [
+                r
+                for r in rows
+                if r.published_at is not None
+                and r.published_at.astimezone(AR_TZ).year == year
+                and r.published_at.astimezone(AR_TZ).month == month_num
+            ]
 
-        max_wait_s = 300
-        poll_every_s = 5
-        elapsed = 0
-        run_status = "RUNNING"
+        chats_del_mes = sum(int(r.chats or 0) for r in rows)
+        piezas_publicadas = len(rows)
+        sin_clasificar = 0
+        for row in rows:
+            classification = row.classification if isinstance(row.classification, dict) else {}
+            dolor = classification.get("dolor")
+            if dolor is None or str(dolor).strip() == "":
+                sin_clasificar += 1
 
-        while run_status in ("RUNNING", "READY"):
-            if elapsed >= max_wait_s:
-                raise HTTPException(status_code=504, detail="Apify tardó más de 5 minutos.")
-            time.sleep(poll_every_s)
-            elapsed += poll_every_s
-            poll_url = (
-                "https://api.apify.com/v2/actor-runs/"
-                + urllib.parse.quote(run_id)
-                + "?token="
-                + urllib.parse.quote(token)
+        return {
+            "chats_del_mes": chats_del_mes,
+            "piezas_publicadas": piezas_publicadas,
+            "sin_clasificar": sin_clasificar,
+        }
+
+    async def sync_instagram(self, user_id: str) -> dict[str, int]:
+        async with _sync_lock:
+            access_token, ig_user_id = self._resolve_instagram_conn(user_id)
+            headers = {"Accept": "application/json"}
+            media_url = (
+                f"https://graph.facebook.com/v19.0/{urllib.parse.quote(ig_user_id)}/media"
+                "?fields=id,media_type,thumbnail_url,permalink,timestamp,caption,like_count,comments_count"
+                f"&access_token={urllib.parse.quote(access_token)}"
             )
-            poll = self._http_json(poll_url)
-            run_status = str(((poll.get("data") or {}).get("status")) or "FAILED")
 
-        if run_status != "SUCCEEDED":
-            raise HTTPException(status_code=502, detail=f"Apify finalizó con estado: {run_status}")
+            payload = self._http_json(media_url, headers=headers)
+            rows = payload.get("data")
+            media_items = rows if isinstance(rows, list) else []
+            reels = [
+                item
+                for item in media_items
+                if isinstance(item, dict) and str(item.get("media_type") or "").upper() in ("REELS", "VIDEO")
+            ]
 
-        ds_url = (
-            "https://api.apify.com/v2/datasets/"
-            + urllib.parse.quote(dataset_id)
-            + "/items?token="
-            + urllib.parse.quote(token)
-            + "&limit="
-            + urllib.parse.quote(str(limit))
-        )
-        items = self._http_json(ds_url)
-        posts = items if isinstance(items, list) else []
-        if not posts:
-            return ReelsSyncResponse(success=True, total=0, new=0, updated=0, detail=f"Sin resultados para @{handle}.")
+            synced = 0
+            created = 0
+            errors = 0
 
-        new_count = 0
-        upd_count = 0
-        now = datetime.now(timezone.utc)
+            for item in reels:
+                try:
+                    media_id = str(item.get("id") or "").strip()
+                    if not media_id:
+                        continue
+                    caption = str(item.get("caption") or "")
+                    title = caption[:100] if caption else None
+                    permalink = str(item.get("permalink") or "").strip() or None
+                    thumbnail_url = str(item.get("thumbnail_url") or "").strip() or None
+                    likes = int(item.get("like_count") or 0)
+                    comments = int(item.get("comments_count") or 0)
+                    timestamp = str(item.get("timestamp") or "").strip()
 
-        with db_session:
-            for post in posts:
-                if not isinstance(post, dict):
-                    continue
-                short_code = str(post.get("shortCode") or post.get("id") or "").strip()
-                if not short_code:
-                    continue
-                external_id = f"apify_{short_code}"
-                caption = str(post.get("caption") or post.get("alt") or "")
-                title = caption[:200] if caption else f"Reel {short_code}"
-                published_raw = str(post.get("timestamp") or "")
-                published_at = None
-                if published_raw:
-                    try:
-                        published_at = datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
-                    except ValueError:
-                        published_at = now
-                else:
-                    published_at = now
+                    published_at = datetime.now(AR_TZ)
+                    if timestamp:
+                        try:
+                            published_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(AR_TZ)
+                        except Exception:
+                            pass
 
-                permalink = str(post.get("url") or f"https://www.instagram.com/reel/{short_code}/")
-                thumb = str(post.get("displayUrl") or "")
-                metrics = {
-                    "views": int(post.get("videoPlayCount") or post.get("videoViewCount") or post.get("viewCount") or 0),
-                    "likes": int(post.get("likesCount") or 0),
-                    "comments": int(post.get("commentsCount") or 0),
-                    "saves": int(post.get("savesCount") or 0),
-                    "shares": int(post.get("sharesCount") or 0),
-                    "reach": 0,
-                    "thumbnail": thumb,
-                }
-                transcript = str(post.get("transcript") or "")
-                chats = round((int(post.get("commentsCount") or 0)) / 2)
+                    insights = {
+                        "ig_reels_avg_watch_time": 0,
+                        "reach": 0,
+                        "saved": 0,
+                        "shares": 0,
+                        "likes": 0,
+                        "comments": 0,
+                        "total_interactions": 0,
+                    }
+                    plays_result = 0
+                    for plays_metric in ["video_views", "views"]:
+                        plays_url = (
+                            f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
+                            f"?metric={urllib.parse.quote(plays_metric)}"
+                            f"&access_token={urllib.parse.quote(access_token)}"
+                        )
+                        try:
+                            plays_payload = self._http_json(plays_url, headers=headers)
+                            plays_data = plays_payload.get("data")
+                            metrics_rows = plays_data if isinstance(plays_data, list) else []
+                            found_value = 0
+                            for m in metrics_rows:
+                                if not isinstance(m, dict):
+                                    continue
+                                values = m.get("values")
+                                if isinstance(values, list) and values:
+                                    first = values[0]
+                                    if isinstance(first, dict):
+                                        found_value = int(first.get("value") or 0)
+                                        break
+                            plays_result = found_value
+                            print(f"[reels] plays metric result: {{'metric': '{plays_metric}', 'data': {plays_data}, 'value': {plays_result}}}")
+                            break
+                        except Exception:
+                            continue
+                    if plays_result == 0:
+                        print(f"[reels] plays metric result: {{'metric': 'none', 'data': None, 'value': 0}}")
 
-                existing = next(
-                    (
-                        r
-                        for r in list(ReelContent.select())
-                        if r.user_id == user_id and r.external_id == external_id
-                    ),
-                    None,
-                )
-                if existing:
-                    existing.title = title
-                    existing.metrics = metrics
-                    existing.classification = {"transcript": transcript}
-                    existing.published_at = published_at
-                    existing.url = permalink
-                    existing.notes = caption
-                    existing.updated_at = now
-                    if existing.chats <= 0:
-                        existing.chats = chats
-                    upd_count += 1
-                else:
-                    ReelContent(
-                        user_id=user_id,
-                        external_id=external_id,
-                        title=title,
-                        metrics=metrics,
-                        classification={"transcript": transcript},
-                        chats=chats,
-                        published_at=published_at,
-                        url=permalink,
-                        notes=caption,
-                        updated_at=now,
+                    insight_metrics = [
+                        "ig_reels_avg_watch_time",
+                        "reach",
+                        "saved",
+                        "shares",
+                        "likes",
+                        "comments",
+                        "total_interactions",
+                    ]
+                    for metric_name in insight_metrics:
+                        insights_url = (
+                            f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
+                            f"?metric={urllib.parse.quote(metric_name)}"
+                            f"&access_token={urllib.parse.quote(access_token)}"
+                        )
+                        try:
+                            insights_payload = self._http_json(insights_url, headers=headers)
+                            insights_data = insights_payload.get("data")
+                            print(f"[reels] insights raw para {media_id}: {insights_data}")
+                            metrics_rows = insights_data if isinstance(insights_data, list) else []
+                            for m in metrics_rows:
+                                if not isinstance(m, dict):
+                                    continue
+                                name = str(m.get("name") or "").strip()
+                                values = m.get("values")
+                                value = 0
+                                if isinstance(values, list) and values:
+                                    first = values[0]
+                                    if isinstance(first, dict):
+                                        value = int(first.get("value") or 0)
+                                if name in insights:
+                                    insights[name] = value
+                        except Exception as e:
+                            import traceback
+                            print(f"[reels] insights FAILED para {media_id} metric={metric_name}: {e}")
+                            print(traceback.format_exc())
+
+                    metrics = {
+                        "plays": int(plays_result),
+                        "avg_watch_time": int(insights.get("ig_reels_avg_watch_time", 0)),
+                        "likes": likes,
+                        "comments": comments,
+                        "saved": int(insights.get("saved", 0)),
+                        "shares": int(insights.get("shares", 0)),
+                        "reach": int(insights.get("reach", 0)),
+                        "thumbnail": thumbnail_url or "",
+                    }
+
+                    now = datetime.now(AR_TZ)
+                    external_id = media_id
+                    result = db.execute(
+                        """
+                        SELECT id FROM reelcontent
+                        WHERE user_id = $user_id AND external_id = $external_id
+                        """
                     )
-                    new_count += 1
+                    existing = result.fetchone()
+                    metrics_json = json.dumps(metrics)
 
-        return ReelsSyncResponse(success=True, total=len(posts), new=new_count, updated=upd_count)
+                    if existing:
+                        reel_id = existing[0]
+                        db.execute(
+                            """
+                            UPDATE reelcontent
+                            SET title = $title,
+                                metrics = CAST($metrics_json AS jsonb),
+                                published_at = $published_at,
+                                url = $permalink,
+                                notes = $caption,
+                                updated_at = $now
+                            WHERE id = $reel_id
+                            """
+                        )
+                    else:
+                        reel_id = str(uuid.uuid4())
+                        db.execute(
+                            """
+                            INSERT INTO reelcontent
+                            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, published_at, url, notes, updated_at)
+                            VALUES (
+                                $reel_id,
+                                $user_id,
+                                $external_id,
+                                $title,
+                                'reel',
+                                'instagram',
+                                CAST($metrics_json AS jsonb),
+                                '{}'::jsonb,
+                                0,
+                                0,
+                                $published_at,
+                                $permalink,
+                                $caption,
+                                $now
+                            )
+                            """
+                        )
+                        created += 1
+
+                    synced += 1
+                except Exception as e:
+                    errors += 1
+                    print(f"[reels sync] ERROR en media {item.get('id')}: {e}")
+
+            _last_sync_times[user_id] = datetime.now(AR_TZ)
+            return {"synced": synced, "created": created, "errors": errors}

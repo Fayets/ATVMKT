@@ -1,13 +1,18 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import uuid4
 
-from pony.orm import Json, Optional, PrimaryKey, Required, composite_key
+from pony.orm import Json, Optional, PrimaryKey, Required, Set, composite_key
 
 from src.db import db
 
 
 class HealthCheck(db.Entity):
     id = PrimaryKey(int, auto=True)
+
+
+class User(db.Entity):
+    id = PrimaryKey(str)
+    story_sequences = Set("StorySequence")
 
 
 class ApiConnection(db.Entity):
@@ -67,3 +72,35 @@ class BioManualEntry(db.Entity):
     cash = Required(float, default=0)
     notes = Optional(str)
     created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class StorySequence(db.Entity):
+    id = PrimaryKey(int, auto=True)
+    user = Required(User)
+    sequence_date = Required(date)
+    title = Optional(str)
+    dolor = Optional(str)
+    angulo = Optional(str)
+    cta_text = Optional(str)
+    cash_generado = Required(int, default=0)
+    has_cta = Required(bool, default=False)
+    chats = Required(int, default=0)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    slides = Set("StorySlide")
+
+
+class StorySlide(db.Entity):
+    id = PrimaryKey(int, auto=True)
+    sequence = Required(StorySequence)
+    order_index = Required(int)
+    image_url = Optional(str)
+    dolor = Optional(str)
+    angulo = Optional(str)
+    cta_text = Optional(str)
+    instagram_media_id = Optional(str)
+    reach = Optional(int)
+    like_count = Optional(int)
+    replies = Optional(int)
+    navigation = Optional(int)
+    profile_visits = Optional(int)
+    synced_at = Optional(datetime)
