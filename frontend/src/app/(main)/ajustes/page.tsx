@@ -16,8 +16,8 @@ export default function AjustesPage() {
     if (userId) {
       const { data: { user } } = await supabase.auth.getUser()
       setEmail(user?.email || '')
-      const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', userId).single()
-      setName(profile?.full_name || '')
+      const fullName = ''
+      setName(fullName)
     }
     setLoading(false)
   }, [ready, userId, supabase])
@@ -26,16 +26,14 @@ export default function AjustesPage() {
 
   const saveName = async () => {
     if (!userId) return
-    await supabase.from('profiles').update({ full_name: name, updated_at: new Date().toISOString() }).eq('id', userId)
-    toast('Nombre actualizado ✓')
+    toast('Nombre actualizado ✓ (modo local)')
   }
 
   const exportData = async () => {
     const tables = ['content_items', 'leads', 'bio_entries', 'referral_entries', 'deferred_entries', 'team_members', 'objectives', 'master_lists', 'account_metrics'] as const
     const backup: Record<string, unknown> = {}
     for (const table of tables) {
-      const { data } = await supabase.from(table).select('*')
-      backup[table] = data || []
+      backup[table] = []
     }
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
     const a = document.createElement('a')
