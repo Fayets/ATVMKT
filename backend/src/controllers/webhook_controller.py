@@ -1,6 +1,7 @@
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+import traceback
 
 from src.services.bio_service import BioService
 
@@ -29,6 +30,7 @@ async def manychat_webhook(request: Request) -> dict[str, Any]:
     except HTTPException as e:
         raise e
     except Exception:
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Error inesperado al procesar webhook de ManyChat.")
 
 
