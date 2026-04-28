@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from src.services.bio_service import BioService
 
-router = APIRouter(prefix="/api/webhooks", tags=["webhooks"], redirect_slashes=False)
+router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
 service = BioService()
 
 
