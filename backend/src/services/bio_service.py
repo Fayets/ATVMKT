@@ -214,8 +214,10 @@ class BioService:
         manychat_contact_id = _to_str(body.get("manychat_contact_id"))
         full_name = " ".join([x for x in [contact_name, contact_lastname] if x]).strip() or None
 
-        if not webhook_token or not keyword:
-            raise HTTPException(status_code=400, detail="Missing webhook_token or keyword")
+        if not webhook_token:
+            raise HTTPException(status_code=401, detail="Invalid webhook token")
+        if not keyword:
+            raise HTTPException(status_code=400, detail="Missing keyword")
 
         user_id = self._resolve_user_by_manychat_webhook_token(webhook_token)
         if not user_id:
