@@ -20,6 +20,7 @@ from src.controllers.health_controller import router as health_router
 from src.controllers.master_lists_controller import router as master_lists_router
 from src.controllers.reels_controller import router as reels_router
 from src.controllers.stories_controller import router as stories_router
+from src.controllers.webhook_controller import router as webhook_router
 from src.db import db, init_db
 from src.models import ApiConnection
 from src.services.reels_services import ReelsServices
@@ -119,4 +120,5 @@ app.include_router(master_lists_router)
 app.include_router(reels_router)
 app.include_router(bio_router)
 app.include_router(stories_router)
+app.include_router(webhook_router)
 

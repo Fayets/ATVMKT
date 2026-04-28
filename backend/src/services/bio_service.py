@@ -13,7 +13,7 @@ import certifi
 from fastapi import HTTPException
 from pony.orm import db_session
 
-from src.models import ApiConnection
+from src.models import ApiConnection, ManychatChat
 from src.schemas import (
     BioLeadResponse,
     BioLeadsListResponse,
@@ -139,6 +139,113 @@ def _month_key_buenos_aires(raw: str | None) -> str | None:
 
 
 class BioService:
+    def _resolve_user_by_manychat_webhook_token(self, webhook_token: str) -> str | None:
+        token = str(webhook_token or "").strip()
+        if not token:
+            return None
+        with db_session:
+            for conn in list(ApiConnection.select()):
+                if conn.platform != "manychat":
+                    continue
+                creds = conn.credentials if isinstance(conn.credentials, dict) else {}
+                saved = str(creds.get("webhook_token") or "").strip()
+                if saved and saved == token:
+                    return conn.user_id
+        return None
+
+    def _create_airtable_lead_from_manychat(
+        self,
+        user_id: str,
+        ig_handle: str,
+        keyword: str,
+        full_name: str | None,
+    ) -> None:
+        pat, base_id, table_id, table_name = self._load_airtable_conn(user_id)
+        table_seg = table_id or table_name
+        base_path = urllib.parse.quote(base_id, safe="")
+        table_path = urllib.parse.quote(table_seg, safe="")
+        handle = _extract_handle_any(ig_handle)
+        if not handle:
+            return
+
+        filter_formula = f'SEARCH("{handle}",{{IG}})'
+        exists_url = (
+            f"https://api.airtable.com/v0/{base_path}/{table_path}"
+            f"?maxRecords=1&filterByFormula={urllib.parse.quote(filter_formula, safe='')}"
+        )
+        headers = {
+            "Authorization": f"Bearer {pat}",
+            "Accept": "application/json",
+        }
+        req_exists = urllib.request.Request(exists_url, headers=headers, method="GET")
+        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+        with urllib.request.urlopen(req_exists, timeout=30, context=ssl_ctx) as response:
+            payload = response.read().decode("utf-8")
+            parsed = json.loads(payload) if payload else {}
+        records = parsed.get("records") if isinstance(parsed, dict) else []
+        if isinstance(records, list) and records:
+            return
+
+        create_url = f"https://api.airtable.com/v0/{base_path}/{table_path}"
+        body = {
+            "fields": {
+                "Nombre": (full_name or "").strip(),
+                "IG": f"https://www.instagram.com/{handle}/",
+                "Vía": "Automático - ManyChat",
+                "Keyword": keyword,
+                "Fecha bot": datetime.utcnow().isoformat(),
+            }
+        }
+        req_create = urllib.request.Request(
+            create_url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={**headers, "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req_create, timeout=30, context=ssl_ctx):
+            pass
+
+    def process_manychat_webhook(self, body: dict[str, Any]) -> dict[str, Any]:
+        webhook_token = str(body.get("webhook_token") or "").strip()
+        keyword = str(body.get("keyword") or "").strip()
+        ig_username = _extract_handle_any(_to_str(body.get("contact_ig_username")) or "")
+        contact_name = _to_str(body.get("contact_name"))
+        contact_lastname = _to_str(body.get("contact_lastname"))
+        manychat_contact_id = _to_str(body.get("manychat_contact_id"))
+        full_name = " ".join([x for x in [contact_name, contact_lastname] if x]).strip() or None
+
+        if not webhook_token or not keyword:
+            raise HTTPException(status_code=400, detail="Missing webhook_token or keyword")
+
+        user_id = self._resolve_user_by_manychat_webhook_token(webhook_token)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid webhook token")
+
+        month = datetime.now(_AR_TZ).strftime("%Y-%m")
+        with db_session:
+            ManychatChat(
+                user_id=user_id,
+                keyword=keyword,
+                contact_name=full_name,
+                contact_ig_username=ig_username or None,
+                manychat_contact_id=manychat_contact_id,
+                month=month,
+            )
+
+        if ig_username:
+            try:
+                self._create_airtable_lead_from_manychat(
+                    user_id=user_id,
+                    ig_handle=ig_username,
+                    keyword=keyword,
+                    full_name=full_name,
+                )
+            except Exception:
+                # Best effort: no romper webhook si Airtable falla.
+                pass
+
+        return {"success": True, "user_id": user_id}
+
     def _load_airtable_conn(self, user_id: str) -> tuple[str, str, str, str]:
         with db_session:
             conn = next(
