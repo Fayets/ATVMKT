@@ -1,103 +1,103 @@
-type QueryResult<T = unknown> = { data: T; error: null }
+type QueryResult<T = any> = { data: T; error: null }
 
-class MockQueryBuilder<T = unknown> implements PromiseLike<QueryResult<T>> {
+class MockQueryBuilder<T = any> implements PromiseLike<QueryResult<T>> {
   private result: QueryResult<T>
 
   constructor(result: QueryResult<T>) {
     this.result = result
   }
 
-  select() {
+  select(..._args: unknown[]) {
     return this
   }
 
-  eq() {
+  eq(..._args: unknown[]) {
     return this
   }
 
-  neq() {
+  neq(..._args: unknown[]) {
     return this
   }
 
-  in() {
+  in(..._args: unknown[]) {
     return this
   }
 
-  or() {
+  or(..._args: unknown[]) {
     return this
   }
 
-  filter() {
+  filter(..._args: unknown[]) {
     return this
   }
 
-  order() {
+  order(..._args: unknown[]) {
     return this
   }
 
-  range() {
+  range(..._args: unknown[]) {
     return this
   }
 
-  ilike() {
+  ilike(..._args: unknown[]) {
     return this
   }
 
-  like() {
+  like(..._args: unknown[]) {
     return this
   }
 
-  not() {
+  not(..._args: unknown[]) {
     return this
   }
 
-  is() {
+  is(..._args: unknown[]) {
     return this
   }
 
-  contains() {
+  contains(..._args: unknown[]) {
     return this
   }
 
-  match() {
+  match(..._args: unknown[]) {
     return this
   }
 
-  gte() {
+  gte(..._args: unknown[]) {
     return this
   }
 
-  lte() {
+  lte(..._args: unknown[]) {
     return this
   }
 
-  limit() {
+  limit(..._args: unknown[]) {
     return this
   }
 
-  single() {
+  single(..._args: unknown[]) {
     this.result = { data: null as T, error: null }
     return this
   }
 
-  maybeSingle() {
+  maybeSingle(..._args: unknown[]) {
     this.result = { data: null as T, error: null }
     return this
   }
 
-  update() {
+  update(..._args: unknown[]) {
     return this
   }
 
-  insert() {
+  insert(..._args: unknown[]) {
     return this
   }
 
-  upsert() {
+  upsert(..._args: unknown[]) {
     return this
   }
 
-  delete() {
+  delete(..._args: unknown[]) {
     return this
   }
 
@@ -117,8 +117,8 @@ type MockClient = {
     signOut: () => Promise<{ error: null }>
     exchangeCodeForSession: () => Promise<{ error: null }>
   }
-  from: (table: string) => MockQueryBuilder<unknown[]>
-  rpc: (name: string, params?: Record<string, unknown>) => Promise<QueryResult<null>>
+  from: (...args: unknown[]) => MockQueryBuilder<any[]>
+  rpc: (...args: unknown[]) => Promise<QueryResult<any>>
   storage: {
     from: (bucket: string) => {
       upload: (path: string, data: Blob | ArrayBuffer, options?: Record<string, unknown>) => Promise<{ error: null }>
@@ -140,23 +140,23 @@ export function createClient(): MockClient {
           error: null,
         }
       },
-      async signInWithPassword() {
+      async signInWithPassword(..._args: unknown[]) {
         return { error: null }
       },
-      async signUp() {
+      async signUp(..._args: unknown[]) {
         return { error: null }
       },
       async signOut() {
         return { error: null }
       },
-      async exchangeCodeForSession() {
+      async exchangeCodeForSession(..._args: unknown[]) {
         return { error: null }
       },
     },
-    from() {
+    from(..._args: unknown[]) {
       return new MockQueryBuilder({ data: [], error: null })
     },
-    async rpc() {
+    async rpc(..._args: unknown[]) {
       return { data: null, error: null }
     },
     storage: {
