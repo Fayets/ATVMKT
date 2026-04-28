@@ -159,6 +159,7 @@ class BioService:
         ig_handle: str,
         keyword: str,
         full_name: str | None,
+        respondio_auto: bool = False,
     ) -> None:
         pat, base_id, table_id, table_name = self._load_airtable_conn(user_id)
         table_seg = table_id or table_name
@@ -184,6 +185,19 @@ class BioService:
             parsed = json.loads(payload) if payload else {}
         records = parsed.get("records") if isinstance(parsed, dict) else []
         if isinstance(records, list) and records:
+            if respondio_auto:
+                record_id = str((records[0] or {}).get("id") or "").strip()
+                if record_id:
+                    patch_url = f"https://api.airtable.com/v0/{base_path}/{table_path}/{urllib.parse.quote(record_id, safe='')}"
+                    patch_body = {"fields": {"Respondió auto": True}}
+                    req_patch = urllib.request.Request(
+                        patch_url,
+                        data=json.dumps(patch_body).encode("utf-8"),
+                        headers={**headers, "Content-Type": "application/json"},
+                        method="PATCH",
+                    )
+                    with urllib.request.urlopen(req_patch, timeout=30, context=ssl_ctx):
+                        pass
             return
 
         create_url = f"https://api.airtable.com/v0/{base_path}/{table_path}"
@@ -194,6 +208,7 @@ class BioService:
                 "Vía": "Automático - ManyChat",
                 "Keyword": keyword,
                 "Fecha bot": datetime.utcnow().isoformat(),
+                "Respondió auto": bool(respondio_auto),
             }
         }
         req_create = urllib.request.Request(
@@ -206,8 +221,11 @@ class BioService:
             pass
 
     def process_manychat_webhook(self, body: dict[str, Any]) -> dict[str, Any]:
+        event = str(body.get("event") or "").strip().lower()
         webhook_token = str(body.get("webhook_token") or "").strip()
         keyword = str(body.get("keyword") or "").strip()
+        if not keyword and event == "respondio_auto":
+            keyword = "respondio_auto"
         ig_username = _extract_handle_any(_to_str(body.get("contact_ig_username")) or "")
         contact_name = _to_str(body.get("contact_name"))
         contact_lastname = _to_str(body.get("contact_lastname"))
@@ -241,6 +259,7 @@ class BioService:
                     ig_handle=ig_username,
                     keyword=keyword,
                     full_name=full_name,
+                    respondio_auto=(event == "respondio_auto"),
                 )
             except Exception:
                 # Best effort: no romper webhook si Airtable falla.
