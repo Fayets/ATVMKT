@@ -8,6 +8,25 @@ class HealthResponse(BaseModel):
     status: str
 
 
+class AuthRegisterRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class AuthMeResponse(BaseModel):
+    username: str
+
+
 class ApiConnectionResponse(BaseModel):
     id: str
     user_id: str

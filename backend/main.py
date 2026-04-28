@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pony.orm import db_session
 
 from src.controllers.airtable_controller import router as airtable_router
+from src.controllers.auth_controller import router as auth_router
 from src.controllers.bio_controller import router as bio_router
 from src.controllers.conexiones_controller import router as conexiones_router
 from src.controllers.health_controller import router as health_router
@@ -110,6 +111,7 @@ app.add_middleware(
 )
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(airtable_router)
 app.include_router(conexiones_router)
 app.include_router(reels_router)

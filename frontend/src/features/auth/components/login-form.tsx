@@ -1,38 +1,50 @@
 'use client'
 
 import { login } from '@/features/auth/services/auth-service'
-import Link from 'next/link'
-import { useActionState } from 'react'
+import { useRouter } from 'next/navigation'
+import { FormEvent, useState } from 'react'
 
 export function LoginForm() {
-  const [state, formAction, pending] = useActionState(
-    async (_prev: { error?: string }, formData: FormData) => {
-      const result = await login(formData)
-      return result
-    },
-    {}
-  )
+  const router = useRouter()
+  const [error, setError] = useState('')
+  const [pending, setPending] = useState(false)
+
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError('')
+    setPending(true)
+    const formData = new FormData(event.currentTarget)
+    const username = String(formData.get('username') || '')
+    const password = String(formData.get('password') || '')
+    const result = await login(username, password)
+    setPending(false)
+    if (result.error) {
+      setError(result.error)
+      return
+    }
+    router.replace('/dashboard')
+  }
 
   return (
-    <form action={formAction} className="space-y-5">
-      {state.error && (
+    <form onSubmit={onSubmit} className="space-y-5">
+      {error && (
         <div className="rounded-lg border border-[var(--red-dark)] bg-[rgba(230,57,70,0.08)] px-4 py-3 text-sm text-[var(--red-light)]">
-          {state.error}
+          {error}
         </div>
       )}
 
       <div>
-        <label htmlFor="email" className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
-          Email
+        <label htmlFor="username" className="mb-2 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+          Usuario
         </label>
         <input
-          id="email"
-          name="email"
-          type="email"
+          id="username"
+          name="username"
+          type="text"
           required
-          autoComplete="email"
+          autoComplete="username"
           className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-3 text-sm text-[var(--text)] outline-none transition-all placeholder:text-[var(--text3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-glow)]"
-          placeholder="tu@email.com"
+          placeholder="tu_usuario"
         />
       </div>
 
@@ -60,12 +72,7 @@ export function LoginForm() {
         {pending ? 'Cargando...' : 'Iniciar sesion'}
       </button>
 
-      <p className="text-center text-sm text-[var(--text3)]">
-        No tenes cuenta?{' '}
-        <Link href="/signup" className="text-[var(--accent)] hover:underline">
-          Crear cuenta
-        </Link>
-      </p>
+      <p className="text-center text-sm text-[var(--text3)]">El registro de usuarios se hace solo desde Swagger.</p>
     </form>
   )
 }

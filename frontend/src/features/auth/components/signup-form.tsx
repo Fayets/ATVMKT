@@ -2,19 +2,22 @@
 
 import { signup } from '@/features/auth/services/auth-service'
 import Link from 'next/link'
-import { useActionState } from 'react'
+import { FormEvent, useState } from 'react'
 
 export function SignupForm() {
-  const [state, formAction, pending] = useActionState(
-    async (_prev: { error?: string }, formData: FormData) => {
-      const result = await signup(formData)
-      return result
-    },
-    {}
-  )
+  const [state, setState] = useState<{ error?: string }>({})
+  const [pending, setPending] = useState(false)
+
+  const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setPending(true)
+    const result = await signup()
+    setState(result)
+    setPending(false)
+  }
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form onSubmit={onSubmit} className="space-y-5">
       {state.error && (
         <div className="rounded-lg border border-[var(--red-dark)] bg-[rgba(230,57,70,0.08)] px-4 py-3 text-sm text-[var(--red-light)]">
           {state.error}
@@ -29,7 +32,7 @@ export function SignupForm() {
           id="fullName"
           name="fullName"
           type="text"
-          required
+          disabled
           autoComplete="name"
           className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-3 text-sm text-[var(--text)] outline-none transition-all placeholder:text-[var(--text3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-glow)]"
           placeholder="Tu nombre"
@@ -44,7 +47,7 @@ export function SignupForm() {
           id="email"
           name="email"
           type="email"
-          required
+          disabled
           autoComplete="email"
           className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-3 text-sm text-[var(--text)] outline-none transition-all placeholder:text-[var(--text3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-glow)]"
           placeholder="tu@email.com"
@@ -59,7 +62,7 @@ export function SignupForm() {
           id="password"
           name="password"
           type="password"
-          required
+          disabled
           autoComplete="new-password"
           minLength={6}
           className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-3 text-sm text-[var(--text)] outline-none transition-all placeholder:text-[var(--text3)] focus:border-[var(--accent)] focus:shadow-[0_0_0_3px_var(--accent-glow)]"
@@ -72,7 +75,7 @@ export function SignupForm() {
         disabled={pending}
         className="w-full rounded-lg bg-[var(--accent)] px-4 py-3 text-sm font-semibold uppercase tracking-wider text-white transition-all hover:opacity-90 hover:-translate-y-0.5 disabled:opacity-30 disabled:cursor-not-allowed disabled:translate-y-0"
       >
-        {pending ? 'Creando cuenta...' : 'Crear cuenta'}
+        {pending ? 'Verificando...' : 'Registro solo por Swagger'}
       </button>
 
       <p className="text-center text-sm text-[var(--text3)]">

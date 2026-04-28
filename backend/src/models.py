@@ -15,6 +15,14 @@ class User(db.Entity):
     story_sequences = Set("StorySequence")
 
 
+class AuthUser(db.Entity):
+    id = PrimaryKey(str, default=lambda: str(uuid4()))
+    username = Required(str, unique=True)
+    password_hash = Required(str)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)
+
+
 class ApiConnection(db.Entity):
     """Credenciales por usuario y plataforma (vista Conexiones)."""
 
