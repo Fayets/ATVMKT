@@ -227,10 +227,10 @@ class BioService:
         if not keyword and event == "respondio_auto":
             keyword = "respondio_auto"
         ig_username = _extract_handle_any(_to_str(body.get("contact_ig_username")) or "")
-        contact_name = _to_str(body.get("contact_name"))
+        contact_name = _to_str(body.get("contact_name")) or _to_str(body.get("contact_ig_username")) or "Desconocido"
         contact_lastname = _to_str(body.get("contact_lastname"))
         manychat_contact_id = _to_str(body.get("manychat_contact_id"))
-        full_name = " ".join([x for x in [contact_name, contact_lastname] if x]).strip() or None
+        full_name = " ".join([x for x in [contact_name, contact_lastname] if x]).strip() or contact_name
 
         if not webhook_token:
             raise HTTPException(status_code=401, detail="Invalid webhook token")
@@ -245,10 +245,10 @@ class BioService:
         with db_session:
             ManychatChat(
                 user_id=user_id,
-                keyword=keyword,
-                contact_name=full_name,
-                contact_ig_username=ig_username or None,
-                manychat_contact_id=manychat_contact_id,
+                keyword=keyword or "sin_keyword",
+                contact_name=full_name or "Desconocido",
+                contact_ig_username=ig_username or "",
+                manychat_contact_id=manychat_contact_id or "",
                 month=month,
             )
 
