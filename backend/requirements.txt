@@ -6,3 +6,7 @@ python-decouple
 pydantic
 certifi
 apscheduler
+httpx
+python-jose[cryptography]
+bcrypt
+python-multipart
