@@ -110,7 +110,7 @@ export function Sidebar() {
 
 function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pathname: string; showBadge?: boolean }) {
   const hasActive = group.items.some(i => pathname === i.href)
-  const [open, setOpen] = useState(group.defaultOpen ?? hasActive)
+  const [open, setOpen] = useState(false)
 
   return (
     <div className="mb-0.5">

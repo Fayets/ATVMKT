@@ -114,25 +114,6 @@ const PLATFORMS: PlatformDef[] = [
     },
   },
   {
-    key: 'metricool', label: 'Metricool', icon: '📊', subtitle: 'Importa reels e historias automaticamente desde tu cuenta de Metricool',
-    fields: [
-      { key: 'user_token', label: 'User Token', placeholder: 'Tu token de API de Metricool', type: 'password' },
-      { key: 'user_id', label: 'User ID', placeholder: 'Tu User ID de Metricool' },
-      { key: 'blog_id', label: 'Blog ID', placeholder: 'Tu Blog ID de Metricool' },
-    ],
-    guide: {
-      title: 'Como configurar Metricool',
-      steps: [
-        'Inicia sesion en app.metricool.com',
-        'Anda a Ajustes → API (necesitas plan con acceso API)',
-        'Copia tu User Token y pegalo aca',
-        'El User ID y Blog ID los encontras en la URL de tu dashboard o en la seccion de API',
-        'Metricool importa reels + historias con metricas (views, likes, comments, reach)',
-        'Listo! Los datos se importan automaticamente al sincronizar',
-      ],
-    },
-  },
-  {
     key: 'youtube', label: 'YouTube', icon: '▶️', subtitle: 'Importa videos de tu canal con YouTube Data API',
     fields: [
       { key: 'api_key', label: 'API Key de Google', placeholder: 'AIzaSy...', type: 'password' },
@@ -286,7 +267,7 @@ export default function ConexionesPage() {
     <div>
       <div className="mb-6">
         <h2 className="text-lg font-semibold tracking-tight">Conexiones API</h2>
-        <p className="mt-1 text-[12px] text-[var(--text3)]">Conecta tus cuentas de Instagram (via Metricool) y YouTube para importar contenido automaticamente. Las credenciales se guardan de forma segura en tu cuenta.</p>
+        <p className="mt-1 text-[12px] text-[var(--text3)]">Conecta tus cuentas y servicios para importar contenido automaticamente. Las credenciales se guardan de forma segura en tu cuenta.</p>
       </div>
 
       <div className="space-y-4">
