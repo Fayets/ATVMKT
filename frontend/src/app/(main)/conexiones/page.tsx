@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { useToast } from '@/shared/components/toast'
 import { useSupabase } from '@/shared/hooks/use-supabase'
 
@@ -374,6 +375,14 @@ function ConnectionCard({
                     placeholder={f.placeholder}
                     className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)] placeholder:text-[var(--text3)] placeholder:opacity-50"
                   />
+                  {platform.key === 'instagram' && f.key === 'access_token' && (
+                    <Link
+                      href="/configuracion/instagram-token-guide"
+                      className="mt-2 inline-block text-[11px] text-[var(--accent)] hover:underline"
+                    >
+                      🔗 Cómo generar tu token de Instagram →
+                    </Link>
+                  )}
                 </div>
               ))}
             </div>

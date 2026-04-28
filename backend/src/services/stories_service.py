@@ -43,6 +43,20 @@ def _iso_dt(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
+def _parse_dt(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    return None
+
+
 def _serialize_slide(slide: StorySlide) -> dict[str, Any]:
     return {
         "id": slide.id,
@@ -377,14 +391,29 @@ class StoriesService:
         slide.profile_visits = metrics.get("profile_visits", 0)
         slide.synced_at = datetime.now(AR_TZ)
 
+    @db_session
     def get_sync_status(self, user_id: str) -> dict[str, str | None]:
         last = _last_sync_times.get(user_id)
-        if last is None:
-            return {"last_sync": None, "next_sync": None}
-        next_sync = last + timedelta(minutes=30)
+        next_sync = last + timedelta(minutes=30) if last else None
+
+        token_saved_at: datetime | None = None
+        token_expires_at: datetime | None = None
+        conn = ApiConnection.get(user_id=user_id, platform="instagram")
+        creds = conn.credentials if conn and isinstance(conn.credentials, dict) else {}
+        token_saved_at = _parse_dt(creds.get("token_saved_at")) or (conn.updated_at if conn else None)
+        token_expires_at = _parse_dt(creds.get("token_expires_at"))
+        if token_expires_at is None:
+            if token_saved_at is not None:
+                token_expires_at = token_saved_at + timedelta(days=60)
+            else:
+                # Fallback solicitado: 59 días por defecto cuando no hay fecha guardada.
+                token_expires_at = datetime.now(AR_TZ) + timedelta(days=59)
+
         return {
-            "last_sync": last.isoformat(),
-            "next_sync": next_sync.isoformat(),
+            "last_sync": _iso_dt(last),
+            "next_sync": _iso_dt(next_sync),
+            "token_saved_at": _iso_dt(token_saved_at),
+            "token_expires_at": _iso_dt(token_expires_at),
         }
 
     async def sync_instagram(self, user_id: str) -> dict[str, int]:

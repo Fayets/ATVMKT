@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from pony.orm import db_session
@@ -8,6 +8,10 @@ from src.schemas import ApiConnectionResponse, ApiConnectionUpsertRequest
 
 
 class ConexionesServices:
+    @staticmethod
+    def _iso_utc(dt: datetime) -> str:
+        return dt.astimezone(timezone.utc).isoformat()
+
     def _to_response(self, row: ApiConnection) -> ApiConnectionResponse:
         creds = row.credentials if isinstance(row.credentials, dict) else {}
         return ApiConnectionResponse(
@@ -35,14 +39,34 @@ class ConexionesServices:
             matches = [c for c in user_rows if c.platform == platform]
             matches.sort(key=lambda c: c.id)
             existing = matches[0] if matches else None
+            incoming_credentials = dict(body.credentials or {})
             if existing:
-                existing.credentials = dict(body.credentials or {})
+                previous_credentials = existing.credentials if isinstance(existing.credentials, dict) else {}
+                if platform.lower() == "instagram":
+                    previous_token = str(previous_credentials.get("access_token") or "").strip()
+                    incoming_token = str(incoming_credentials.get("access_token") or "").strip()
+                    if incoming_token and incoming_token != previous_token:
+                        incoming_credentials["token_saved_at"] = self._iso_utc(now)
+                        incoming_credentials["token_expires_at"] = self._iso_utc(now + timedelta(days=60))
+                existing.credentials = incoming_credentials
                 existing.updated_at = now
                 return self._to_response(existing)
             row = ApiConnection(
                 user_id=user_id,
                 platform=platform,
-                credentials=dict(body.credentials or {}),
+                credentials=(
+                    {
+                        **incoming_credentials,
+                        **(
+                            {
+                                "token_saved_at": self._iso_utc(now),
+                                "token_expires_at": self._iso_utc(now + timedelta(days=60)),
+                            }
+                            if platform.lower() == "instagram" and str(incoming_credentials.get("access_token") or "").strip()
+                            else {}
+                        ),
+                    }
+                ),
                 updated_at=now,
             )
             return self._to_response(row)

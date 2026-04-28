@@ -62,6 +62,13 @@ type Secuencia = {
   hasSync: boolean
 }
 
+type SyncStatus = {
+  last_sync: string | null
+  next_sync: string | null
+  token_saved_at?: string | null
+  token_expires_at?: string | null
+}
+
 type YTVideo = { id: string; title: string }
 const UNDO_DURATION = 6000
 const getImageUrl = (url: string | null | undefined) => {
@@ -102,7 +109,7 @@ export default function HistoriasPage() {
   const [masterLists, setMasterLists] = useState<{ dolores: string[]; angulos: string[]; ctas: string[] }>({ dolores: [], angulos: [], ctas: [] })
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
-  const [syncStatus, setSyncStatus] = useState<{ last_sync: string | null; next_sync: string | null } | null>(null)
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [countdown, setCountdown] = useState<string>('')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [detailSecuencia, setDetailSecuencia] = useState<Secuencia | null>(null)
@@ -193,11 +200,13 @@ export default function HistoriasPage() {
   const fetchSyncStatus = useCallback(async () => {
     if (!ready) return
     const res = await apiFetch('/stories/sync-status', { headers: authHeaders() })
-    const data = await res.json().catch(() => ({ last_sync: null, next_sync: null }))
+    const data = await res.json().catch(() => ({ last_sync: null, next_sync: null, token_saved_at: null, token_expires_at: null }))
     if (res.ok) {
       setSyncStatus({
         last_sync: data.last_sync || null,
         next_sync: data.next_sync || null,
+        token_saved_at: data.token_saved_at || null,
+        token_expires_at: data.token_expires_at || null,
       })
     }
   }, [ready, userId])
@@ -489,6 +498,12 @@ export default function HistoriasPage() {
   const totalChats = metrics.chats_del_mes
   const conCTA = metrics.secuencias_con_cta
   const sinCTA = metrics.secuencias_sin_cta
+  const tokenExpiresAt = syncStatus?.token_expires_at ? new Date(syncStatus.token_expires_at) : null
+  const tokenDaysLeft = tokenExpiresAt ? Math.max(0, Math.floor((tokenExpiresAt.getTime() - Date.now()) / 86400000)) : 59
+  const tokenStatusColor =
+    tokenDaysLeft < 5 ? 'text-[var(--red)]'
+      : tokenDaysLeft <= 10 ? 'text-[var(--amber)]'
+        : 'text-[var(--green)]'
 
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -544,16 +559,24 @@ export default function HistoriasPage() {
         )}
       </div>
       {syncMessage && <div className={`mb-4 text-[12px] ${syncMessage.startsWith('Error') ? 'text-[var(--red)]' : 'text-[var(--text3)]'}`}>{syncMessage}</div>}
-      {syncStatus?.last_sync && (
-        <div className="mb-4 flex items-center gap-4 text-sm text-zinc-400">
-          <span>
-            Último sync: {new Date(syncStatus.last_sync).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-          </span>
-          {countdown && (
-            <span className="text-zinc-300">
-              Próximo en: <span className="font-mono text-white">{countdown}</span>
-            </span>
-          )}
+      {syncStatus && (
+        <div className="mb-4 text-sm text-zinc-400">
+          <div className="flex items-center gap-4">
+            {syncStatus.last_sync && (
+              <span>
+                Último sync: {new Date(syncStatus.last_sync).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+              </span>
+            )}
+            {countdown && (
+              <span className="text-zinc-300">
+                Próximo en: <span className="font-mono text-white">{countdown}</span>
+              </span>
+            )}
+          </div>
+          <div className={`mt-1 flex items-center gap-2 ${tokenStatusColor}`}>
+            {tokenDaysLeft <= 10 && <span aria-hidden="true">⚠️</span>}
+            <span>Token Instagram: {tokenDaysLeft} días restantes</span>
+          </div>
         </div>
       )}
 
