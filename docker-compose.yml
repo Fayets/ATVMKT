@@ -13,7 +13,10 @@ services:
       - ./backend/media:/app/media
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      args:
+        - NEXT_PUBLIC_BACKEND_URL=http://72.60.244.220:8001
     container_name: atv-mkt-frontend
     restart: always
     ports:
