@@ -61,6 +61,11 @@ export default function ReelsPage() {
   })
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
   const [countdown, setCountdown] = useState('')
+  const [masterLists, setMasterLists] = useState<{ dolores: string[]; angulos: string[]; ctas: string[] }>({
+    dolores: [],
+    angulos: [],
+    ctas: [],
+  })
   const PAGE_SIZE = 12
   const authHeaders = () => {
     const token = typeof window !== 'undefined' ? sessionStorage.getItem('evoluciona_token') : null
@@ -142,6 +147,21 @@ export default function ReelsPage() {
     }
   }, [ready, userId])
 
+  const fetchMasterLists = useCallback(async () => {
+    if (!ready || !userId) return
+    try {
+      const res = await apiFetch('/master-lists', { headers: authHeaders() })
+      const data = await parseJson<{ dolores: string[]; angulos: string[]; ctas: string[] }>(res)
+      setMasterLists({
+        dolores: Array.isArray(data.dolores) ? data.dolores : [],
+        angulos: Array.isArray(data.angulos) ? data.angulos : [],
+        ctas: Array.isArray(data.ctas) ? data.ctas : [],
+      })
+    } catch {
+      setMasterLists({ dolores: [], angulos: [], ctas: [] })
+    }
+  }, [ready, userId])
+
   useEffect(() => {
     fetchData()
     fetchMetrics()
@@ -149,7 +169,23 @@ export default function ReelsPage() {
 
   useEffect(() => {
     fetchSyncStatus()
-  }, [fetchSyncStatus])
+    fetchMasterLists()
+  }, [fetchSyncStatus, fetchMasterLists])
+
+  useEffect(() => {
+    const refreshLists = () => { fetchMasterLists() }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchMasterLists()
+    }
+    window.addEventListener('master-lists-updated', refreshLists)
+    window.addEventListener('focus', refreshLists)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('master-lists-updated', refreshLists)
+      window.removeEventListener('focus', refreshLists)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [fetchMasterLists])
 
   useEffect(() => {
     const nextSync = syncStatus?.next_sync ? new Date(syncStatus.next_sync).getTime() : null
@@ -306,6 +342,7 @@ export default function ReelsPage() {
             <ReelCard
               key={reel.id}
               reel={reel}
+              masterLists={masterLists}
               isExpanded={expanded === reel.id}
               onToggle={() => setExpanded(expanded === reel.id ? null : reel.id)}
               onUpdate={updateField}
@@ -339,11 +376,13 @@ export default function ReelsPage() {
 
 function ReelCard({
   reel,
+  masterLists,
   isExpanded,
   onToggle,
   onUpdate,
 }: {
   reel: Reel
+  masterLists: { dolores: string[]; angulos: string[]; ctas: string[] }
   isExpanded: boolean
   onToggle: () => void
   onUpdate: (id: string, field: 'cash' | 'chats', value: number) => void
@@ -484,30 +523,42 @@ function ReelCard({
           <div className="grid grid-cols-3 gap-3">
             <div>
               <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-[var(--text3)]">Dolor</div>
-              <input
+              <select
                 value={dolor}
                 onChange={(e) => setDolor(e.target.value)}
-                placeholder="Texto libre"
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
-              />
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer"
+              >
+                <option value="">Seleccionar...</option>
+                {masterLists.dolores.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
             </div>
             <div>
               <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-[var(--text3)]">Angulos</div>
-              <input
+              <select
                 value={angulos}
                 onChange={(e) => setAngulos(e.target.value)}
-                placeholder="Separados por coma"
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
-              />
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer"
+              >
+                <option value="">Seleccionar...</option>
+                {masterLists.angulos.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
             </div>
             <div>
               <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-[var(--text3)]">CTA</div>
-              <input
+              <select
                 value={cta}
                 onChange={(e) => setCta(e.target.value)}
-                placeholder="Texto libre"
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
-              />
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer"
+              >
+                <option value="">Seleccionar...</option>
+                {masterLists.ctas.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>

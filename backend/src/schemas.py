@@ -27,6 +27,16 @@ class AuthMeResponse(BaseModel):
     username: str
 
 
+class MasterListUpsertRequest(BaseModel):
+    items: list[str] = Field(default_factory=list)
+
+
+class MasterListsResponse(BaseModel):
+    dolores: list[str] = Field(default_factory=list)
+    angulos: list[str] = Field(default_factory=list)
+    ctas: list[str] = Field(default_factory=list)
+
+
 class ApiConnectionResponse(BaseModel):
     id: str
     user_id: str

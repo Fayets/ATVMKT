@@ -23,6 +23,18 @@ class AuthUser(db.Entity):
     updated_at = Optional(datetime)
 
 
+class MasterList(db.Entity):
+    _table_ = "masterlist"
+    id = PrimaryKey(str, default=lambda: str(uuid4()))
+    user_id = Required(str, index=True)
+    category = Required(str)
+    items = Required(Json, default=lambda: [])
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)
+
+    composite_key(user_id, category)
+
+
 class ApiConnection(db.Entity):
     """Credenciales por usuario y plataforma (vista Conexiones)."""
 

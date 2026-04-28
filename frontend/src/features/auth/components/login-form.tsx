@@ -72,7 +72,6 @@ export function LoginForm() {
         {pending ? 'Cargando...' : 'Iniciar sesion'}
       </button>
 
-      <p className="text-center text-sm text-[var(--text3)]">El registro de usuarios se hace solo desde Swagger.</p>
     </form>
   )
 }

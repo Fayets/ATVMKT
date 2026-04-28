@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { apiFetch } from '@/lib/api'
 import { useToast } from '@/shared/components/toast'
 import { useSupabase } from '@/shared/hooks/use-supabase'
 
@@ -12,31 +13,59 @@ const CATEGORIES = [
 
 export default function ListasMaestrasPage() {
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useSupabase()
   const [lists, setLists] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(true)
 
   const fetchLists = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const { data } = await supabase.from('master_lists').select('category, items')
-    const result: Record<string, string[]> = {}
-    ;(data || []).forEach((row: { category: string; items: unknown }) => {
-      result[row.category] = Array.isArray(row.items) ? row.items as string[] : []
-    })
-    setLists(result)
-    setLoading(false)
-  }, [ready, supabase])
+    try {
+      const res = await apiFetch('/master-lists', {
+        headers: userId ? { 'X-User-Id': userId } : undefined,
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const detail = typeof data === 'object' && data && 'detail' in data ? String((data as { detail: unknown }).detail) : res.statusText
+        toast(`Error al cargar listas: ${detail}`)
+      } else {
+        setLists({
+          dolores: Array.isArray(data.dolores) ? data.dolores : [],
+          angulos: Array.isArray(data.angulos) ? data.angulos : [],
+          ctas: Array.isArray(data.ctas) ? data.ctas : [],
+        })
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [ready, userId, toast])
 
   useEffect(() => { fetchLists() }, [fetchLists])
 
   const saveList = async (category: string, items: string[]) => {
     if (!userId) return
-    await supabase.from('master_lists').upsert(
-      { user_id: userId, category, items, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id,category' }
-    )
-    setLists(prev => ({ ...prev, [category]: items }))
+    const res = await apiFetch(`/master-lists/${encodeURIComponent(category)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-User-Id': userId,
+      },
+      body: JSON.stringify({ items }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const detail = typeof data === 'object' && data && 'detail' in data ? String((data as { detail: unknown }).detail) : res.statusText
+      toast(`Error al guardar: ${detail}`)
+      return
+    }
+    setLists({
+      dolores: Array.isArray(data.dolores) ? data.dolores : [],
+      angulos: Array.isArray(data.angulos) ? data.angulos : [],
+      ctas: Array.isArray(data.ctas) ? data.ctas : [],
+    })
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('master-lists-updated'))
+    }
   }
 
   const addItem = async (category: string, value: string) => {

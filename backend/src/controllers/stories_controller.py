@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+import traceback
 
 from src.schemas import StoriesMetricsOut, StorySequenceIn, StorySequenceOut
 from src.services.stories_service import StoriesService
@@ -65,7 +66,9 @@ def update_sequence(
         return service.update_sequence(sequence_id, user_id, payload)
     except HTTPException as e:
         raise e
-    except Exception:
+    except Exception as e:
+        print(f"[stories] update_sequence error: {e}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail="Error inesperado al actualizar secuencia de historias.")
 
 

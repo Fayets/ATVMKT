@@ -126,7 +126,7 @@ export default function YouTubePage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">YouTube <span className="text-[var(--text3)] text-sm font-normal">{month}</span></h2>
+        <h2 className="text-lg font-semibold tracking-tight">YouTube</h2>
         <MonthSelector month={month} options={options} onChange={setMonth} />
       </div>
 

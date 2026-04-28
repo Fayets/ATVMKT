@@ -80,6 +80,12 @@ const toNumber = (v: unknown) => {
   return 0
 }
 
+const hasCtaValue = (value: string | null | undefined): boolean => {
+  const normalized = (value || '').trim().toLowerCase()
+  if (!normalized) return false
+  return !['no', 'sin cta', 'ninguno', 'none', 'false', '0', 'n/a'].includes(normalized)
+}
+
 export default function HistoriasPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
@@ -167,6 +173,23 @@ export default function HistoriasPage() {
     }
   }, [month, ready])
 
+  const fetchMasterLists = useCallback(async () => {
+    if (!ready || !userId) return
+    try {
+      const res = await apiFetch('/master-lists', { headers: authHeaders() })
+      const data = await res.json().catch(() => ({}))
+      if (res.ok) {
+        setMasterLists({
+          dolores: Array.isArray(data.dolores) ? data.dolores : [],
+          angulos: Array.isArray(data.angulos) ? data.angulos : [],
+          ctas: Array.isArray(data.ctas) ? data.ctas : [],
+        })
+      }
+    } catch {
+      setMasterLists({ dolores: [], angulos: [], ctas: [] })
+    }
+  }, [ready, userId])
+
   const fetchSyncStatus = useCallback(async () => {
     if (!ready) return
     const res = await apiFetch('/stories/sync-status', { headers: authHeaders() })
@@ -179,7 +202,22 @@ export default function HistoriasPage() {
     }
   }, [ready, userId])
 
-  useEffect(() => { fetchData(); fetchSyncStatus() }, [fetchData, fetchSyncStatus])
+  useEffect(() => { fetchData(); fetchSyncStatus(); fetchMasterLists() }, [fetchData, fetchSyncStatus, fetchMasterLists])
+
+  useEffect(() => {
+    const refreshLists = () => { fetchMasterLists() }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchMasterLists()
+    }
+    window.addEventListener('master-lists-updated', refreshLists)
+    window.addEventListener('focus', refreshLists)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('master-lists-updated', refreshLists)
+      window.removeEventListener('focus', refreshLists)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [fetchMasterLists])
   useEffect(() => {
     setMonth(monthMode === 'current' ? currentMonth : comparisonMonth)
   }, [monthMode, setMonth, currentMonth, comparisonMonth])
@@ -343,7 +381,7 @@ export default function HistoriasPage() {
       .filter((x) => formSelected.has(x.idx + 1))
       .filter((x) => x.desc.trim().length > 0)
     if (selectedSlides.length === 0) { toast('Selecciona al menos una story'); return }
-    const tieneCTA = Boolean((form.cta || '').trim())
+    const tieneCTA = hasCtaValue(form.cta)
     const titulo = form.secuenciaDesc || `Secuencia ${form.fecha}`
     const selectedThumbs = formSlideThumbs.filter((_, i) => formSelected.has(i + 1))
     const res = await apiFetch('/stories/sequences', {
@@ -393,7 +431,7 @@ export default function HistoriasPage() {
         angulo: angulo || null,
         cta_text: ctaText || null,
         cash_generado: cashGenerado,
-        has_cta: Boolean((form.cta || '').trim()),
+        has_cta: hasCtaValue(ctaText),
         chats,
         slides: sec.slides.map((s, i) => ({
           order_index: i + 1,
@@ -422,9 +460,29 @@ export default function HistoriasPage() {
 
   // Master list creators
   const addToList = async (category: 'dolores' | 'angulos' | 'ctas', value: string) => {
-    if (!value.trim()) return
-    const updated = [...masterLists[category], value.trim()]
-    setMasterLists(prev => ({ ...prev, [category]: updated }))
+    const clean = value.trim()
+    if (!clean) return
+    const existing = masterLists[category] || []
+    if (existing.some((v) => v.toLowerCase() === clean.toLowerCase())) {
+      toast('Ya existe')
+      return
+    }
+    const updated = [...existing, clean]
+    const res = await apiFetch(`/master-lists/${category}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ items: updated }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast(`Error al guardar lista: ${String((data as { detail?: unknown }).detail || 'error')}`)
+      return
+    }
+    setMasterLists({
+      dolores: Array.isArray(data.dolores) ? data.dolores : [],
+      angulos: Array.isArray(data.angulos) ? data.angulos : [],
+      ctas: Array.isArray(data.ctas) ? data.ctas : [],
+    })
     toast('Creado')
   }
 
@@ -552,14 +610,25 @@ export default function HistoriasPage() {
             </div>
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Angulos</label>
-              <div className="min-h-[38px] rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-2 py-1.5 flex flex-wrap gap-1 items-center">
-                {formAngulos.map(a => (
-                  <span key={a} className="inline-flex items-center gap-1 rounded-full bg-[var(--bg4)] px-2.5 py-1 text-[11px]">
-                    {a} <button type="button" onClick={() => setFormAngulos(p => p.filter(x => x !== a))} className="text-[var(--text3)] hover:text-[var(--red)]">x</button>
-                  </span>
-                ))}
-                <AnguloSelect angulos={masterLists.angulos} selected={formAngulos} onAdd={v => setFormAngulos(p => [...p, v])} onCreateNew={async () => { const v = prompt('Nuevo angulo:'); if (v) { await addToList('angulos', v); setFormAngulos(p => [...p, v.trim()]) } }} />
-              </div>
+              <select
+                value={formAngulos[0] || ''}
+                onChange={async e => {
+                  if (e.target.value === '__new__') {
+                    const v = prompt('Nuevo angulo:')
+                    if (v) {
+                      await addToList('angulos', v)
+                      setFormAngulos([v.trim()])
+                    }
+                  } else {
+                    setFormAngulos(e.target.value ? [e.target.value] : [])
+                  }
+                }}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none cursor-pointer"
+              >
+                <option value="">Seleccionar...</option>
+                {masterLists.angulos.map(a => <option key={a} value={a}>{a}</option>)}
+                <option value="__new__">+ Crear nuevo...</option>
+              </select>
             </div>
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Fecha</label>
@@ -716,8 +785,8 @@ export default function HistoriasPage() {
                                 {!hasMetrics && i > 0 && (
                                   <div className="w-2 flex-shrink-0" />
                                 )}
-                                {/* Story card — fills available space */}
-                                <div className="flex-1 min-w-0 text-center">
+                                {/* Story card — fixed width to avoid giant single-slide cards */}
+                                <div className="w-[120px] flex-shrink-0 text-center">
                                   <div className="aspect-[9/16] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)] mb-1.5">
                                     {s.thumb ? <img src={s.thumb} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)] text-lg font-bold">{s.idx}</div>}
                                   </div>
@@ -749,14 +818,25 @@ export default function HistoriasPage() {
                       </div>
                       <div>
                         <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Angulos</label>
-                        <div className="min-h-[38px] rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-2 py-1.5 flex flex-wrap gap-1 items-center">
-                          {formAngulos.map(a => (
-                            <span key={a} className="inline-flex items-center gap-1 rounded-full bg-[rgba(245,158,11,0.15)] px-2.5 py-1 text-[11px] text-amber-400">
-                              {a} <button type="button" onClick={() => setFormAngulos(p => p.filter(x => x !== a))} className="text-[var(--text3)] hover:text-[var(--red)]">×</button>
-                            </span>
-                          ))}
-                          <AnguloSelect angulos={masterLists.angulos} selected={formAngulos} onAdd={v => setFormAngulos(p => [...p, v])} onCreateNew={async () => { const v = prompt('Nuevo angulo:'); if (v) { await addToList('angulos', v); setFormAngulos(p => [...p, v.trim()]) } }} />
-                        </div>
+                        <select
+                          value={formAngulos[0] || ''}
+                          onChange={async e => {
+                            if (e.target.value === '__new__') {
+                              const v = prompt('Nuevo angulo:')
+                              if (v) {
+                                await addToList('angulos', v)
+                                setFormAngulos([v.trim()])
+                              }
+                            } else {
+                              setFormAngulos(e.target.value ? [e.target.value] : [])
+                            }
+                          }}
+                          className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none cursor-pointer"
+                        >
+                          <option value="">Seleccionar...</option>
+                          {masterLists.angulos.map(a => <option key={a} value={a}>{a}</option>)}
+                          <option value="__new__">+ Crear nuevo...</option>
+                        </select>
                       </div>
                       <div>
                         <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">CTA</label>
@@ -951,14 +1031,3 @@ function StorySequenceDetail({
   )
 }
 
-function AnguloSelect({ angulos, selected, onAdd, onCreateNew }: { angulos: string[]; selected: string[]; onAdd: (v: string) => void; onCreateNew: () => void }) {
-  const [val, setVal] = useState('')
-  return (
-    <select value={val} onChange={e => { if (e.target.value === '__new__') { onCreateNew(); setVal('') } else if (e.target.value && !selected.includes(e.target.value)) { onAdd(e.target.value); setVal('') } else setVal('') }}
-      className="bg-transparent text-[11px] text-[var(--text3)] outline-none cursor-pointer border-0 min-w-[80px]">
-      <option value="">+ Agregar</option>
-      {angulos.filter(a => !selected.includes(a)).map(a => <option key={a} value={a}>{a}</option>)}
-      <option value="__new__">+ Crear nuevo...</option>
-    </select>
-  )
-}

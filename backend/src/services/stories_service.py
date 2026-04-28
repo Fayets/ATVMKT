@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import certifi
 import httpx
 from fastapi import HTTPException
-from pony.orm import db_session
+from pony.orm import db_session, flush
 
 from src.models import ApiConnection, StorySequence, StorySlide, User, db
 from src.schemas import StorySequenceIn
@@ -78,6 +78,13 @@ def _serialize_sequence(sequence: StorySequence) -> dict[str, Any]:
     }
 
 
+def _has_cta(sequence: StorySequence) -> bool:
+    normalized = str(sequence.cta_text or "").strip().lower()
+    if not normalized:
+        return bool(sequence.has_cta)
+    return normalized not in {"no", "sin cta", "ninguno", "none", "false", "0", "n/a"}
+
+
 def _http_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
     req = urllib.request.Request(url, headers=headers, method="GET")
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
@@ -136,10 +143,10 @@ class StoriesService:
         sequence = StorySequence(
             user=user,
             sequence_date=data.sequence_date,
-            title=data.title,
-            dolor=data.dolor,
-            angulo=data.angulo,
-            cta_text=data.cta_text,
+            title=(data.title or "").strip(),
+            dolor=(data.dolor or "").strip(),
+            angulo=(data.angulo or "").strip(),
+            cta_text=(data.cta_text or "").strip(),
             cash_generado=max(0, int(data.cash_generado or 0)),
             has_cta=bool(data.has_cta),
             chats=max(0, int(data.chats or 0)),
@@ -149,10 +156,11 @@ class StoriesService:
                 sequence=sequence,
                 order_index=int(slide.order_index),
                 image_url=slide.image_url,
-                dolor=slide.dolor,
-                angulo=slide.angulo,
-                cta_text=slide.cta_text,
+                dolor=(slide.dolor or "").strip(),
+                angulo=(slide.angulo or "").strip(),
+                cta_text=(slide.cta_text or "").strip(),
             )
+        flush()
         return _serialize_sequence(sequence)
 
     @db_session
@@ -164,13 +172,13 @@ class StoriesService:
         if "sequence_date" in data and data["sequence_date"] is not None:
             sequence.sequence_date = data["sequence_date"]
         if "title" in data:
-            sequence.title = data.get("title")
+            sequence.title = str(data.get("title") or "").strip()
         if "dolor" in data:
-            sequence.dolor = data.get("dolor")
+            sequence.dolor = str(data.get("dolor") or "").strip()
         if "angulo" in data:
-            sequence.angulo = data.get("angulo")
+            sequence.angulo = str(data.get("angulo") or "").strip()
         if "cta_text" in data:
-            sequence.cta_text = data.get("cta_text")
+            sequence.cta_text = str(data.get("cta_text") or "").strip()
         if "cash_generado" in data and data["cash_generado"] is not None:
             sequence.cash_generado = max(0, int(data["cash_generado"]))
         if "has_cta" in data and data["has_cta"] is not None:
@@ -186,11 +194,12 @@ class StoriesService:
                     sequence=sequence,
                     order_index=int(raw.get("order_index", 0)),
                     image_url=raw.get("image_url"),
-                    dolor=raw.get("dolor"),
-                    angulo=raw.get("angulo"),
-                    cta_text=raw.get("cta_text"),
+                    dolor=str(raw.get("dolor") or "").strip(),
+                    angulo=str(raw.get("angulo") or "").strip(),
+                    cta_text=str(raw.get("cta_text") or "").strip(),
                 )
 
+        flush()
         return _serialize_sequence(sequence)
 
     @db_session
@@ -241,8 +250,8 @@ class StoriesService:
                 and s.sequence_date.month == month_num
             ]
             chats_del_mes = sum(int(seq.chats or 0) for seq in rows)
-            secuencias_con_cta = sum(1 for seq in rows if bool(seq.has_cta))
-            secuencias_sin_cta = sum(1 for seq in rows if not bool(seq.has_cta))
+            secuencias_con_cta = sum(1 for seq in rows if _has_cta(seq))
+            secuencias_sin_cta = sum(1 for seq in rows if not _has_cta(seq))
             stories_sincronizadas = sum(
                 1
                 for seq in rows

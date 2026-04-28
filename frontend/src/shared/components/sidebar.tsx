@@ -1,18 +1,17 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { logout } from '@/features/auth/services/auth-service'
 import { useState } from 'react'
 
 type NavItem = { label: string; href: string }
-type NavGroup = { title: string; icon: string; items: NavItem[]; defaultOpen?: boolean }
+type NavGroup = { title: string; icon: string; items: NavItem[]; defaultOpen?: boolean; href?: string }
 
 const navigation: NavGroup[] = [
   {
-    title: 'Dashboard marketing', icon: '◆', defaultOpen: true,
-    items: [
-      { label: 'Resumen', href: '/dashboard' },
-    ],
+    title: 'Dashboard marketing', icon: '◆', defaultOpen: true, href: '/dashboard',
+    items: [],
   },
   {
     title: 'Dashboard ventas', icon: '◆', defaultOpen: true,
@@ -56,7 +55,13 @@ const settingsItems: NavItem[] = [
 ]
 
 export function Sidebar() {
+  const router = useRouter()
   const pathname = usePathname()
+
+  const onLogout = async () => {
+    await logout()
+    router.replace('/login')
+  }
 
   return (
     <aside className="flex h-screen w-56 flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg2)] sticky top-0">
@@ -102,6 +107,16 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="mt-2 border-t border-[var(--border)] px-4 pb-3 pt-3 text-[9px] text-[var(--text3)]">
+        <div className="mb-3 flex items-center justify-between text-[11px]">
+          <span className="text-[var(--text3)]">Invitado</span>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="rounded-md border border-[var(--border2)] bg-transparent px-2 py-1 text-[10px] font-medium text-[var(--text3)] transition-all hover:border-[var(--accent)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)]"
+          >
+            Salir
+          </button>
+        </div>
         © 2025-2026 Aumenta Tu Valor
       </div>
     </aside>
@@ -110,7 +125,24 @@ export function Sidebar() {
 
 function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pathname: string; showBadge?: boolean }) {
   const hasActive = group.items.some(i => pathname === i.href)
+  const directActive = group.href ? pathname === group.href : false
   const [open, setOpen] = useState(false)
+
+  if (group.href) {
+    return (
+      <div className="mb-0.5">
+        <Link
+          href={group.href}
+          className={`mx-1 w-[calc(100%-8px)] flex items-center gap-2 rounded-md px-3 py-2 text-[13px] font-medium transition-all text-left ${
+            directActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)]'
+          }`}
+        >
+          <span className="text-[10px]">▸</span>
+          <span className="flex-1">{group.title}</span>
+        </Link>
+      </div>
+    )
+  }
 
   return (
     <div className="mb-0.5">
