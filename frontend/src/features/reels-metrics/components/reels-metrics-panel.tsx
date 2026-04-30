@@ -264,12 +264,6 @@ export function ReelsMetricsPanel() {
                 <div className="mt-1 text-[11px] text-[var(--text3)]">
                   {selectedReel.publishedAt ? selectedReel.publishedAt.split('T')[0] : 'Sin fecha'}
                 </div>
-                <div className="mt-2 text-[11px] text-[var(--text2)]">
-                  Keyword:{' '}
-                  <span className="rounded bg-[var(--bg4)] px-2 py-0.5 font-mono">
-                    {selectedReel.keyword || 'Sin keyword'}
-                  </span>
-                </div>
               </div>
               <button
                 type="button"
@@ -286,6 +280,7 @@ export function ReelsMetricsPanel() {
               <MetricCard label="Comentarios" value={selectedReel.comments} />
               <MetricCard label="Likes" value={selectedReel.likes} />
               <MetricCard label="Compartidos" value={selectedReel.shares} />
+              <KeywordCard value={selectedReel.keyword} />
             </div>
 
             {selectedReel.url && (
@@ -312,6 +307,17 @@ function MetricCard({ label, value }: { label: string; value: number }) {
     <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
       <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">{label}</div>
       <div className="font-mono-num mt-1 text-[18px] font-bold">{Number(value || 0).toLocaleString('es-AR')}</div>
+    </div>
+  )
+}
+
+function KeywordCard({ value }: { value: string | null }) {
+  return (
+    <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+      <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Keyword</div>
+      <div className="mt-1 truncate font-mono text-[16px] font-bold">
+        {value && value.trim() ? value : 'Sin keyword'}
+      </div>
     </div>
   )
 }
