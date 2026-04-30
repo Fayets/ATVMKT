@@ -52,9 +52,10 @@ def patch_reel(
 @router.post("/sync")
 async def sync_instagram(
     user_id: Annotated[str, Depends(require_user_id)],
-) -> dict[str, int]:
+) -> dict[str, str]:
     try:
-        return await service.sync_instagram(user_id)
+        service.trigger_sync(user_id)
+        return {"status": "started"}
     except HTTPException as e:
         raise e
     except Exception:
@@ -64,7 +65,7 @@ async def sync_instagram(
 @router.get("/sync-status")
 def get_sync_status(
     user_id: Annotated[str, Depends(require_user_id)],
-) -> dict[str, str | None]:
+) -> dict[str, int | str]:
     try:
         return service.get_sync_status(user_id)
     except HTTPException as e:

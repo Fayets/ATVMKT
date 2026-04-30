@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from decouple import config
 from fastapi import FastAPI
@@ -83,14 +84,13 @@ async def lifespan(_: FastAPI):
     )
     scheduler.add_job(
         auto_sync_reels,
-        trigger=IntervalTrigger(hours=24),
+        trigger=CronTrigger(hour=7, minute=0, timezone=AR_TZ),
         id="auto_sync_reels",
         replace_existing=True,
-        next_run_time=datetime.now(AR_TZ),
     )
     scheduler.start()
     print("[scheduler] Auto-sync de historias iniciado (cada 30 min)")
-    print("[scheduler] Auto-sync de reels iniciado (cada 24 h)")
+    print("[scheduler] Auto-sync de reels iniciado (diario 07:00 AR)")
     yield
     scheduler.shutdown()
 

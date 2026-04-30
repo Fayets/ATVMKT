@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { apiFetch } from '@/lib/api'
 import { useToast } from '@/shared/components/toast'
@@ -38,8 +38,11 @@ type ReelsMetrics = {
 }
 
 type SyncStatus = {
-  last_sync: string | null
-  next_sync: string | null
+  total: number
+  processed: number
+  status: 'idle' | 'running' | 'done' | 'error'
+  phase?: 'idle' | 'collecting' | 'processing' | 'done' | 'error'
+  discovered?: number
 }
 
 export default function ReelsPage() {
@@ -59,13 +62,18 @@ export default function ReelsPage() {
     piezas_publicadas: 0,
     sin_clasificar: 0,
   })
-  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null)
-  const [countdown, setCountdown] = useState('')
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ total: 0, processed: 0, status: 'idle' })
+  const previousSyncStatus = useRef<SyncStatus['status']>('idle')
   const [masterLists, setMasterLists] = useState<{ dolores: string[]; angulos: string[]; ctas: string[] }>({
     dolores: [],
     angulos: [],
     ctas: [],
   })
+  const isSyncRunning = syncing || syncStatus.status === 'running'
+  const syncProgressPct = useMemo(() => {
+    if (!isSyncRunning || syncStatus.total <= 0) return 0
+    return Math.min(100, Math.max(0, Math.round((syncStatus.processed / syncStatus.total) * 100)))
+  }, [isSyncRunning, syncStatus.total, syncStatus.processed])
   const PAGE_SIZE = 12
   const authHeaders = () => {
     const token = typeof window !== 'undefined' ? sessionStorage.getItem('evoluciona_token') : null
@@ -141,9 +149,15 @@ export default function ReelsPage() {
     try {
       const res = await apiFetch('/reels/sync-status', { headers: authHeaders() })
       const data = await parseJson<SyncStatus>(res)
-      setSyncStatus(data)
+      setSyncStatus({
+        total: Number(data.total || 0),
+        processed: Number(data.processed || 0),
+        status: ['idle', 'running', 'done', 'error'].includes(String(data.status)) ? data.status : 'idle',
+        phase: ['idle', 'collecting', 'processing', 'done', 'error'].includes(String(data.phase)) ? data.phase : 'idle',
+        discovered: Number(data.discovered || 0),
+      })
     } catch {
-      setSyncStatus(null)
+      setSyncStatus({ total: 0, processed: 0, status: 'idle', phase: 'idle', discovered: 0 })
     }
   }, [ready, userId])
 
@@ -188,42 +202,41 @@ export default function ReelsPage() {
   }, [fetchMasterLists])
 
   useEffect(() => {
-    const nextSync = syncStatus?.next_sync ? new Date(syncStatus.next_sync).getTime() : null
-    if (!nextSync) {
-      setCountdown('')
-      return
+    if (syncStatus.status !== 'running') return
+    const id = window.setInterval(() => {
+      fetchSyncStatus()
+    }, 2000)
+    return () => window.clearInterval(id)
+  }, [syncStatus.status, fetchSyncStatus])
+
+  useEffect(() => {
+    const previous = previousSyncStatus.current
+    const current = syncStatus.status
+    if (previous === 'running' && current !== 'running') {
+      fetchData()
+      fetchMetrics()
+      if (current === 'done') setSyncMessage('Sync completado')
+      if (current === 'error') setSyncMessage('Error durante la sincronizacion')
+      setSyncing(false)
     }
-
-    const id = setInterval(() => {
-      const diff = nextSync - Date.now()
-      if (diff <= 0) {
-        setCountdown('00:00:00')
-        return
-      }
-      const hh = Math.floor(diff / 3600000)
-      const mm = Math.floor((diff % 3600000) / 60000)
-      const ss = Math.floor((diff % 60000) / 1000)
-      setCountdown(`${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`)
-    }, 1000)
-
-    return () => clearInterval(id)
-  }, [syncStatus])
+    previousSyncStatus.current = current
+  }, [syncStatus.status, fetchData, fetchMetrics])
 
   const handleSync = async () => {
-    if (!ready) return
+    if (!ready || syncStatus.status === 'running') return
     setSyncing(true)
     setSyncMessage('Sincronizando...')
+    setSyncStatus((prev) => ({ ...prev, status: 'running', processed: 0 }))
+    fetchSyncStatus()
     try {
       const res = await apiFetch('/reels/sync', { method: 'POST', headers: authHeaders() })
-      const data = await parseJson<{ synced: number; created: number; errors: number }>(res)
-      setSyncMessage(`✓ ${data.synced} reels (${data.created} nuevos)`)
-      await fetchData()
-      await fetchMetrics()
+      await parseJson<{ status: string }>(res)
       await fetchSyncStatus()
     } catch (e) {
       setSyncMessage(`Error: ${(e as Error).message}`)
-    } finally {
       setSyncing(false)
+    } finally {
+      await fetchSyncStatus()
     }
   }
 
@@ -310,29 +323,33 @@ export default function ReelsPage() {
       </div>
 
       <div className="mb-4 flex items-center gap-3">
-        <button onClick={handleSync} disabled={syncing} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
-          {syncing ? 'Sincronizando...' : 'SINCRONIZAR INSTAGRAM'}
+        <button onClick={handleSync} disabled={isSyncRunning} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
+          ACTUALIZAR DATOS
         </button>
       </div>
-      {syncMessage && <div className={`mb-4 text-[12px] ${syncMessage.startsWith('Error') ? 'text-[var(--red)]' : 'text-[var(--text3)]'}`}>{syncMessage}</div>}
-      {syncStatus?.last_sync && (
-        <div className="mb-4 flex items-center gap-4 text-sm text-zinc-400">
-          <span>
-            Último sync:{' '}
-            {new Date(syncStatus.last_sync).toLocaleTimeString('es-AR', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            })}
-          </span>
-          {countdown && (
-            <span className="text-zinc-300">
-              Próximo en: <span className="font-mono text-white">{countdown}</span>
+      {syncStatus.status === 'running' && (
+        <div className="mb-4 glass-card p-4">
+          <div className="mb-2 flex items-center gap-2 text-[12px] text-[var(--text)]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
+            {syncStatus.phase === 'collecting' ? 'Buscando reels en Instagram...' : 'Recolectando metricas de Instagram...'}
+          </div>
+          <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-[var(--bg4)]">
+            <div
+              className={`h-full rounded-full bg-[var(--accent)] transition-all duration-500 ease-out ${syncStatus.phase === 'collecting' ? 'animate-pulse' : ''}`}
+              style={{ width: `${syncStatus.phase === 'collecting' ? 100 : syncProgressPct}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between text-[12px] text-[var(--text3)]">
+            <span>
+              {syncStatus.phase === 'collecting'
+                ? `Descubiertos: ${syncStatus.discovered || 0} reels`
+                : `Sincronizando: ${syncStatus.processed} de ${syncStatus.total || '?'} reels`}
             </span>
-          )}
+            <span>{syncStatus.phase === 'collecting' ? '...' : `${syncProgressPct}%`}</span>
+          </div>
         </div>
       )}
+      {syncMessage && <div className={`mb-4 text-[12px] ${syncMessage.startsWith('Error') ? 'text-[var(--red)]' : 'text-[var(--text3)]'}`}>{syncMessage}</div>}
 
       {reels.length === 0 ? (
         <div className="py-16 text-center text-[13px] text-[var(--text3)]">Sin reels para este filtro. Sincroniza Instagram para empezar.</div>
@@ -403,7 +420,7 @@ function ReelCard({
   const thumb = rawThumb && !imgErr ? `/api/proxy-image?url=${encodeURIComponent(rawThumb)}` : ''
   const plays = Number(reel.metrics?.plays) || 0
   const likes = Number(reel.metrics?.likes) || 0
-  const saves = Number(reel.metrics?.saved) || 0
+  const comments = Number(reel.metrics?.comments_count ?? reel.metrics?.comments) || 0
   const shares = Number(reel.metrics?.shares) || 0
   const reach = Number(reel.metrics?.reach) || 0
   const cpc = reel.chats > 0 ? reel.cash / reel.chats : 0
@@ -507,8 +524,8 @@ function ReelCard({
               <div className="font-mono-num text-[14px] font-bold">{formatInt(likes)}</div>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
-              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Guardados</div>
-              <div className="font-mono-num text-[14px] font-bold">{formatInt(saves)}</div>
+              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Comentarios</div>
+              <div className="font-mono-num text-[14px] font-bold">{formatInt(comments)}</div>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Shares</div>

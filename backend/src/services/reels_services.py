@@ -1,26 +1,62 @@
 import asyncio
 import json
 import ssl
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import certifi
 from fastapi import HTTPException
-from pony.orm import ObjectNotFound, db_session
+from pony.orm import ObjectNotFound, db_session, rollback
 
 from src.models import ApiConnection, ReelContent, db
 from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
-_sync_lock = asyncio.Lock()
-_last_sync_times: dict[str, datetime] = {}
+_sync_lock = threading.Lock()
+_sync_states: dict[str, dict[str, int | str]] = {}
+_sync_tasks: dict[str, asyncio.Task] = {}
+SYNC_REELS_SINCE = datetime(2024, 12, 1, tzinfo=AR_TZ)
 
 
 class ReelsServices:
+    def _is_user_sync_running(self, user_id: str) -> bool:
+        task = _sync_tasks.get(user_id)
+        return task is not None and not task.done()
+
+    def trigger_sync(self, user_id: str) -> None:
+        if self._is_user_sync_running(user_id):
+            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+
+        async def _runner() -> None:
+            await self.sync_instagram(user_id)
+
+        task = asyncio.create_task(_runner())
+        task.add_done_callback(lambda _: _sync_tasks.pop(user_id, None))
+        _sync_tasks[user_id] = task
+
+    def _set_sync_state(
+        self,
+        user_id: str,
+        *,
+        total: int,
+        processed: int,
+        status: str,
+        phase: str = "idle",
+        discovered: int = 0,
+    ) -> None:
+        _sync_states[user_id] = {
+            "total": max(0, int(total)),
+            "processed": max(0, int(processed)),
+            "status": status,
+            "phase": phase,
+            "discovered": max(0, int(discovered)),
+        }
+
     def _to_response(self, row: ReelContent) -> ReelResponse:
         return ReelResponse(
             id=row.id,
@@ -36,6 +72,67 @@ class ReelsServices:
             notes=row.notes,
             external_id=row.external_id,
         )
+
+    @db_session
+    def _upsert_reel_content(
+        self,
+        *,
+        user_id: str,
+        external_id: str,
+        title: str,
+        metrics_json: str,
+        published_at: datetime,
+        permalink: str | None,
+        caption: str,
+    ) -> bool:
+        now = datetime.now(AR_TZ)
+        result = db.execute(
+            """
+            SELECT id FROM reelcontent
+            WHERE user_id = $user_id AND external_id = $external_id
+            """
+        )
+        existing = result.fetchone()
+        if existing:
+            reel_id = existing[0]
+            db.execute(
+                """
+                UPDATE reelcontent
+                SET title = $title,
+                    metrics = CAST($metrics_json AS jsonb),
+                    published_at = $published_at,
+                    url = $permalink,
+                    notes = $caption,
+                    updated_at = $now
+                WHERE id = $reel_id
+                """
+            )
+            return False
+
+        reel_id = str(uuid.uuid4())
+        db.execute(
+            """
+            INSERT INTO reelcontent
+            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, published_at, url, notes, updated_at)
+            VALUES (
+                $reel_id,
+                $user_id,
+                $external_id,
+                $title,
+                'reel',
+                'instagram',
+                CAST($metrics_json AS jsonb),
+                '{}'::jsonb,
+                0,
+                0,
+                $published_at,
+                $permalink,
+                $caption,
+                $now
+            )
+            """
+        )
+        return True
 
     def list_reels(self, user_id: str, month: str | None, page: int, page_size: int) -> ReelsListResponse:
         with db_session:
@@ -138,14 +235,11 @@ class ReelsServices:
         except Exception as e:  # pragma: no cover
             raise HTTPException(status_code=502, detail=f"Error al llamar proveedor externo: {str(e)}") from e
 
-    def get_sync_status(self, user_id: str) -> dict[str, str | None]:
-        last = _last_sync_times.get(user_id)
-        if last is None:
-            return {"last_sync": None, "next_sync": None}
-        return {
-            "last_sync": last.isoformat(),
-            "next_sync": (last + timedelta(hours=24)).isoformat(),
-        }
+    def get_sync_status(self, user_id: str) -> dict[str, int | str]:
+        state = _sync_states.get(user_id)
+        if state is not None:
+            return state
+        return {"total": 0, "processed": 0, "status": "idle", "phase": "idle", "discovered": 0}
 
     @db_session
     def get_metrics(self, user_id: str, month: str | None) -> dict[str, int]:
@@ -180,8 +274,9 @@ class ReelsServices:
             "sin_clasificar": sin_clasificar,
         }
 
-    async def sync_instagram(self, user_id: str) -> dict[str, int]:
-        async with _sync_lock:
+    def _sync_instagram_blocking(self, user_id: str) -> dict[str, int]:
+        self._set_sync_state(user_id, total=0, processed=0, status="running", phase="collecting", discovered=0)
+        try:
             access_token, ig_user_id = self._resolve_instagram_conn(user_id)
             headers = {"Accept": "application/json"}
             media_url = (
@@ -189,49 +284,71 @@ class ReelsServices:
                 "?fields=id,media_type,thumbnail_url,permalink,timestamp,caption,like_count,comments_count"
                 f"&access_token={urllib.parse.quote(access_token)}"
             )
+            media_items: list[dict] = []
+            pages_fetched = 0
+            max_pages = 100
+            next_url = media_url
+            stop_pagination = False
+            while next_url and pages_fetched < max_pages and not stop_pagination:
+                payload = self._http_json(next_url, headers=headers)
+                rows = payload.get("data")
+                if isinstance(rows, list):
+                    for item in rows:
+                        if not isinstance(item, dict):
+                            continue
+                        media_type = str(item.get("media_type") or "").upper()
+                        if media_type in ("REELS", "VIDEO"):
+                            timestamp_raw = str(item.get("timestamp") or "").strip()
+                            if timestamp_raw:
+                                try:
+                                    published_at = datetime.fromisoformat(timestamp_raw.replace("Z", "+00:00")).astimezone(AR_TZ)
+                                    if published_at < SYNC_REELS_SINCE:
+                                        stop_pagination = True
+                                        break
+                                except Exception:
+                                    pass
+                        media_items.append(item)
+                paging = payload.get("paging") if isinstance(payload, dict) else None
+                next_from_api = paging.get("next") if isinstance(paging, dict) else None
+                next_url = str(next_from_api).strip() if next_from_api else ""
+                pages_fetched += 1
+                discovered_reels = sum(
+                    1
+                    for media in media_items
+                    if isinstance(media, dict) and str(media.get("media_type") or "").upper() in ("REELS", "VIDEO")
+                )
+                self._set_sync_state(user_id, total=discovered_reels, processed=0, status="running", phase="collecting", discovered=discovered_reels)
 
-            payload = self._http_json(media_url, headers=headers)
-            rows = payload.get("data")
-            media_items = rows if isinstance(rows, list) else []
-            reels = [
-                item
-                for item in media_items
-                if isinstance(item, dict) and str(item.get("media_type") or "").upper() in ("REELS", "VIDEO")
-            ]
-
+            reels = [item for item in media_items if isinstance(item, dict) and str(item.get("media_type") or "").upper() in ("REELS", "VIDEO")]
             synced = 0
             created = 0
             errors = 0
+            processed = 0
+            total = len(reels)
+            self._set_sync_state(user_id, total=total, processed=0, status="running", phase="processing", discovered=total)
 
             for item in reels:
                 try:
                     media_id = str(item.get("id") or "").strip()
                     if not media_id:
                         continue
-                    caption = str(item.get("caption") or "")
-                    title = caption[:100] if caption else None
+                    caption = str(item.get("caption") or "").strip()
+                    title = caption[:100]
                     permalink = str(item.get("permalink") or "").strip() or None
                     thumbnail_url = str(item.get("thumbnail_url") or "").strip() or None
                     likes = int(item.get("like_count") or 0)
                     comments = int(item.get("comments_count") or 0)
                     timestamp = str(item.get("timestamp") or "").strip()
-
                     published_at = datetime.now(AR_TZ)
                     if timestamp:
                         try:
                             published_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(AR_TZ)
                         except Exception:
                             pass
+                    if published_at < SYNC_REELS_SINCE:
+                        continue
 
-                    insights = {
-                        "ig_reels_avg_watch_time": 0,
-                        "reach": 0,
-                        "saved": 0,
-                        "shares": 0,
-                        "likes": 0,
-                        "comments": 0,
-                        "total_interactions": 0,
-                    }
+                    insights = {"ig_reels_avg_watch_time": 0, "reach": 0, "saved": 0, "shares": 0, "likes": 0, "comments": 0, "total_interactions": 0}
                     plays_result = 0
                     for plays_metric in ["video_views", "views"]:
                         plays_url = (
@@ -243,34 +360,18 @@ class ReelsServices:
                             plays_payload = self._http_json(plays_url, headers=headers)
                             plays_data = plays_payload.get("data")
                             metrics_rows = plays_data if isinstance(plays_data, list) else []
-                            found_value = 0
                             for m in metrics_rows:
                                 if not isinstance(m, dict):
                                     continue
                                 values = m.get("values")
-                                if isinstance(values, list) and values:
-                                    first = values[0]
-                                    if isinstance(first, dict):
-                                        found_value = int(first.get("value") or 0)
-                                        break
-                            plays_result = found_value
-                            print(f"[reels] plays metric result: {{'metric': '{plays_metric}', 'data': {plays_data}, 'value': {plays_result}}}")
+                                if isinstance(values, list) and values and isinstance(values[0], dict):
+                                    plays_result = int(values[0].get("value") or 0)
+                                    break
                             break
                         except Exception:
                             continue
-                    if plays_result == 0:
-                        print(f"[reels] plays metric result: {{'metric': 'none', 'data': None, 'value': 0}}")
 
-                    insight_metrics = [
-                        "ig_reels_avg_watch_time",
-                        "reach",
-                        "saved",
-                        "shares",
-                        "likes",
-                        "comments",
-                        "total_interactions",
-                    ]
-                    for metric_name in insight_metrics:
+                    for metric_name in ["ig_reels_avg_watch_time", "reach", "saved", "shares", "likes", "comments", "total_interactions"]:
                         insights_url = (
                             f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
                             f"?metric={urllib.parse.quote(metric_name)}"
@@ -278,92 +379,75 @@ class ReelsServices:
                         )
                         try:
                             insights_payload = self._http_json(insights_url, headers=headers)
-                            insights_data = insights_payload.get("data")
-                            print(f"[reels] insights raw para {media_id}: {insights_data}")
-                            metrics_rows = insights_data if isinstance(insights_data, list) else []
+                            metrics_rows = insights_payload.get("data") if isinstance(insights_payload.get("data"), list) else []
                             for m in metrics_rows:
                                 if not isinstance(m, dict):
                                     continue
                                 name = str(m.get("name") or "").strip()
                                 values = m.get("values")
                                 value = 0
-                                if isinstance(values, list) and values:
-                                    first = values[0]
-                                    if isinstance(first, dict):
-                                        value = int(first.get("value") or 0)
+                                if isinstance(values, list) and values and isinstance(values[0], dict):
+                                    value = int(values[0].get("value") or 0)
                                 if name in insights:
                                     insights[name] = value
-                        except Exception as e:
-                            import traceback
-                            print(f"[reels] insights FAILED para {media_id} metric={metric_name}: {e}")
-                            print(traceback.format_exc())
+                        except Exception:
+                            continue
 
-                    metrics = {
-                        "plays": int(plays_result),
-                        "avg_watch_time": int(insights.get("ig_reels_avg_watch_time", 0)),
-                        "likes": likes,
-                        "comments": comments,
-                        "saved": int(insights.get("saved", 0)),
-                        "shares": int(insights.get("shares", 0)),
-                        "reach": int(insights.get("reach", 0)),
-                        "thumbnail": thumbnail_url or "",
-                    }
-
-                    now = datetime.now(AR_TZ)
-                    external_id = media_id
-                    result = db.execute(
-                        """
-                        SELECT id FROM reelcontent
-                        WHERE user_id = $user_id AND external_id = $external_id
-                        """
+                    metrics_json = json.dumps(
+                        {
+                            "plays": int(plays_result),
+                            "avg_watch_time": int(insights.get("ig_reels_avg_watch_time", 0)),
+                            "likes": likes,
+                            "comments": comments,
+                            "comments_count": comments,
+                            "saved": int(insights.get("saved", 0)),
+                            "shares": int(insights.get("shares", 0)),
+                            "reach": int(insights.get("reach", 0)),
+                            "thumbnail": thumbnail_url or "",
+                        }
                     )
-                    existing = result.fetchone()
-                    metrics_json = json.dumps(metrics)
-
-                    if existing:
-                        reel_id = existing[0]
-                        db.execute(
-                            """
-                            UPDATE reelcontent
-                            SET title = $title,
-                                metrics = CAST($metrics_json AS jsonb),
-                                published_at = $published_at,
-                                url = $permalink,
-                                notes = $caption,
-                                updated_at = $now
-                            WHERE id = $reel_id
-                            """
-                        )
-                    else:
-                        reel_id = str(uuid.uuid4())
-                        db.execute(
-                            """
-                            INSERT INTO reelcontent
-                            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, published_at, url, notes, updated_at)
-                            VALUES (
-                                $reel_id,
-                                $user_id,
-                                $external_id,
-                                $title,
-                                'reel',
-                                'instagram',
-                                CAST($metrics_json AS jsonb),
-                                '{}'::jsonb,
-                                0,
-                                0,
-                                $published_at,
-                                $permalink,
-                                $caption,
-                                $now
-                            )
-                            """
-                        )
+                    created_this_reel = self._upsert_reel_content(
+                        user_id=user_id,
+                        external_id=media_id,
+                        title=title,
+                        metrics_json=metrics_json,
+                        published_at=published_at,
+                        permalink=permalink,
+                        caption=caption,
+                    )
+                    if created_this_reel:
                         created += 1
-
                     synced += 1
                 except Exception as e:
+                    try:
+                        rollback()
+                    except Exception:
+                        pass
                     errors += 1
                     print(f"[reels sync] ERROR en media {item.get('id')}: {e}")
+                finally:
+                    processed += 1
+                    self._set_sync_state(user_id, total=total, processed=processed, status="running", phase="processing", discovered=total)
 
-            _last_sync_times[user_id] = datetime.now(AR_TZ)
+            self._set_sync_state(user_id, total=total, processed=processed, status="done", phase="done", discovered=total)
             return {"synced": synced, "created": created, "errors": errors}
+        except Exception:
+            current = _sync_states.get(user_id, {"total": 0, "processed": 0, "discovered": 0})
+            self._set_sync_state(
+                user_id,
+                total=int(current.get("total", 0)),
+                processed=int(current.get("processed", 0)),
+                status="error",
+                phase="error",
+                discovered=int(current.get("discovered", 0)),
+            )
+            raise
+
+    async def sync_instagram(self, user_id: str) -> dict[str, int]:
+        acquired = _sync_lock.acquire(blocking=False)
+        if not acquired:
+            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+        try:
+            return await asyncio.to_thread(self._sync_instagram_blocking, user_id)
+        finally:
+            _sync_lock.release()

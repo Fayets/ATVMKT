@@ -16,6 +16,10 @@ async def manychat_webhook(request: Request) -> dict[str, Any]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid request body") from exc
 
+    print("=== WEBHOOK MANYCHAT RAW PAYLOAD ===")
+    print(body)
+    print("=====================================")
+
     payload = body if isinstance(body, dict) else {}
     query_token = str(request.query_params.get("token") or "").strip()
     header_token = str(request.headers.get("X-Webhook-Token") or "").strip()
