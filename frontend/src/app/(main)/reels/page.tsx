@@ -514,7 +514,7 @@ function ReelCard({
             </div>
           </div>
 
-          <div className="grid grid-cols-5 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cash</div>
               <input
@@ -526,12 +526,7 @@ function ReelCard({
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
-              <input
-                type="number"
-                value={reel.chats || 0}
-                onChange={(e) => onUpdate(reel.id, 'chats', Number(e.target.value) || 0)}
-                className="w-full bg-transparent text-center font-mono-num text-[16px] font-bold text-[var(--text)] outline-none"
-              />
+              <div className="font-mono-num text-[16px] font-bold text-[var(--text)]">{formatInt(chatsCount)}</div>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">CPC</div>
@@ -579,10 +574,6 @@ function ReelCard({
             <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Reach</div>
               <div className="font-mono-num text-[14px] font-bold">{formatInt(reach)}</div>
-            </div>
-            <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
-              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Chats MC</div>
-              <div className="font-mono-num text-[14px] font-bold">{formatInt(chatsCount)}</div>
             </div>
           </div>
 

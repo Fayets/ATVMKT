@@ -384,6 +384,12 @@ class BioService:
             manychat_subscribed_at = _to_str((manychat_sub or {}).get("subscribed_at"))
             fecha_bot = _to_str(airtable.get("fecha"))
             created_time = _to_str(rec.get("createdTime"))
+            lead_keyword = (
+                _to_str(airtable.get("keyword"))
+                or _to_str((manychat_sub or {}).get("current_cta_tag"))
+            )
+            if _norm(lead_keyword or "") != _norm("info"):
+                continue
             leads.append(
                 BioLeadResponse(
                     id=_to_str(rec.get("id")) or handle_plain,
@@ -391,10 +397,7 @@ class BioService:
                     nombre=_to_str(_pick_field(fields, ["Nombre", "Name"])) or _to_str((manychat_sub or {}).get("nombre")),
                     avatar_url=_to_str((manychat_sub or {}).get("avatar_url")),
                     subscribed_at=fecha_bot or created_time or manychat_subscribed_at,
-                    keyword=(
-                        _to_str(airtable.get("keyword"))
-                        or _to_str((manychat_sub or {}).get("current_cta_tag"))
-                    ),
+                    keyword=lead_keyword,
                     via=_to_str(airtable.get("via")),
                     airtable_found=bool(airtable.get("airtable_record_id")),
                     airtable_record_id=_to_str(airtable.get("airtable_record_id")),

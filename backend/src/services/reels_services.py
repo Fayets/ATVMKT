@@ -2,6 +2,7 @@ import asyncio
 import json
 import ssl
 import threading
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,7 @@ from pony.orm import ObjectNotFound, db_session, rollback
 
 from src.models import ApiConnection, ReelContent, db
 from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse
+from src.services.airtable_service import AirtableService
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 _sync_lock = threading.Lock()
@@ -24,6 +26,10 @@ SYNC_REELS_SINCE = datetime(2024, 12, 1, tzinfo=AR_TZ)
 
 
 class ReelsServices:
+    def _normalize_keyword(self, value: str | None) -> str:
+        raw = str(value or "").strip().lower()
+        return re.sub(r"\s+", " ", raw)
+
     def _is_user_sync_running(self, user_id: str) -> bool:
         task = _sync_tasks.get(user_id)
         return task is not None and not task.done()
@@ -73,6 +79,8 @@ class ReelsServices:
             external_id=row.external_id,
             keyword=row.keyword,
             chats_count=row.chats_count,
+            cash_total=0,
+            cpc=0,
         )
 
     @db_session
@@ -157,16 +165,27 @@ class ReelsServices:
             start = (page - 1) * page_size
             end = start + page_size
             page_rows = rows[start:end]
-            return ReelsListResponse(
-                reels=[self._to_response(r) for r in page_rows],
-                total=total,
-                page=page,
-                page_size=page_size,
-                total_pages=total_pages,
-                available_months=available_months,
-                total_cash=total_cash,
-                total_chats=total_chats,
-            )
+            reels_out = [self._to_response(r) for r in page_rows]
+
+        airtable = AirtableService()
+        for reel in reels_out:
+            normalized = self._normalize_keyword(reel.keyword)
+            if normalized:
+                metrics = airtable.get_reel_metrics(user_id, normalized)
+                reel.chats_count = int(metrics.get("chats_count", 0))
+                reel.cash_total = float(metrics.get("cash_total", 0) or 0)
+                reel.cpc = float(metrics.get("cpc", 0) or 0)
+
+        return ReelsListResponse(
+            reels=reels_out,
+            total=total,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            available_months=available_months,
+            total_cash=total_cash,
+            total_chats=total_chats,
+        )
 
     def patch_reel(self, user_id: str, reel_id: str, body: ReelPatchRequest) -> ReelResponse:
         if body.cash is None and body.chats is None:

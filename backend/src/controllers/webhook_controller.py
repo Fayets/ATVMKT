@@ -4,11 +4,10 @@ from fastapi import APIRouter, HTTPException, Request
 import traceback
 
 from src.services.bio_service import BioService
-from src.services.reels_services import ReelsServices
+from src.services.airtable_service import AirtableService
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
 service = BioService()
-reels_service = ReelsServices()
 
 
 @router.post("/manychat")
@@ -38,8 +37,9 @@ async def manychat_webhook(request: Request) -> dict[str, Any]:
         keyword = str(payload.get("keyword") or "").strip()
         if not keyword and event == "respondio_auto":
             keyword = "respondio_auto"
-        if user_id and keyword:
-            reels_service.increment_chats_count_by_keyword(user_id, keyword)
+        contact_ig_username = str(payload.get("contact_ig_username") or "").strip()
+        if user_id and contact_ig_username and keyword:
+            AirtableService().upsert_lead_keyword(user_id, contact_ig_username, keyword)
         return result
     except HTTPException as e:
         raise e
