@@ -456,14 +456,14 @@ function ReelCard({
   const [editingCash, setEditingCash] = useState(false)
   const [editingChats, setEditingChats] = useState(false)
   const [cashDraft, setCashDraft] = useState(String(Number(reel.cash || 0)))
-  const [chatsDraft, setChatsDraft] = useState(String(Math.trunc(Number(reel.chats || 0))))
+  const [chatsDraft, setChatsDraft] = useState(String(Math.trunc(Number(reel.manual_chats || 0))))
 
   useEffect(() => {
     setCashDraft(String(Number(reel.cash || 0)))
-    setChatsDraft(String(Math.trunc(Number(reel.chats || 0))))
+    setChatsDraft(String(Math.trunc(Number(reel.manual_chats || 0))))
     setEditingCash(false)
     setEditingChats(false)
-  }, [reel.cash, reel.chats, reel.id])
+  }, [reel.cash, reel.chats, reel.manual_chats, reel.id])
 
   return (
     <div className={`glass-card overflow-hidden transition-all ${isExpanded ? 'col-span-4 grid grid-cols-[300px_1fr]' : 'cursor-pointer'}`} onClick={!isExpanded ? onToggle : undefined}>

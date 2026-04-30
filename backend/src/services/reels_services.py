@@ -176,8 +176,8 @@ class ReelsServices:
             normalized = self._normalize_keyword(reel.keyword)
             if not normalized:
                 reel.cash = float(reel.manual_cash if reel.manual_cash is not None else 0)
+                reel.chats_count = 0
                 reel.chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
-                reel.chats_count = reel.chats
                 reel.cash_total = reel.cash
                 reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
                 total_cash += float(reel.cash or 0)
@@ -189,7 +189,8 @@ class ReelsServices:
             airtable_cash = float(metrics.get("cash_total", 0) or 0)
             reel.chats_count = airtable_chats
             reel.cash_total = airtable_cash
-            reel.chats = int(reel.manual_chats if reel.manual_chats is not None else airtable_chats)
+            manual_chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
+            reel.chats = manual_chats + airtable_chats
             reel.cash = float(reel.manual_cash if reel.manual_cash is not None else airtable_cash)
             reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
             total_cash += float(reel.cash or 0)
