@@ -1,7 +1,7 @@
 from urllib.parse import parse_qs, unquote, urlparse
 
 from decouple import config
-from pony.orm import Database
+from pony.orm import Database, db_session
 
 db = Database()
 
@@ -74,12 +74,13 @@ def init_db() -> None:
     db.generate_mapping(create_tables=True, check_tables=False)
 
     # Idempotent schema migration for reels keyword linkage.
-    db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS keyword text")
-    db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS chats_count integer NOT NULL DEFAULT 0")
-    db.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_reelcontent_user_keyword_nonempty
-        ON reelcontent (user_id, lower(btrim(keyword)))
-        WHERE keyword IS NOT NULL AND btrim(keyword) <> ''
-        """
-    )
+    with db_session:
+        db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS keyword text")
+        db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS chats_count integer DEFAULT 0")
+        db.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_reelcontent_user_keyword_nonempty
+            ON reelcontent (user_id, lower(btrim(keyword)))
+            WHERE keyword IS NOT NULL AND btrim(keyword) <> ''
+            """
+        )
