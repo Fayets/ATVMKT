@@ -69,4 +69,17 @@ def init_db() -> None:
     # Importa entidades para que Pony las registre antes del mapping.
     import src.models  # noqa: F401
 
-    db.generate_mapping(create_tables=True)
+    # Avoid startup crash when model changes add new columns that are not
+    # present yet; we run idempotent ALTERs right after.
+    db.generate_mapping(create_tables=True, check_tables=False)
+
+    # Idempotent schema migration for reels keyword linkage.
+    db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS keyword text")
+    db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS chats_count integer NOT NULL DEFAULT 0")
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_reelcontent_user_keyword_nonempty
+        ON reelcontent (user_id, lower(btrim(keyword)))
+        WHERE keyword IS NOT NULL AND btrim(keyword) <> ''
+        """
+    )

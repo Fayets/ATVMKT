@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from pony.orm import ObjectNotFound, db_session, rollback
 
 from src.models import ApiConnection, ReelContent, db
-from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse
+from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 _sync_lock = threading.Lock()
@@ -71,6 +71,8 @@ class ReelsServices:
             url=row.url,
             notes=row.notes,
             external_id=row.external_id,
+            keyword=row.keyword,
+            chats_count=row.chats_count,
         )
 
     @db_session
@@ -113,7 +115,7 @@ class ReelsServices:
         db.execute(
             """
             INSERT INTO reelcontent
-            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, published_at, url, notes, updated_at)
+            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, chats_count, keyword, published_at, url, notes, updated_at)
             VALUES (
                 $reel_id,
                 $user_id,
@@ -125,6 +127,8 @@ class ReelsServices:
                 '{}'::jsonb,
                 0,
                 0,
+                0,
+                NULL,
                 $published_at,
                 $permalink,
                 $caption,
@@ -179,6 +183,52 @@ class ReelsServices:
                 row.chats = int(body.chats)
             row.updated_at = now
             return self._to_response(row)
+
+    def patch_reel_keyword(self, user_id: str, reel_id: str, body: ReelKeywordPatchRequest) -> ReelResponse:
+        normalized_keyword = (body.keyword or "").strip()
+        now = datetime.now(timezone.utc)
+        with db_session:
+            try:
+                row = ReelContent.get(id=reel_id, user_id=user_id)
+            except ObjectNotFound as e:
+                raise HTTPException(status_code=404, detail="Reel no encontrado.") from e
+
+            if normalized_keyword:
+                duplicated = next(
+                    (
+                        r
+                        for r in list(ReelContent.select())
+                        if r.user_id == user_id
+                        and r.id != reel_id
+                        and (r.keyword or "").strip().lower() == normalized_keyword.lower()
+                    ),
+                    None,
+                )
+                if duplicated is not None:
+                    raise HTTPException(status_code=409, detail="Ya existe otro reel con ese keyword.")
+
+            row.keyword = normalized_keyword or None
+            row.updated_at = now
+            return self._to_response(row)
+
+    def increment_chats_count_by_keyword(self, user_id: str, keyword: str) -> bool:
+        normalized_keyword = (keyword or "").strip().lower()
+        if not normalized_keyword:
+            return False
+        with db_session:
+            row = next(
+                (
+                    r
+                    for r in list(ReelContent.select())
+                    if r.user_id == user_id and (r.keyword or "").strip().lower() == normalized_keyword
+                ),
+                None,
+            )
+            if row is None:
+                return False
+            row.chats_count = int(row.chats_count or 0) + 1
+            row.updated_at = datetime.now(timezone.utc)
+            return True
 
     def _resolve_instagram_conn(self, user_id: str) -> tuple[str, str]:
         with db_session:

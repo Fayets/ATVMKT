@@ -18,6 +18,8 @@ type Reel = {
   url: string | null
   notes: string | null
   external_id: string | null
+  keyword: string | null
+  chats_count: number
 }
 
 type ReelsListResponse = {
@@ -264,6 +266,23 @@ export default function ReelsPage() {
     }
   }
 
+  const updateKeyword = async (id: string, keyword: string) => {
+    if (!ready) return
+    const cleanKeyword = keyword.trim()
+    try {
+      const res = await apiFetch(`/reels/${encodeURIComponent(id)}/keyword`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ keyword: cleanKeyword || null }),
+      })
+      const updated = await parseJson<Reel>(res)
+      setReels((rows) => rows.map((r) => (r.id === id ? { ...r, keyword: updated.keyword } : r)))
+      toast('Keyword guardado')
+    } catch (e) {
+      toast(`No se pudo guardar keyword: ${(e as Error).message}`)
+    }
+  }
+
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   return (
@@ -363,6 +382,7 @@ export default function ReelsPage() {
               isExpanded={expanded === reel.id}
               onToggle={() => setExpanded(expanded === reel.id ? null : reel.id)}
               onUpdate={updateField}
+              onKeywordUpdate={updateKeyword}
             />
           ))}
         </div>
@@ -397,17 +417,20 @@ function ReelCard({
   isExpanded,
   onToggle,
   onUpdate,
+  onKeywordUpdate,
 }: {
   reel: Reel
   masterLists: { dolores: string[]; angulos: string[]; ctas: string[] }
   isExpanded: boolean
   onToggle: () => void
   onUpdate: (id: string, field: 'cash' | 'chats', value: number) => void
+  onKeywordUpdate: (id: string, keyword: string) => void
 }) {
   const [imgErr, setImgErr] = useState(false)
   const [dolor, setDolor] = useState(reel.classification?.dolor || '')
   const [angulos, setAngulos] = useState((reel.classification?.angulos || []).join(', '))
   const [cta, setCta] = useState(reel.classification?.cta || '')
+  const [keyword, setKeyword] = useState(reel.keyword || '')
   const rawThumb = String(reel.metrics?.thumbnail || '')
 
   useEffect(() => {
@@ -415,7 +438,8 @@ function ReelCard({
     setDolor(reel.classification?.dolor || '')
     setAngulos((reel.classification?.angulos || []).join(', '))
     setCta(reel.classification?.cta || '')
-  }, [rawThumb, reel.classification?.dolor, reel.classification?.angulos, reel.classification?.cta])
+    setKeyword(reel.keyword || '')
+  }, [rawThumb, reel.classification?.dolor, reel.classification?.angulos, reel.classification?.cta, reel.keyword])
 
   const thumb = rawThumb && !imgErr ? `/api/proxy-image?url=${encodeURIComponent(rawThumb)}` : ''
   const plays = Number(reel.metrics?.plays) || 0
@@ -424,6 +448,7 @@ function ReelCard({
   const shares = Number(reel.metrics?.shares) || 0
   const reach = Number(reel.metrics?.reach) || 0
   const cpc = reel.chats > 0 ? reel.cash / reel.chats : 0
+  const chatsCount = Number(reel.chats_count || 0)
   const title = reel.title || reel.notes?.substring(0, 60) || 'Sin titulo'
 
   return (
@@ -489,7 +514,7 @@ function ReelCard({
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cash</div>
               <input
@@ -518,6 +543,26 @@ function ReelCard({
             </div>
           </div>
 
+          <div className="rounded-lg bg-[var(--bg4)] p-3">
+            <div className="mb-2 text-[8px] uppercase tracking-wider text-[var(--text3)]">Keyword ManyChat</div>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                className="w-full rounded-md border border-[var(--border2)] bg-[var(--bg3)] px-2 py-1.5 text-[12px] outline-none"
+                placeholder="ej: reel_agenda"
+              />
+              <button
+                type="button"
+                onClick={() => onKeywordUpdate(reel.id, keyword)}
+                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-[10px] font-semibold uppercase text-white"
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-4 gap-3">
             <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Likes</div>
@@ -534,6 +579,10 @@ function ReelCard({
             <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Reach</div>
               <div className="font-mono-num text-[14px] font-bold">{formatInt(reach)}</div>
+            </div>
+            <div className="rounded-lg bg-[var(--bg4)] p-2.5 text-center">
+              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Chats MC</div>
+              <div className="font-mono-num text-[14px] font-bold">{formatInt(chatsCount)}</div>
             </div>
           </div>
 

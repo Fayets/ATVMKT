@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from src.schemas import ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsMetricsOut
+from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsMetricsOut
 from src.services.reels_services import ReelsServices
 
 router = APIRouter(prefix="/api/reels", tags=["reels"], redirect_slashes=False)
@@ -47,6 +47,20 @@ def patch_reel(
         raise e
     except Exception:
         raise HTTPException(status_code=500, detail="Error inesperado al actualizar el reel.")
+
+
+@router.patch("/{reel_id}/keyword", response_model=ReelResponse)
+def patch_reel_keyword(
+    reel_id: str,
+    body: ReelKeywordPatchRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> ReelResponse:
+    try:
+        return service.patch_reel_keyword(user_id, reel_id, body)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al actualizar el keyword del reel.")
 
 
 @router.post("/sync")

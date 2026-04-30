@@ -85,6 +85,8 @@ class ReelResponse(BaseModel):
     url: str | None = None
     notes: str | None = None
     external_id: str
+    keyword: str | None = None
+    chats_count: int = 0
 
 
 class ReelsListResponse(BaseModel):
@@ -101,6 +103,10 @@ class ReelsListResponse(BaseModel):
 class ReelPatchRequest(BaseModel):
     cash: float | None = None
     chats: int | None = None
+
+
+class ReelKeywordPatchRequest(BaseModel):
+    keyword: str | None = None
 
 
 class ReelsSyncRequest(BaseModel):

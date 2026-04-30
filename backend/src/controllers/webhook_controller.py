@@ -4,9 +4,11 @@ from fastapi import APIRouter, HTTPException, Request
 import traceback
 
 from src.services.bio_service import BioService
+from src.services.reels_services import ReelsServices
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
 service = BioService()
+reels_service = ReelsServices()
 
 
 @router.post("/manychat")
@@ -30,7 +32,15 @@ async def manychat_webhook(request: Request) -> dict[str, Any]:
         payload["webhook_token"] = resolved_token
 
     try:
-        return service.process_manychat_webhook(payload)
+        result = service.process_manychat_webhook(payload)
+        user_id = str(result.get("user_id") or "").strip()
+        event = str(payload.get("event") or "").strip().lower()
+        keyword = str(payload.get("keyword") or "").strip()
+        if not keyword and event == "respondio_auto":
+            keyword = "respondio_auto"
+        if user_id and keyword:
+            reels_service.increment_chats_count_by_keyword(user_id, keyword)
+        return result
     except HTTPException as e:
         raise e
     except Exception:
