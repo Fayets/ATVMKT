@@ -77,6 +77,8 @@ def init_db() -> None:
     with db_session:
         db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS keyword text")
         db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS chats_count integer DEFAULT 0")
+        db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS manual_cash double precision")
+        db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS manual_chats integer")
         db.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_reelcontent_user_keyword_nonempty

@@ -59,6 +59,8 @@ class ReelContent(db.Entity):
     classification = Required(Json, default=lambda: {})
     cash = Required(float, default=0)
     chats = Required(int, default=0)
+    manual_cash = Optional(float)
+    manual_chats = Optional(int)
     chats_count = Required(int, default=0)
     keyword = Optional(str)
     published_at = Optional(datetime)

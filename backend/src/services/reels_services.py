@@ -79,6 +79,8 @@ class ReelsServices:
             external_id=row.external_id,
             keyword=row.keyword,
             chats_count=row.chats_count,
+            manual_cash=row.manual_cash,
+            manual_chats=row.manual_chats,
             cash_total=0,
             cpc=0,
         )
@@ -123,7 +125,7 @@ class ReelsServices:
         db.execute(
             """
             INSERT INTO reelcontent
-            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, chats_count, keyword, published_at, url, notes, updated_at)
+            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, manual_cash, manual_chats, chats_count, keyword, published_at, url, notes, updated_at)
             VALUES (
                 $reel_id,
                 $user_id,
@@ -135,6 +137,8 @@ class ReelsServices:
                 '{}'::jsonb,
                 0,
                 0,
+                NULL,
+                NULL,
                 0,
                 NULL,
                 $published_at,
@@ -157,8 +161,8 @@ class ReelsServices:
                 rows = [r for r in rows if r.published_at and r.published_at.strftime("%Y-%m") == month]
             rows.sort(key=lambda r: r.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
             total = len(rows)
-            total_cash = sum(float(r.cash or 0) for r in rows)
-            total_chats = sum(int(r.chats or 0) for r in rows)
+            total_cash = 0.0
+            total_chats = 0
             page_size = max(1, min(page_size, 50))
             page = max(1, page)
             total_pages = (total + page_size - 1) // page_size if total else 0
@@ -170,11 +174,26 @@ class ReelsServices:
         airtable = AirtableService()
         for reel in reels_out:
             normalized = self._normalize_keyword(reel.keyword)
-            if normalized:
-                metrics = airtable.get_reel_metrics(user_id, normalized)
-                reel.chats_count = int(metrics.get("chats_count", 0))
-                reel.cash_total = float(metrics.get("cash_total", 0) or 0)
-                reel.cpc = float(metrics.get("cpc", 0) or 0)
+            if not normalized:
+                reel.cash = float(reel.manual_cash if reel.manual_cash is not None else 0)
+                reel.chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
+                reel.chats_count = reel.chats
+                reel.cash_total = reel.cash
+                reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
+                total_cash += float(reel.cash or 0)
+                total_chats += int(reel.chats or 0)
+                continue
+
+            metrics = airtable.get_reel_metrics(user_id, normalized)
+            airtable_chats = int(metrics.get("chats_count", 0))
+            airtable_cash = float(metrics.get("cash_total", 0) or 0)
+            reel.chats_count = airtable_chats
+            reel.cash_total = airtable_cash
+            reel.chats = int(reel.manual_chats if reel.manual_chats is not None else airtable_chats)
+            reel.cash = float(reel.manual_cash if reel.manual_cash is not None else airtable_cash)
+            reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
+            total_cash += float(reel.cash or 0)
+            total_chats += int(reel.chats or 0)
 
         return ReelsListResponse(
             reels=reels_out,
@@ -197,9 +216,9 @@ class ReelsServices:
             except ObjectNotFound as e:
                 raise HTTPException(status_code=404, detail="Reel no encontrado.") from e
             if body.cash is not None:
-                row.cash = float(body.cash)
+                row.manual_cash = float(body.cash)
             if body.chats is not None:
-                row.chats = int(body.chats)
+                row.manual_chats = int(body.chats)
             row.updated_at = now
             return self._to_response(row)
 

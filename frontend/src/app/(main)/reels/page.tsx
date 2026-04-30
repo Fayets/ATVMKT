@@ -20,6 +20,10 @@ type Reel = {
   external_id: string | null
   keyword: string | null
   chats_count: number
+  manual_cash: number | null
+  manual_chats: number | null
+  cash_total: number
+  cpc: number
 }
 
 type ReelsListResponse = {
@@ -448,8 +452,18 @@ function ReelCard({
   const shares = Number(reel.metrics?.shares) || 0
   const reach = Number(reel.metrics?.reach) || 0
   const cpc = reel.chats > 0 ? reel.cash / reel.chats : 0
-  const chatsCount = Number(reel.chats_count || 0)
   const title = reel.title || reel.notes?.substring(0, 60) || 'Sin titulo'
+  const [editingCash, setEditingCash] = useState(false)
+  const [editingChats, setEditingChats] = useState(false)
+  const [cashDraft, setCashDraft] = useState(String(Number(reel.cash || 0)))
+  const [chatsDraft, setChatsDraft] = useState(String(Math.trunc(Number(reel.chats || 0))))
+
+  useEffect(() => {
+    setCashDraft(String(Number(reel.cash || 0)))
+    setChatsDraft(String(Math.trunc(Number(reel.chats || 0))))
+    setEditingCash(false)
+    setEditingChats(false)
+  }, [reel.cash, reel.chats, reel.id])
 
   return (
     <div className={`glass-card overflow-hidden transition-all ${isExpanded ? 'col-span-4 grid grid-cols-[300px_1fr]' : 'cursor-pointer'}`} onClick={!isExpanded ? onToggle : undefined}>
@@ -515,18 +529,79 @@ function ReelCard({
           </div>
 
           <div className="grid grid-cols-4 gap-3">
-            <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+            <div className="group relative rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cash</div>
-              <input
-                type="number"
-                value={reel.cash || 0}
-                onChange={(e) => onUpdate(reel.id, 'cash', Number(e.target.value) || 0)}
-                className="w-full bg-transparent text-center font-mono-num text-[16px] font-bold text-[var(--green)] outline-none"
-              />
+              {editingCash ? (
+                <div className="mt-1 flex items-center justify-center gap-1">
+                  <input
+                    type="number"
+                    value={cashDraft}
+                    onChange={(e) => setCashDraft(e.target.value)}
+                    className="w-24 rounded bg-[var(--bg3)] px-2 py-1 text-center font-mono-num text-[14px] font-bold text-[var(--green)] outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdate(reel.id, 'cash', Number(cashDraft) || 0)
+                      setEditingCash(false)
+                    }}
+                    className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] font-semibold text-white"
+                  >
+                    OK
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center justify-center">
+                  <div className="font-mono-num text-[16px] font-bold text-[var(--green)]">{formatCash(reel.cash)}</div>
+                </div>
+              )}
+              {!editingCash && (
+                <button
+                  type="button"
+                  onClick={() => setEditingCash(true)}
+                  className="absolute bottom-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 text-[10px] text-[var(--text3)] hover:text-[var(--text)]"
+                  title="Editar cash"
+                >
+                  ✎ Editar
+                </button>
+              )}
             </div>
-            <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+            <div className="group relative rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
-              <div className="font-mono-num text-[16px] font-bold text-[var(--text)]">{formatInt(chatsCount)}</div>
+              {editingChats ? (
+                <div className="mt-1 flex items-center justify-center gap-1">
+                  <input
+                    type="number"
+                    value={chatsDraft}
+                    onChange={(e) => setChatsDraft(e.target.value)}
+                    className="w-24 rounded bg-[var(--bg3)] px-2 py-1 text-center font-mono-num text-[14px] font-bold text-[var(--text)] outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdate(reel.id, 'chats', Math.trunc(Number(chatsDraft)) || 0)
+                      setEditingChats(false)
+                    }}
+                    className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] font-semibold text-white"
+                  >
+                    OK
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center justify-center">
+                  <div className="font-mono-num text-[16px] font-bold text-[var(--text)]">{formatInt(reel.chats)}</div>
+                </div>
+              )}
+              {!editingChats && (
+                <button
+                  type="button"
+                  onClick={() => setEditingChats(true)}
+                  className="absolute bottom-2 right-2 opacity-0 transition-opacity group-hover:opacity-100 text-[10px] text-[var(--text3)] hover:text-[var(--text)]"
+                  title="Editar chats"
+                >
+                  ✎ Editar
+                </button>
+              )}
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">CPC</div>

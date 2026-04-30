@@ -87,6 +87,8 @@ class ReelResponse(BaseModel):
     external_id: str
     keyword: str | None = None
     chats_count: int = 0
+    manual_cash: float | None = None
+    manual_chats: int | None = None
     cash_total: float = 0
     cpc: float = 0
 
