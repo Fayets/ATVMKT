@@ -78,6 +78,7 @@ class ReelsServices:
             notes=row.notes,
             external_id=row.external_id,
             keyword=row.keyword,
+            content_url=row.content_url,
             chats_count=row.chats_count,
             manual_cash=row.manual_cash,
             manual_chats=row.manual_chats,
@@ -113,6 +114,7 @@ class ReelsServices:
                 SET title = $title,
                     metrics = CAST($metrics_json AS jsonb),
                     published_at = $published_at,
+                    content_url = $permalink,
                     url = $permalink,
                     notes = $caption,
                     updated_at = $now
@@ -125,7 +127,7 @@ class ReelsServices:
         db.execute(
             """
             INSERT INTO reelcontent
-            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, manual_cash, manual_chats, chats_count, keyword, published_at, url, notes, updated_at)
+            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, manual_cash, manual_chats, chats_count, keyword, content_url, published_at, url, notes, updated_at)
             VALUES (
                 $reel_id,
                 $user_id,
@@ -141,6 +143,7 @@ class ReelsServices:
                 NULL,
                 0,
                 NULL,
+                $permalink,
                 $published_at,
                 $permalink,
                 $caption,
@@ -184,7 +187,7 @@ class ReelsServices:
                 total_chats += int(reel.chats or 0)
                 continue
 
-            metrics = airtable.get_reel_metrics(user_id, normalized)
+            metrics = airtable.get_reel_metrics(user_id, normalized, reel.content_url)
             airtable_chats = int(metrics.get("chats_count", 0))
             airtable_cash = float(metrics.get("cash_total", 0) or 0)
             reel.chats_count = airtable_chats

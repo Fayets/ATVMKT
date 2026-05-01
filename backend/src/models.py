@@ -63,6 +63,7 @@ class ReelContent(db.Entity):
     manual_chats = Optional(int)
     chats_count = Required(int, default=0)
     keyword = Optional(str)
+    content_url = Optional(str)
     published_at = Optional(datetime)
     url = Optional(str)
     notes = Optional(str)

@@ -107,9 +107,10 @@ class AirtableService:
                 break
         return out
 
-    def get_reel_metrics(self, user_id: str, keyword: str) -> dict[str, float | int]:
+    def get_reel_metrics(self, user_id: str, keyword: str, content_url: str | None = None) -> dict[str, float | int]:
         target = str(keyword or "").strip().lower()
-        if not target:
+        target_url = str(content_url or "").strip().lower()
+        if not target and not target_url:
             return {"chats_count": 0, "cash_total": 0.0, "cpc": 0.0}
 
         chats_count = 0
@@ -118,19 +119,36 @@ class AirtableService:
             fields = rec.get("fields")
             if not isinstance(fields, dict):
                 continue
-            tokens = self._normalize_tokens(str(fields.get("Keyword") or ""))
-            if target not in tokens:
-                continue
+            if target_url:
+                record_content_url = str(
+                    fields.get("content_url")
+                    or fields.get("Content URL")
+                    or fields.get("Content Url")
+                    or ""
+                ).strip().lower()
+                if record_content_url != target_url:
+                    continue
+            else:
+                tokens = self._normalize_tokens(str(fields.get("Keyword") or ""))
+                if target not in tokens:
+                    continue
             chats_count += 1
             cash_total += self._to_float(fields.get("Pagó"))
 
         cpc = (cash_total / chats_count) if chats_count > 0 else 0.0
         return {"chats_count": chats_count, "cash_total": round(cash_total, 2), "cpc": round(cpc, 2)}
 
-    def upsert_lead_keyword(self, user_id: str, contact_ig_username: str, keyword: str) -> None:
+    def upsert_lead_keyword(
+        self,
+        user_id: str,
+        contact_ig_username: str,
+        keyword: str,
+        content_url: str | None = None,
+    ) -> None:
         api_key, base_id, table_name = self._load_conn(user_id)
         handle = self._extract_handle(contact_ig_username)
         normalized_kw = str(keyword or "").strip().lower()
+        normalized_content_url = str(content_url or "").strip()
         if not handle or not normalized_kw:
             return
 
@@ -155,11 +173,14 @@ class AirtableService:
                 base = urllib.parse.quote(base_id, safe="")
                 table = urllib.parse.quote(table_name, safe="")
                 rec_path = urllib.parse.quote(rec_id, safe="")
+                update_fields: dict[str, Any] = {"Keyword": merged}
+                if normalized_content_url:
+                    update_fields["content_url"] = normalized_content_url
                 self._request(
                     api_key,
                     f"https://api.airtable.com/v0/{base}/{table}/{rec_path}",
                     method="PATCH",
-                    body={"fields": {"Keyword": merged}},
+                    body={"fields": update_fields},
                 )
             return
 
@@ -169,5 +190,11 @@ class AirtableService:
             api_key,
             f"https://api.airtable.com/v0/{base}/{table}",
             method="POST",
-            body={"fields": {"IG": f"https://www.instagram.com/{handle}/", "Keyword": normalized_kw}},
+            body={
+                "fields": {
+                    "IG": f"https://www.instagram.com/{handle}/",
+                    "Keyword": normalized_kw,
+                    "content_url": normalized_content_url,
+                }
+            },
         )

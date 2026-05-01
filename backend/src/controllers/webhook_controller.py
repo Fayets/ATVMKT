@@ -38,8 +38,9 @@ async def manychat_webhook(request: Request) -> dict[str, Any]:
         if not keyword and event == "respondio_auto":
             keyword = "respondio_auto"
         contact_ig_username = str(payload.get("contact_ig_username") or "").strip()
+        content_url = str(payload.get("content_url") or "").strip() or None
         if user_id and contact_ig_username and keyword:
-            AirtableService().upsert_lead_keyword(user_id, contact_ig_username, keyword)
+            AirtableService().upsert_lead_keyword(user_id, contact_ig_username, keyword, content_url)
         return result
     except HTTPException as e:
         raise e

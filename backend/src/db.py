@@ -79,6 +79,16 @@ def init_db() -> None:
         db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS chats_count integer DEFAULT 0")
         db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS manual_cash double precision")
         db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS manual_chats integer")
+        db.execute("ALTER TABLE reelcontent ADD COLUMN IF NOT EXISTS content_url text")
+        db.execute(
+            """
+            UPDATE reelcontent
+            SET content_url = url
+            WHERE (content_url IS NULL OR btrim(content_url) = '')
+              AND url IS NOT NULL
+              AND btrim(url) <> ''
+            """
+        )
         db.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS ux_reelcontent_user_keyword_nonempty

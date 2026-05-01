@@ -516,7 +516,7 @@ function ReelCard({
           <div className="flex items-center justify-between">
             <div>
               <div className="text-[14px] font-semibold">{title}</div>
-              <div className="text-[11px] text-[var(--text3)] mt-0.5">{reel.published_at?.split('T')[0]}</div>
+              <div className="text-[11px] text-[var(--text3)] mt-0.5">{formatDateDMY(reel.published_at)}</div>
             </div>
             <div className="flex items-center gap-2">
               {reel.url && (
@@ -707,5 +707,15 @@ function formatCash(value: number): string {
 function formatInt(value: number): string {
   const n = Number(value || 0)
   return Math.trunc(n).toLocaleString('es-AR')
+}
+
+function formatDateDMY(value: string | null | undefined): string {
+  if (!value) return 'Sin fecha'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return 'Sin fecha'
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${dd}/${mm}/${yyyy}`
 }
 

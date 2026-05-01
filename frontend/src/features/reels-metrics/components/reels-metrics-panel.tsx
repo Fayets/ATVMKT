@@ -262,7 +262,7 @@ export function ReelsMetricsPanel() {
               <div>
                 <div className="text-[15px] font-semibold">{selectedReel.title}</div>
                 <div className="mt-1 text-[11px] text-[var(--text3)]">
-                  {selectedReel.publishedAt ? selectedReel.publishedAt.split('T')[0] : 'Sin fecha'}
+                  {formatDateDMY(selectedReel.publishedAt)}
                 </div>
               </div>
               <button
@@ -320,4 +320,14 @@ function KeywordCard({ value }: { value: string | null }) {
       </div>
     </div>
   )
+}
+
+function formatDateDMY(value: string | null | undefined): string {
+  if (!value) return 'Sin fecha'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return 'Sin fecha'
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${dd}/${mm}/${yyyy}`
 }
