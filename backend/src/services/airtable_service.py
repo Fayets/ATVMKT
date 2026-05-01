@@ -132,6 +132,10 @@ class AirtableService:
     def _reel_metrics_cache_set(self, key: str, value: dict[str, float | int]) -> None:
         _reel_metrics_cache[key] = (time.monotonic() + _REEL_METRICS_TTL_SEC, value)
 
+    def clear_reel_metrics_cache(self, user_id: str, keyword: str, content_url: str | None = None) -> None:
+        key = self._reel_metrics_cache_key(user_id, keyword, content_url)
+        _reel_metrics_cache.pop(key, None)
+
     def get_reel_metrics(self, user_id: str, keyword: str, content_url: str | None = None) -> dict[str, float | int]:
         target = str(keyword or "").strip().lower()
         target_url = str(content_url or "").strip().lower()

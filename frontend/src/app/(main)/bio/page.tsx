@@ -49,12 +49,6 @@ type BioLeadsResponse = {
   detail?: string
 }
 
-type ManychatStatusResponse = {
-  connected: boolean
-  tag: string
-  total_subscribers: number
-}
-
 type BioViaOptionsResponse = {
   options?: string[]
 }
@@ -114,7 +108,6 @@ export default function BioPage() {
   })
   const [expanded, setExpanded] = useState<string | null>(null)
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null)
-  const [manychatStatus, setManychatStatus] = useState<ManychatStatusResponse>({ connected: false, tag: '', total_subscribers: 0 })
   const [viaFilter, setViaFilter] = useState<string>('all')
   const [viaOptionsFromApi, setViaOptionsFromApi] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState<string>('')
@@ -176,30 +169,6 @@ export default function BioPage() {
     }
   }, [ready, userId, apiBase, month])
 
-  const fetchManychatStatus = useCallback(async () => {
-    if (!ready || !userId) return
-    try {
-      const res = await fetch(`${apiBase}/api/bio/manychat-status`, {
-        headers: { 'X-User-Id': userId },
-      })
-      const txt = await res.text()
-      const data = (() => {
-        try { return txt ? JSON.parse(txt) : {} } catch { return {} }
-      })() as Partial<ManychatStatusResponse>
-      if (res.ok) {
-        setManychatStatus({
-          connected: Boolean(data.connected),
-          tag: String(data.tag || ''),
-          total_subscribers: Number(data.total_subscribers || 0),
-        })
-      } else {
-        setManychatStatus({ connected: false, tag: '', total_subscribers: 0 })
-      }
-    } catch {
-      setManychatStatus({ connected: false, tag: '', total_subscribers: 0 })
-    }
-  }, [ready, userId, apiBase])
-
   const fetchViaOptions = useCallback(async () => {
     if (!ready || !userId) return
     try {
@@ -223,8 +192,7 @@ export default function BioPage() {
   useEffect(() => {
     fetchLeads()
     fetchMetrics()
-    fetchManychatStatus()
-  }, [fetchLeads, fetchMetrics, fetchManychatStatus])
+  }, [fetchLeads, fetchMetrics])
 
   useEffect(() => {
     fetchViaOptions()
@@ -306,14 +274,6 @@ export default function BioPage() {
             ))}
           </select>
           <MonthSelector month={month} options={options} onChange={setMonth} />
-          <span
-            className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${
-              manychatStatus.connected ? 'bg-[#22C55E22] text-[#22C55E]' : 'bg-[var(--bg4)] text-[var(--text3)]'
-            }`}
-            title={manychatStatus.tag ? `Tag: ${manychatStatus.tag} · ${manychatStatus.total_subscribers} subs` : undefined}
-          >
-            {manychatStatus.connected ? 'ManyChat activo' : 'ManyChat inactivo'}
-          </span>
         </div>
       </div>
 

@@ -86,6 +86,38 @@ class ReelsServices:
             cpc=0,
         )
 
+    def _apply_airtable_metrics(
+        self,
+        *,
+        user_id: str,
+        reel: ReelResponse,
+        refresh: bool = False,
+    ) -> ReelResponse:
+        airtable = AirtableService()
+        normalized = self._normalize_keyword(reel.keyword)
+
+        if not normalized:
+            reel.cash = float(reel.manual_cash if reel.manual_cash is not None else 0)
+            reel.chats_count = 0
+            reel.chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
+            reel.cash_total = reel.cash
+            reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
+            return reel
+
+        if refresh:
+            airtable.clear_reel_metrics_cache(user_id, normalized, reel.content_url)
+
+        metrics = airtable.get_reel_metrics(user_id, normalized, reel.content_url)
+        airtable_chats = int(metrics.get("chats_count", 0))
+        airtable_cash = float(metrics.get("cash_total", 0) or 0)
+        reel.chats_count = airtable_chats
+        reel.cash_total = airtable_cash
+        manual_chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
+        reel.chats = manual_chats + airtable_chats
+        reel.cash = float(reel.manual_cash if reel.manual_cash is not None else airtable_cash)
+        reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
+        return reel
+
     @db_session
     def _upsert_reel_content(
         self,
@@ -174,28 +206,8 @@ class ReelsServices:
             page_rows = rows[start:end]
             reels_out = [self._to_response(r) for r in page_rows]
 
-        airtable = AirtableService()
         for reel in reels_out:
-            normalized = self._normalize_keyword(reel.keyword)
-            if not normalized:
-                reel.cash = float(reel.manual_cash if reel.manual_cash is not None else 0)
-                reel.chats_count = 0
-                reel.chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
-                reel.cash_total = reel.cash
-                reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
-                total_cash += float(reel.cash or 0)
-                total_chats += int(reel.chats or 0)
-                continue
-
-            metrics = airtable.get_reel_metrics(user_id, normalized, reel.content_url)
-            airtable_chats = int(metrics.get("chats_count", 0))
-            airtable_cash = float(metrics.get("cash_total", 0) or 0)
-            reel.chats_count = airtable_chats
-            reel.cash_total = airtable_cash
-            manual_chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
-            reel.chats = manual_chats + airtable_chats
-            reel.cash = float(reel.manual_cash if reel.manual_cash is not None else airtable_cash)
-            reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
+            self._apply_airtable_metrics(user_id=user_id, reel=reel, refresh=False)
             total_cash += float(reel.cash or 0)
             total_chats += int(reel.chats or 0)
 
@@ -209,6 +221,16 @@ class ReelsServices:
             total_cash=total_cash,
             total_chats=total_chats,
         )
+
+    def get_reel(self, user_id: str, reel_id: str, refresh: bool = False) -> ReelResponse:
+        with db_session:
+            try:
+                row = ReelContent.get(id=reel_id, user_id=user_id)
+            except ObjectNotFound as e:
+                raise HTTPException(status_code=404, detail="Reel no encontrado.") from e
+            response = self._to_response(row)
+
+        return self._apply_airtable_metrics(user_id=user_id, reel=response, refresh=refresh)
 
     def patch_reel(self, user_id: str, reel_id: str, body: ReelPatchRequest) -> ReelResponse:
         if body.cash is None and body.chats is None:

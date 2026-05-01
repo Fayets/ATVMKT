@@ -35,6 +35,20 @@ def list_reels(
         raise HTTPException(status_code=500, detail="Error inesperado al listar reels.")
 
 
+@router.get("/{reel_id}", response_model=ReelResponse)
+def get_reel(
+    reel_id: str,
+    user_id: Annotated[str, Depends(require_user_id)],
+    refresh: bool = Query(default=False),
+) -> ReelResponse:
+    try:
+        return service.get_reel(user_id, reel_id, refresh=refresh)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al obtener el reel.")
+
+
 @router.patch("/{reel_id}", response_model=ReelResponse)
 def patch_reel(
     reel_id: str,

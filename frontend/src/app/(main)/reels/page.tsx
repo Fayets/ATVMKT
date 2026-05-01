@@ -287,6 +287,21 @@ export default function ReelsPage() {
     }
   }
 
+  const refreshReel = async (id: string) => {
+    if (!ready) return
+    try {
+      const res = await apiFetch(`/reels/${encodeURIComponent(id)}?refresh=true`, {
+        headers: authHeaders(),
+      })
+      const updated = await parseJson<Reel>(res)
+      setReels((rows) => rows.map((r) => (r.id === id ? { ...r, ...updated } : r)))
+      await fetchData()
+      toast('Reel actualizado')
+    } catch (e) {
+      toast(`No se pudo refrescar el reel: ${(e as Error).message}`)
+    }
+  }
+
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   return (
@@ -387,6 +402,7 @@ export default function ReelsPage() {
               onToggle={() => setExpanded(expanded === reel.id ? null : reel.id)}
               onUpdate={updateField}
               onKeywordUpdate={updateKeyword}
+              onRefresh={refreshReel}
             />
           ))}
         </div>
@@ -422,6 +438,7 @@ function ReelCard({
   onToggle,
   onUpdate,
   onKeywordUpdate,
+  onRefresh,
 }: {
   reel: Reel
   masterLists: { dolores: string[]; angulos: string[]; ctas: string[] }
@@ -429,6 +446,7 @@ function ReelCard({
   onToggle: () => void
   onUpdate: (id: string, field: 'cash' | 'chats', value: number) => void
   onKeywordUpdate: (id: string, keyword: string) => void
+  onRefresh: (id: string) => void
 }) {
   const [imgErr, setImgErr] = useState(false)
   const [dolor, setDolor] = useState(reel.classification?.dolor || '')
@@ -565,6 +583,14 @@ function ReelCard({
                   ✎ Editar
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => onRefresh(reel.id)}
+                className="absolute top-2 right-2 rounded bg-[var(--bg3)] px-2 py-0.5 text-[9px] text-[var(--text3)] hover:text-[var(--text)]"
+                title="Refrescar desde Airtable"
+              >
+                Refrescar
+              </button>
             </div>
             <div className="group relative rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
@@ -602,6 +628,14 @@ function ReelCard({
                   ✎ Editar
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => onRefresh(reel.id)}
+                className="absolute top-2 right-2 rounded bg-[var(--bg3)] px-2 py-0.5 text-[9px] text-[var(--text3)] hover:text-[var(--text)]"
+                title="Refrescar desde Airtable"
+              >
+                Refrescar
+              </button>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">CPC</div>
