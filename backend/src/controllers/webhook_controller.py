@@ -40,7 +40,12 @@ async def manychat_webhook(request: Request) -> dict[str, Any]:
         contact_ig_username = str(payload.get("contact_ig_username") or "").strip()
         content_url = str(payload.get("content_url") or "").strip() or None
         if user_id and contact_ig_username and keyword:
-            AirtableService().upsert_lead_keyword(user_id, contact_ig_username, keyword, content_url)
+            try:
+                AirtableService().upsert_lead_keyword(user_id, contact_ig_username, keyword, content_url)
+            except Exception:
+                print("=== WEBHOOK MANYCHAT AIRTABLE ERROR ===")
+                print(traceback.format_exc())
+                print("======================================")
         return result
     except HTTPException as e:
         raise e

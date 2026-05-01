@@ -1,6 +1,7 @@
 import json
 import re
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,6 +13,9 @@ from pony.orm import db_session
 
 from src.models import ApiConnection
 from src.services.airtable_services import _normalize_base_id, _normalize_table_id
+
+_REEL_METRICS_TTL_SEC = 300
+_reel_metrics_cache: dict[str, tuple[float, dict[str, float | int]]] = {}
 
 
 class AirtableService:
@@ -107,11 +111,37 @@ class AirtableService:
                 break
         return out
 
+    def _reel_metrics_cache_key(self, user_id: str, keyword: str, content_url: str | None) -> str:
+        """Clave de caché: por usuario + keyword o por content_url (filtro principal)."""
+        target = str(keyword or "").strip().lower()
+        target_url = str(content_url or "").strip().lower()
+        if target_url:
+            return f"metrics_{user_id}_url_{target_url}"
+        return f"metrics_{user_id}_{target}"
+
+    def _reel_metrics_cache_get(self, key: str) -> dict[str, float | int] | None:
+        entry = _reel_metrics_cache.get(key)
+        if entry is None:
+            return None
+        expires_at, value = entry
+        if time.monotonic() > expires_at:
+            _reel_metrics_cache.pop(key, None)
+            return None
+        return value
+
+    def _reel_metrics_cache_set(self, key: str, value: dict[str, float | int]) -> None:
+        _reel_metrics_cache[key] = (time.monotonic() + _REEL_METRICS_TTL_SEC, value)
+
     def get_reel_metrics(self, user_id: str, keyword: str, content_url: str | None = None) -> dict[str, float | int]:
         target = str(keyword or "").strip().lower()
         target_url = str(content_url or "").strip().lower()
         if not target and not target_url:
             return {"chats_count": 0, "cash_total": 0.0, "cpc": 0.0}
+
+        cache_key = self._reel_metrics_cache_key(user_id, keyword, content_url)
+        cached = self._reel_metrics_cache_get(cache_key)
+        if cached is not None:
+            return cached
 
         chats_count = 0
         cash_total = 0.0
@@ -136,7 +166,9 @@ class AirtableService:
             cash_total += self._to_float(fields.get("Pagó"))
 
         cpc = (cash_total / chats_count) if chats_count > 0 else 0.0
-        return {"chats_count": chats_count, "cash_total": round(cash_total, 2), "cpc": round(cpc, 2)}
+        result = {"chats_count": chats_count, "cash_total": round(cash_total, 2), "cpc": round(cpc, 2)}
+        self._reel_metrics_cache_set(cache_key, result)
+        return result
 
     def upsert_lead_keyword(
         self,
