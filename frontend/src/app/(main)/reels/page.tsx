@@ -58,6 +58,9 @@ export default function ReelsPage() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
+  const [showRangeSyncModal, setShowRangeSyncModal] = useState(false)
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [monthMode, setMonthMode] = useState<'all' | 'current' | 'comparison'>('all')
   const [page, setPage] = useState(1)
@@ -246,6 +249,33 @@ export default function ReelsPage() {
     }
   }
 
+  const handleSyncRange = async () => {
+    if (!ready || syncStatus.status === 'running') return
+    if (!rangeFrom || !rangeTo) {
+      toast('Seleccioná fecha desde y hasta')
+      return
+    }
+    setSyncing(true)
+    setSyncMessage('Sincronizando por rango...')
+    setSyncStatus((prev) => ({ ...prev, status: 'running', processed: 0 }))
+    setShowRangeSyncModal(false)
+    fetchSyncStatus()
+    try {
+      const res = await apiFetch('/reels/sync-range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ date_from: rangeFrom, date_to: rangeTo }),
+      })
+      await parseJson<{ status: string }>(res)
+      await fetchSyncStatus()
+    } catch (e) {
+      setSyncMessage(`Error: ${(e as Error).message}`)
+      setSyncing(false)
+    } finally {
+      await fetchSyncStatus()
+    }
+  }
+
   const updateField = async (id: string, field: 'cash' | 'chats', value: number) => {
     if (!ready) return
     const prev = reels.find((r) => r.id === id)
@@ -364,6 +394,13 @@ export default function ReelsPage() {
         <button onClick={handleSync} disabled={isSyncRunning} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
           ACTUALIZAR DATOS
         </button>
+        <button
+          onClick={() => setShowRangeSyncModal(true)}
+          disabled={isSyncRunning}
+          className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text)] hover:opacity-90 disabled:opacity-30"
+        >
+          Sync por rango
+        </button>
       </div>
       {syncStatus.status === 'running' && (
         <div className="mb-4 glass-card p-4">
@@ -425,6 +462,49 @@ export default function ReelsPage() {
           >
             Siguiente
           </button>
+        </div>
+      )}
+      {showRangeSyncModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-5">
+            <div className="mb-4 text-[14px] font-semibold">Sincronizar reels por rango</div>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Desde</label>
+                <input
+                  type="date"
+                  value={rangeFrom}
+                  onChange={(e) => setRangeFrom(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Hasta</label>
+                <input
+                  type="date"
+                  value={rangeTo}
+                  onChange={(e) => setRangeTo(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                />
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRangeSyncModal(false)}
+                className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSyncRange}
+                className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
+              >
+                Iniciar sync
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

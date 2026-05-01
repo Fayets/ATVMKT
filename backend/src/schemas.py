@@ -118,6 +118,11 @@ class ReelsSyncRequest(BaseModel):
     limit: int | None = None
 
 
+class ReelsSyncRangeRequest(BaseModel):
+    date_from: date
+    date_to: date
+
+
 class ReelsSyncResponse(BaseModel):
     success: bool
     total: int = 0

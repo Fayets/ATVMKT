@@ -2,7 +2,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsMetricsOut
+from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsMetricsOut, ReelsSyncRangeRequest
 from src.services.reels_services import ReelsServices
 
 router = APIRouter(prefix="/api/reels", tags=["reels"], redirect_slashes=False)
@@ -88,6 +88,22 @@ async def sync_instagram(
         raise e
     except Exception:
         raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels con Instagram.")
+
+
+@router.post("/sync-range")
+async def sync_instagram_range(
+    body: ReelsSyncRangeRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> dict[str, str]:
+    if body.date_from > body.date_to:
+        raise HTTPException(status_code=400, detail="date_from no puede ser mayor que date_to.")
+    try:
+        service.trigger_sync_range(user_id, body.date_from, body.date_to)
+        return {"status": "started"}
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels por rango.")
 
 
 @router.get("/sync-status")

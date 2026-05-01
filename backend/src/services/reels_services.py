@@ -7,7 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, time as dt_time, timezone
 from zoneinfo import ZoneInfo
 
 import certifi
@@ -40,6 +40,17 @@ class ReelsServices:
 
         async def _runner() -> None:
             await self.sync_instagram(user_id)
+
+        task = asyncio.create_task(_runner())
+        task.add_done_callback(lambda _: _sync_tasks.pop(user_id, None))
+        _sync_tasks[user_id] = task
+
+    def trigger_sync_range(self, user_id: str, date_from: date, date_to: date) -> None:
+        if self._is_user_sync_running(user_id):
+            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+
+        async def _runner() -> None:
+            await self.sync_instagram_range(user_id, date_from, date_to)
 
         task = asyncio.create_task(_runner())
         task.add_done_callback(lambda _: _sync_tasks.pop(user_id, None))
@@ -388,9 +399,16 @@ class ReelsServices:
             "sin_clasificar": sin_clasificar,
         }
 
-    def _sync_instagram_blocking(self, user_id: str) -> dict[str, int]:
+    def _sync_instagram_blocking(
+        self,
+        user_id: str,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+    ) -> dict[str, int]:
         self._set_sync_state(user_id, total=0, processed=0, status="running", phase="collecting", discovered=0)
         try:
+            lower_bound = date_from or SYNC_REELS_SINCE
+            upper_bound = date_to
             access_token, ig_user_id = self._resolve_instagram_conn(user_id)
             headers = {"Accept": "application/json"}
             media_url = (
@@ -416,11 +434,15 @@ class ReelsServices:
                             if timestamp_raw:
                                 try:
                                     published_at = datetime.fromisoformat(timestamp_raw.replace("Z", "+00:00")).astimezone(AR_TZ)
-                                    if published_at < SYNC_REELS_SINCE:
+                                    if published_at < lower_bound:
                                         stop_pagination = True
                                         break
+                                    if upper_bound is not None and published_at > upper_bound:
+                                        continue
                                 except Exception:
                                     pass
+                            else:
+                                continue
                         media_items.append(item)
                 paging = payload.get("paging") if isinstance(payload, dict) else None
                 next_from_api = paging.get("next") if isinstance(paging, dict) else None
@@ -459,7 +481,9 @@ class ReelsServices:
                             published_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(AR_TZ)
                         except Exception:
                             pass
-                    if published_at < SYNC_REELS_SINCE:
+                    if published_at < lower_bound:
+                        continue
+                    if upper_bound is not None and published_at > upper_bound:
                         continue
 
                     insights = {"ig_reels_avg_watch_time": 0, "reach": 0, "saved": 0, "shares": 0, "likes": 0, "comments": 0, "total_interactions": 0}
@@ -563,5 +587,16 @@ class ReelsServices:
             raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
         try:
             return await asyncio.to_thread(self._sync_instagram_blocking, user_id)
+        finally:
+            _sync_lock.release()
+
+    async def sync_instagram_range(self, user_id: str, date_from: date, date_to: date) -> dict[str, int]:
+        acquired = _sync_lock.acquire(blocking=False)
+        if not acquired:
+            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+        try:
+            start_dt = datetime.combine(date_from, dt_time.min).replace(tzinfo=AR_TZ)
+            end_dt = datetime.combine(date_to, dt_time.max).replace(tzinfo=AR_TZ)
+            return await asyncio.to_thread(self._sync_instagram_blocking, user_id, start_dt, end_dt)
         finally:
             _sync_lock.release()
