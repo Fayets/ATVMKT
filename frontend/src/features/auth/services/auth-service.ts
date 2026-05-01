@@ -15,30 +15,27 @@ export type AuthResult = {
 const BACKEND_BASE =
   (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
 
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const payload = token.split('.')[1]
-    if (!payload) return null
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
-    return JSON.parse(atob(padded)) as Record<string, unknown>
-  } catch {
-    return null
-  }
+type LoginResponseBody = {
+  detail?: string
+  access_token?: string
+  user_id?: number
 }
 
-function persistSession(token: string) {
+function persistSession(token: string, userIdFromServer?: number) {
   if (typeof window === 'undefined') return
-  const payload = decodeJwtPayload(token)
-  const sub = payload?.sub
-  const userId = typeof sub === 'string' ? sub : ''
   sessionStorage.setItem('access_token', token)
   sessionStorage.setItem('evoluciona_token', token)
   sessionStorage.setItem('auth_token', token)
-  if (userId) {
-    sessionStorage.setItem('user_id', userId)
-    sessionStorage.setItem('evoluciona_user_id', userId)
+
+  if (userIdFromServer != null && Number.isFinite(userIdFromServer)) {
+    const id = String(userIdFromServer)
+    localStorage.setItem('auth_user_id', id)
+    sessionStorage.setItem('auth_user_id', id)
+    sessionStorage.setItem('user_id', id)
+    sessionStorage.setItem('evoluciona_user_id', id)
   }
+
+  window.dispatchEvent(new Event('auth-session-changed'))
 }
 
 export async function login(username: string, password: string): Promise<AuthResult> {
@@ -53,7 +50,7 @@ export async function login(username: string, password: string): Promise<AuthRes
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(parsed.data),
   })
-  const data = (await response.json().catch(() => null)) as { detail?: string; access_token?: string } | null
+  const data = (await response.json().catch(() => null)) as LoginResponseBody | null
 
   if (!response.ok) {
     return { error: data?.detail || 'No se pudo iniciar sesion' }
@@ -61,7 +58,13 @@ export async function login(username: string, password: string): Promise<AuthRes
 
   const token = data?.access_token
   if (!token) return { error: 'Respuesta invalida del servidor' }
-  persistSession(token)
+
+  const uid = data?.user_id
+  if (typeof uid !== 'number' || !Number.isFinite(uid)) {
+    return { error: 'Respuesta invalida del servidor (falta user_id)' }
+  }
+
+  persistSession(token, uid)
   return { ok: true }
 }
 
@@ -70,13 +73,14 @@ export async function signup(): Promise<AuthResult> {
 }
 
 export async function logout() {
-  if (typeof window !== 'undefined') {
-    sessionStorage.removeItem('access_token')
-    sessionStorage.removeItem('evoluciona_token')
-    sessionStorage.removeItem('token')
-    sessionStorage.removeItem('auth_token')
-    sessionStorage.removeItem('user_id')
-    sessionStorage.removeItem('evoluciona_user_id')
-    sessionStorage.removeItem('auth_user_id')
-  }
+  if (typeof window === 'undefined') return
+  sessionStorage.removeItem('access_token')
+  sessionStorage.removeItem('evoluciona_token')
+  sessionStorage.removeItem('token')
+  sessionStorage.removeItem('auth_token')
+  sessionStorage.removeItem('user_id')
+  sessionStorage.removeItem('evoluciona_user_id')
+  sessionStorage.removeItem('auth_user_id')
+  localStorage.removeItem('auth_user_id')
+  window.dispatchEvent(new Event('auth-session-changed'))
 }

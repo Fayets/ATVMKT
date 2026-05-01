@@ -1,31 +1,23 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireNumericUserId } from '@/lib/request-user'
 import { NextResponse } from 'next/server'
 
 // POST /api/youtube-analyze — Analyze YouTube video with AI
-// Uses transcript if available, otherwise analyzes from title + description
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const uid = requireNumericUserId(request)
+  if (uid instanceof NextResponse) return uid
 
   const body = await request.json()
-  const { contentItemId, manualTranscript } = body
+  const { contentItemId, manualTranscript, title = '', classification = {} } = body
 
   if (!contentItemId) return NextResponse.json({ error: 'Missing contentItemId' }, { status: 400 })
 
   const anthropicKey = process.env.ANTHROPIC_API_KEY
   if (!anthropicKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 })
 
-  // Get video data
-  const { data: video } = await supabase.from('content_items').select('*').eq('id', contentItemId).single()
-  if (!video) return NextResponse.json({ error: 'Video not found' }, { status: 404 })
-
-  const cls = (video.classification || {}) as Record<string, unknown>
-  const title = video.title || ''
+  const cls = classification as Record<string, unknown>
   const description = (cls.description as string) || ''
   const existingTranscript = manualTranscript || (cls.transcript as string) || ''
 
-  // Build context for AI
   let contextText = ''
   if (existingTranscript && existingTranscript.length > 50) {
     contextText = `TRANSCRIPT DEL VIDEO:\n${existingTranscript.substring(0, 15000)}`
@@ -55,7 +47,8 @@ Solo JSON.`
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 2000,
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }],
       }),
     })
@@ -67,11 +60,12 @@ Solo JSON.`
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
 
     let analysis: Record<string, unknown>
-    try { analysis = JSON.parse(cleaned) } catch {
+    try {
+      analysis = JSON.parse(cleaned)
+    } catch {
       return NextResponse.json({ error: 'Failed to parse AI response' }, { status: 500 })
     }
 
-    // Save to database
     const newCls = {
       ...cls,
       summary: analysis.summary || '',
@@ -82,9 +76,14 @@ Solo JSON.`
       ...(manualTranscript ? { transcript: manualTranscript } : {}),
     }
 
-    await supabase.from('content_items').update({ classification: newCls, updated_at: new Date().toISOString() }).eq('id', contentItemId)
-
-    return NextResponse.json({ success: true, analysis, source: existingTranscript.length > 50 ? 'transcript' : 'description' })
+    return NextResponse.json({
+      success: true,
+      analysis,
+      classification: newCls,
+      contentItemId,
+      userId: uid,
+      source: existingTranscript.length > 50 ? 'transcript' : 'description',
+    })
   } catch (e) {
     return NextResponse.json({ error: `Analysis failed: ${(e as Error).message}` }, { status: 500 })
   }

@@ -5,8 +5,8 @@ import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { Modal } from '@/shared/components/modal'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
 
 type FieldDef = { key: string; label: string; type?: string }
 
@@ -20,7 +20,7 @@ type SimpleEntriesPageProps = {
 export function SimpleEntriesPage({ table, title, fields, columns }: SimpleEntriesPageProps) {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [items, setItems] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -29,10 +29,11 @@ export function SimpleEntriesPage({ table, title, fields, columns }: SimpleEntri
   const fetchItems = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const { data } = await supabase.from(table).select('*').eq('month', month).order('created_at', { ascending: false })
-    setItems(data || [])
+    void table
+    void month
+    setItems([])
     setLoading(false)
-  }, [month, table, ready, supabase])
+  }, [month, table, ready])
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
@@ -46,22 +47,17 @@ export function SimpleEntriesPage({ table, title, fields, columns }: SimpleEntri
       else row[f.key] = form[f.key] || null
     })
 
-    if (editItem) {
-      await supabase.from(table).update({ ...row, updated_at: new Date().toISOString() }).eq('id', editItem.id as string)
-      toast('Actualizado ✓')
-    } else {
-      await supabase.from(table).insert(row)
-      toast('Agregado ✓')
-    }
+    void row
+    void editItem
+    toast('Esta vista requiere endpoint en FastAPI para ' + table)
     setShowModal(false)
     setEditItem(null)
     fetchItems()
   }
 
   const handleDelete = async (id: string) => {
-    await supabase.from(table).delete().eq('id', id)
-    toast('Eliminado ✓')
-    fetchItems()
+    void id
+    toast('Eliminación no disponible sin API.')
   }
 
   const totalCash = items.reduce((s, i) => s + (Number(i.cash) || 0), 0)

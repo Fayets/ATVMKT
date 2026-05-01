@@ -5,15 +5,15 @@ import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { Modal } from '@/shared/components/modal'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
+import { apiFetch } from '@/lib/api'
 import {
   Lead, ColumnDef, SortConfig, FilterConfig,
   STATUS_COLORS, AVATAR_COLORS, CHANNEL_COLORS, PROGRAM_COLORS,
   STATUS_OPTIONS, AVATAR_OPTIONS, PROGRAM_OPTIONS, CHANNEL_OPTIONS,
   STATUS_TABS, buildColumns, canonicalLeadStatus,
 } from '../types'
-import { mapAirtableRecordToLead } from '../services/airtable-leads-mapper'
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MAIN PAGE
@@ -21,21 +21,12 @@ import { mapAirtableRecordToLead } from '../services/airtable-leads-mapper'
 export function LeadsPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
 
   // Data
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
-  const [leadsDataSource, setLeadsDataSource] = useState<'supabase' | 'airtable'>('supabase')
-  const [airtableMeta, setAirtableMeta] = useState<{
-    table_name: string | null
-    base_id: string | null
-    table_id: string | null
-    view_id: string | null
-  } | null>(null)
 
-  const apiBase =
-    (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
   const [setterNames, setSetterNames] = useState<string[]>([])
   const [closerNames, setCloserNames] = useState<string[]>([])
 
@@ -50,7 +41,6 @@ export function LeadsPage() {
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
     new Set(buildColumns([], []).filter(c => c.defaultVisible).map(c => c.key))
   )
-  const prevLeadsSource = useRef<'supabase' | 'airtable'>('supabase')
   const [groupBy, setGroupBy] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
@@ -74,96 +64,48 @@ export function LeadsPage() {
   // ── Data fetching ──
   const fetchTeamMembers = useCallback(async () => {
     if (!ready) return
-    const { data } = await supabase.from('team_members').select('name, role').eq('is_active', true)
-    if (data) {
-      setSetterNames(data.filter(m => m.role === 'setter').map(m => m.name))
-      setCloserNames(data.filter(m => m.role === 'closer').map(m => m.name))
-    }
-  }, [ready, supabase])
+    setSetterNames([])
+    setCloserNames([])
+  }, [ready])
 
   const fetchLeads = useCallback(async () => {
-    if (!ready) return
-    setLoading(true)
-    setAirtableMeta(null)
-
-    if (userId) {
-      try {
-        const ar = await fetch(`${apiBase}/airtable/leads`, {
-          headers: { 'X-User-Id': userId },
-        })
-        const rawText = await ar.text()
-        const data = (() => {
-          try { return rawText ? JSON.parse(rawText) : {} } catch { return {} }
-        })() as {
-          records?: { id: string; createdTime?: string; fields?: Record<string, unknown> }[]
-          table_name?: string | null
-          base_id?: string | null
-          table_id?: string | null
-          view_id?: string | null
-          detail?: string
-        }
-        if (ar.ok && Array.isArray(data.records)) {
-          const mapped = data.records
-            .filter(r => r && typeof r.id === 'string' && r.fields && typeof r.fields === 'object')
-            .map(r => mapAirtableRecordToLead({
-              id: r.id,
-              createdTime: r.createdTime,
-              fields: r.fields as Record<string, unknown>,
-            }))
-          setLeadsDataSource('airtable')
-          setAirtableMeta({
-            table_name: data.table_name ?? null,
-            base_id: data.base_id ?? null,
-            table_id: data.table_id ?? null,
-            view_id: data.view_id ?? null,
-          })
-          setLeads(mapped)
-          setLoading(false)
-          return
-        }
-        if (!ar.ok && rawText) {
-          try {
-            const errJson = JSON.parse(rawText) as { detail?: string }
-            if (errJson.detail) {
-              console.error('Airtable leads:', errJson.detail)
-            }
-          } catch { /* ignore */ }
-        }
-      } catch (e) {
-        console.error('Airtable leads fetch:', e)
-      }
+    if (!ready || !userId) {
+      setLeads([])
+      setLoading(false)
+      return
     }
-
-    setLeadsDataSource('supabase')
-    const { data, error } = await supabase
-      .from('leads').select('*').eq('month', month)
-      .order('created_at', { ascending: false })
-    if (error) console.error('Leads fetch error:', error)
-    setLeads((data as Lead[]) || [])
-    setLoading(false)
-  }, [month, ready, supabase, userId, apiBase])
+    setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (month) params.set('month', month)
+      const qs = params.toString()
+      const res = await apiFetch(`/leads${qs ? `?${qs}` : ''}`)
+      const raw = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const detail = typeof raw === 'object' && raw && 'detail' in raw
+          ? String((raw as { detail: unknown }).detail)
+          : res.statusText
+        toast(`Error al cargar leads: ${detail}`)
+        setLeads([])
+        return
+      }
+      const data = raw as { leads?: Lead[] }
+      setLeads(Array.isArray(data.leads) ? data.leads : [])
+    } catch {
+      toast('Error al cargar leads')
+      setLeads([])
+    } finally {
+      setLoading(false)
+    }
+  }, [ready, userId, month, toast])
 
   useEffect(() => { fetchTeamMembers() }, [fetchTeamMembers])
   useEffect(() => { fetchLeads() }, [fetchLeads])
   useEffect(() => { setSelectedRows(new Set()) }, [month, statusTab])
 
-  /** Airtable: mostrar todas las columnas del modelo (muchas venían ocultas por defaultVisible: false). */
-  useEffect(() => {
-    if (leadsDataSource === 'airtable' && prevLeadsSource.current !== 'airtable') {
-      setVisibleColumns(new Set(COLUMNS.map(c => c.key)))
-    } else if (leadsDataSource === 'supabase' && prevLeadsSource.current === 'airtable') {
-      setVisibleColumns(new Set(COLUMNS.filter(c => c.defaultVisible).map(c => c.key)))
-    }
-    prevLeadsSource.current = leadsDataSource
-  }, [leadsDataSource, COLUMNS])
-
   // ── CRUD ──
   const handleSave = async (form: Record<string, string>) => {
     if (!userId) return
-    if (editLead?.id?.startsWith('rec')) {
-      toast('Los leads de Airtable son solo lectura en esta vista.')
-      return
-    }
     const row = {
       user_id: userId,
       client_name: form.client_name || '',
@@ -195,72 +137,33 @@ export function LeadsPage() {
       month,
     }
     if (editLead) {
-      await supabase.from('leads').update({ ...row, updated_at: new Date().toISOString() }).eq('id', editLead.id)
-      toast('Lead actualizado ✓')
+      toast('Edición de leads no disponible por ahora.')
     } else {
-      await supabase.from('leads').insert(row)
-      toast('Lead agregado ✓')
+      toast('Alta de leads no disponible por ahora.')
     }
     setShowModal(false)
     setEditLead(null)
     fetchLeads()
   }
 
-  const handleDelete = async (ids: string[]) => {
-    const blocked = ids.filter(id => id.startsWith('rec'))
-    if (blocked.length) {
-      toast('No se pueden eliminar filas de Airtable desde acá.')
-      return
-    }
-    for (const id of ids) {
-      await supabase.from('leads').delete().eq('id', id)
-    }
-    toast(`${ids.length > 1 ? ids.length + ' leads eliminados' : 'Eliminado'} ✓`)
-    setSelectedRows(new Set())
-    fetchLeads()
+  const handleDelete = async (_ids: string[]) => {
+    toast('Eliminación no disponible por ahora.')
   }
 
-  const handleInlineUpdate = async (id: string, field: string, value: string | number | null) => {
-    if (id.startsWith('rec')) {
-      toast('Solo lectura: editá la fila en Airtable.')
-      setEditingCell(null)
-      return
-    }
-    await supabase.from('leads').update({ [field]: value, updated_at: new Date().toISOString() }).eq('id', id)
-    setLeads(prev => prev.map(l => l.id === id ? { ...l, [field]: value } : l))
+  const handleInlineUpdate = async (_id: string, _field: string, _value: string | number | null) => {
+    toast('Edición en tabla no disponible por ahora.')
     setEditingCell(null)
   }
 
   const handleAddRow = async () => {
-    if (leadsDataSource === 'airtable') {
-      toast('Agregá filas en Airtable; acá solo se muestran.')
-      return
-    }
-    if (!userId || addingRow) return
-    setAddingRow(true)
-    const row = {
-      user_id: userId,
-      client_name: '',
-      source_type: 'manual',
-      amount: 0,
-      status: 'Pendiente',
-      revenue: 0, payment: 0, owed: 0, ctas_responded: 0,
-      date: new Date().toISOString().split('T')[0],
-      month,
-    }
-    const { data, error } = await supabase.from('leads').insert(row).select().single()
-    if (error) { console.error(error); setAddingRow(false); return }
-    const newLead = data as Lead
-    setLeads(prev => [...prev, newLead])
-    setEditingCell({ id: newLead.id, field: 'client_name' })
-    setAddingRow(false)
+    toast('Agregar filas no disponible por ahora.')
   }
 
   // ── Filtering & Sorting ──
   const filtered = useMemo(() => {
     let result = [...leads]
 
-    if (leadsDataSource === 'airtable' && month) {
+    if (month) {
       result = result.filter(l => {
         const m = l.month
         if (!m) return true
@@ -268,7 +171,7 @@ export function LeadsPage() {
       })
     }
 
-    // Status tab (comparación canónica: Airtable suele mandar variantes de texto / mayúsculas)
+    // Status tab (comparación canónica de texto / mayúsculas)
     if (statusTab === 'Cerrados') {
       result = result.filter(l => {
         const c = canonicalLeadStatus(l.status)
@@ -321,7 +224,7 @@ export function LeadsPage() {
     })
 
     return result
-  }, [leads, leadsDataSource, month, statusTab, search, filters, sort])
+  }, [leads, month, statusTab, search, filters, sort])
 
   // ── Grouping ──
   const grouped = useMemo(() => {
@@ -368,46 +271,15 @@ export function LeadsPage() {
 
   if (!ready) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
-  const readOnlyGrid = leadsDataSource === 'airtable'
+  const readOnlyGrid = false
 
   const openLeadEditor = (lead: Lead) => {
-    if (lead.id.startsWith('rec')) {
-      const text = [`ID Airtable: ${lead.id}`, '', lead.notes || '(sin notas / campos extra en esta fila)'].join('\n')
-      setTextPreview({ title: lead.client_name || 'Lead Airtable', text })
-      return
-    }
     setEditLead(lead)
     setShowModal(true)
   }
 
   return (
     <div className="flex flex-col h-full">
-      {readOnlyGrid && (
-        <div className="mb-3 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-2.5 text-[12px] text-[var(--text2)]">
-          <span className="font-semibold text-[var(--text)]">Airtable</span>
-          {' · '}
-          Tabla <span className="font-mono text-[var(--accent)]">{airtableMeta?.table_name || '—'}</span>
-          {airtableMeta?.table_id && (
-            <>
-              {' · '}
-              ID <span className="font-mono text-[10px]">{airtableMeta.table_id}</span>
-            </>
-          )}
-          {airtableMeta?.base_id && (
-            <>
-              {' · '}
-              Base <span className="font-mono text-[10px]">{airtableMeta.base_id}</span>
-            </>
-          )}
-          {airtableMeta?.view_id && (
-            <>
-              {' · '}
-              Vista <span className="font-mono text-[10px]">{airtableMeta.view_id}</span>
-            </>
-          )}
-          <span className="text-[var(--text3)]"> — Solo lectura; los cambios se hacen en Airtable.</span>
-        </div>
-      )}
       {/* ━━ TOOLBAR ━━ */}
       <div className="flex items-center justify-between mb-3">
         {/* Left: Status tabs */}
@@ -519,7 +391,7 @@ export function LeadsPage() {
                 <span className="text-[11px] font-semibold text-[var(--text)]">{groupName}</span>
                 <span className="text-[10px] text-[var(--text3)] font-mono-num">{groupLeads.length}</span>
               </div>
-              <AirtableTable
+              <LeadsTable
                 leads={groupLeads} columns={activeColumns} sort={sort}
                 editingCell={editingCell} setEditingCell={setEditingCell}
                 onInlineUpdate={handleInlineUpdate} onToggleSort={toggleSort}
@@ -538,7 +410,7 @@ export function LeadsPage() {
         </div>
       ) : (
         <div className="flex-1 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg2)]">
-          <AirtableTable
+          <LeadsTable
             leads={filtered} columns={activeColumns} sort={sort}
             editingCell={editingCell} setEditingCell={setEditingCell}
             onInlineUpdate={handleInlineUpdate} onToggleSort={toggleSort}
@@ -590,9 +462,9 @@ export function LeadsPage() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// AIRTABLE TABLE
+// LEADS TABLE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function AirtableTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onOpenEdit, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly }: {
+function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onOpenEdit, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly }: {
   leads: Lead[]
   columns: ColumnDef[]
   sort: SortConfig
@@ -657,7 +529,7 @@ function AirtableTable({ leads, columns, sort, editingCell, setEditingCell, onIn
             {/* Cells */}
             {columns.map(col => (
               <td key={col.key} className="px-3 py-1.5" style={{ width: col.width, minWidth: col.width }}>
-                <AirtableCell
+                <LeadsTableCell
                   lead={lead} col={col}
                   editing={editingCell?.id === lead.id && editingCell?.field === col.key}
                   onStartEdit={() => setEditingCell({ id: lead.id, field: col.key })}
@@ -703,9 +575,9 @@ function AirtableTable({ leads, columns, sort, editingCell, setEditingCell, onIn
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// AIRTABLE CELL
+// LEAD TABLE CELL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function AirtableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave, onOpenFullEdit, onPreviewText, readOnly }: {
+function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave, onOpenFullEdit, onPreviewText, readOnly }: {
   lead: Lead
   col: ColumnDef
   editing: boolean

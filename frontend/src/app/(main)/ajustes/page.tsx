@@ -2,27 +2,25 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
 
 export default function AjustesPage() {
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(true)
 
   const loadProfile = useCallback(async () => {
     if (!ready) return
-    if (userId) {
-      const { data: { user } } = await supabase.auth.getUser()
-      setEmail(user?.email || '')
-      const fullName = ''
-      setName(fullName)
-    }
+    setEmail(userId ? `Usuario #${userId}` : '')
+    setName('')
     setLoading(false)
-  }, [ready, userId, supabase])
+  }, [ready, userId])
 
-  useEffect(() => { loadProfile() }, [loadProfile])
+  useEffect(() => {
+    loadProfile()
+  }, [loadProfile])
 
   const saveName = async () => {
     if (!userId) return
@@ -54,7 +52,6 @@ export default function AjustesPage() {
       </div>
 
       <div className="max-w-lg space-y-6">
-        {/* Profile */}
         <div className="glass-card p-6">
           <h3 className="mb-4 text-[11px] font-medium uppercase tracking-widest text-[var(--text3)]">Perfil</h3>
           <div className="space-y-3">
@@ -65,17 +62,21 @@ export default function AjustesPage() {
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Nombre</label>
               <input
-                type="text" value={name} onChange={(e) => setName(e.target.value)}
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
               />
             </div>
-            <button onClick={saveName} className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90">
+            <button
+              onClick={saveName}
+              className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
+            >
               Guardar
             </button>
           </div>
         </div>
 
-        {/* Export */}
         <div className="glass-card p-6">
           <h3 className="mb-4 text-[11px] font-medium uppercase tracking-widest text-[var(--text3)]">Datos</h3>
           <button

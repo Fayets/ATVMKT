@@ -15,21 +15,21 @@ class ConexionesServices:
     def _to_response(self, row: ApiConnection) -> ApiConnectionResponse:
         creds = row.credentials if isinstance(row.credentials, dict) else {}
         return ApiConnectionResponse(
-            id=row.id,
-            user_id=row.user_id,
+            id=str(row.id),
+            user_id=str(row.user_id),
             platform=row.platform,
             credentials=creds,
             last_sync_at=row.last_sync_at,
             updated_at=row.updated_at,
         )
 
-    def list_by_user(self, user_id: str) -> list[ApiConnectionResponse]:
+    def list_by_user(self, user_id: int) -> list[ApiConnectionResponse]:
         with db_session:
             rows = [c for c in list(ApiConnection.select()) if c.user_id == user_id]
             rows.sort(key=lambda r: r.platform)
             return [self._to_response(r) for r in rows]
 
-    def upsert(self, user_id: str, platform: str, body: ApiConnectionUpsertRequest) -> ApiConnectionResponse:
+    def upsert(self, user_id: int, platform: str, body: ApiConnectionUpsertRequest) -> ApiConnectionResponse:
         if not platform.strip():
             raise HTTPException(status_code=400, detail="La plataforma no puede estar vacía.")
         platform = platform.strip()

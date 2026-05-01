@@ -4,24 +4,22 @@ import { useState, useEffect, useCallback } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatK } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatK } from '@/shared/lib/format-utils'
 
 export default function MetricasPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [metrics, setMetrics] = useState({ account_views: 0, followers: 0 })
   const [loading, setLoading] = useState(true)
 
   const fetchMetrics = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const { data } = await supabase.from('account_metrics').select('*').eq('month', month).maybeSingle()
-    if (data) setMetrics({ account_views: data.account_views || 0, followers: data.followers || 0 })
-    else setMetrics({ account_views: 0, followers: 0 })
+    setMetrics({ account_views: 0, followers: 0 })
     setLoading(false)
-  }, [month, ready, supabase])
+  }, [month, ready])
 
   useEffect(() => { fetchMetrics() }, [fetchMetrics])
 
@@ -29,11 +27,7 @@ export default function MetricasPage() {
     if (!userId) return
     const updated = { ...metrics, [field]: value }
     setMetrics(updated)
-    await supabase.from('account_metrics').upsert(
-      { user_id: userId, month, ...updated, updated_at: new Date().toISOString() },
-      { onConflict: 'user_id,month' }
-    )
-    toast('Metrica guardada ✓')
+    toast('Cambio local. Persistencia en backend pendiente.')
   }
 
   if (loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>

@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { getMonthRange, formatK, formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { backendAuthHeaders } from '@/lib/api'
+import { formatK, formatCash } from '@/shared/lib/format-utils'
 
 type PerfSnapshot = { date: string; views: number; likes: number; comments: number }
 type VideoMetrics = {
@@ -29,7 +30,9 @@ const UNDO_DURATION = 6000
 export default function YouTubePage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
+  const apiBase =
+    (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
   const [videos, setVideos] = useState<Video[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   const [prevVideos, setPrevVideos] = useState<Video[]>([])
@@ -57,30 +60,31 @@ export default function YouTubePage() {
 
   const fetchData = useCallback(async () => {
     if (!ready) return; setLoading(true)
-    const { start, end } = getMonthRange(month)
-    const [y, m] = month.split('-').map(Number)
-    const prevMonth = `${new Date(y, m - 2, 1).getFullYear()}-${String(new Date(y, m - 2, 1).getMonth() + 1).padStart(2, '0')}`
-    const { start: pStart, end: pEnd } = getMonthRange(prevMonth)
-    const [res, leadsRes, prevRes] = await Promise.all([
-      supabase.from('content_items').select('*').eq('content_type', 'video').eq('platform', 'youtube').gte('published_at', start).lte('published_at', end).order('published_at', { ascending: false }),
-      supabase.from('leads').select('client_name, status, payment, program_purchased, agenda_point').eq('month', month),
-      supabase.from('content_items').select('*').eq('content_type', 'video').eq('platform', 'youtube').gte('published_at', pStart).lte('published_at', pEnd),
-    ])
-    setVideos((res.data as Video[]) || [])
-    setLeads((leadsRes.data as Lead[]) || [])
-    setPrevVideos((prevRes.data as Video[]) || [])
+    setVideos([])
+    setLeads([])
+    setPrevVideos([])
     setLoading(false)
-  }, [month, ready, supabase])
+  }, [month, ready])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   const handleSync = async () => {
-    const { data: conn } = await supabase.from('api_connections').select('credentials').eq('platform', 'youtube').maybeSingle()
+    if (!userId) {
+      toast('Iniciá sesión para sincronizar.')
+      return
+    }
+    const cr = await fetch(`${apiBase}/conexiones`, { headers: backendAuthHeaders() })
+    const rows = (await cr.json().catch(() => [])) as { platform: string; credentials: Record<string, string> }[]
+    const conn = rows.find((r) => r.platform === 'youtube')
     const creds = conn?.credentials as Record<string, string> | null
     if (!creds?.api_key || !creds?.channel_id) { toast('Configura YouTube en Conexiones API'); return }
     setSyncing(true); setSyncStatus('Sincronizando...')
     try {
-      const res = await fetch('/api/sync/youtube', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: creds.api_key, channelId: creds.channel_id }) })
+      const res = await fetch('/api/sync/youtube', {
+        method: 'POST',
+        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ apiKey: creds.api_key, channelId: creds.channel_id }),
+      })
       const data = await res.json()
       if (data.error) setSyncStatus(`Error: ${data.error}`)
       else { setSyncStatus(`${data.total} videos. ${data.new} nuevos, ${data.updated} actualizados.`); toast('Sync completado'); await fetchData() }
@@ -89,25 +93,47 @@ export default function YouTubePage() {
   }
 
   const updateField = async (id: string, field: string, value: unknown) => {
-    await supabase.from('content_items').update({ [field]: value, updated_at: new Date().toISOString() }).eq('id', id)
     setVideos(prev => prev.map(v => v.id !== id ? v : { ...v, [field]: value }))
   }
 
   const deleteVideo = async (id: string) => {
     const video = videos.find(v => v.id === id)
     if (!video || !userId || !confirm('Eliminar?')) return
-    await supabase.from('content_items').delete().eq('id', id)
-    showUndo('Eliminado', async () => { await supabase.from('content_items').insert({ user_id: userId, content_type: 'video', platform: 'youtube', title: video.title, notes: video.notes, classification: video.classification, metrics: video.metrics, published_at: video.published_at, url: video.url, external_id: video.external_id, cash: video.cash, chats: video.chats }) })
-    toast('Eliminado'); if (expanded === id) setExpanded(null); fetchData()
+    setVideos((prev) => prev.filter((v) => v.id !== id))
+    showUndo('Eliminado', async () => {
+      setVideos((prev) => [...prev, video])
+    })
+    toast('Eliminado')
+    if (expanded === id) setExpanded(null)
   }
 
   const analyzeVideo = async (video: Video, manualTranscript?: string) => {
     setAnalyzingId(video.id)
     try {
-      const res = await fetch('/api/youtube-analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contentItemId: video.id, manualTranscript: manualTranscript || undefined }) })
+      const res = await fetch('/api/youtube-analyze', {
+        method: 'POST',
+        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          contentItemId: video.id,
+          manualTranscript: manualTranscript || undefined,
+          title: video.title,
+          classification: video.classification || {},
+        }),
+      })
       const data = await res.json()
       if (data.error) toast(`Error: ${data.error}`)
-      else { toast(`Analisis completo (fuente: ${data.source})`); setShowTranscriptFor(null); setTranscriptInput(''); fetchData() }
+      else {
+        toast(`Analisis completo (fuente: ${data.source})`)
+        setShowTranscriptFor(null)
+        setTranscriptInput('')
+        if (data.classification) {
+          setVideos((prev) =>
+            prev.map((v) =>
+              v.id === video.id ? { ...v, classification: { ...v.classification, ...(data.classification as VideoClassification) } } : v
+            )
+          )
+        }
+      }
     } catch (e) { toast(`Error: ${(e as Error).message}`) }
     setAnalyzingId(null)
   }

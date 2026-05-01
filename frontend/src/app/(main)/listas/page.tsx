@@ -1,67 +1,67 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, backendAuthHeaders, resolveBackendUserId } from '@/lib/api'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
 
 const CATEGORIES = [
-  { key: 'dolores', label: 'Dolores', defaults: ['No tiene tiempo', 'No sabe vender', 'No tiene sistema', 'Estancado en revenue', 'No tiene equipo'] },
-  { key: 'angulos', label: 'Angulos', defaults: ['VSL Chat', 'Reporte del closer', 'Proceso de agendamiento corto', 'QuickCash', 'Evergreen Value', 'Metodo unico'] },
-  { key: 'ctas', label: 'CTAs', defaults: ['INFO', 'SISTEMA', 'SOP', 'REPORTE', 'GRATIS'] },
-]
+  { key: 'dolores', label: 'Dolores' },
+  { key: 'angulos', label: 'Angulos' },
+  { key: 'ctas', label: 'CTAs' },
+] as const
 
 export default function ListasMaestrasPage() {
   const { toast } = useToast()
-  const { ready, userId } = useSupabase()
+  const { ready } = useAuthUser()
   const [lists, setLists] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(true)
 
   const fetchLists = useCallback(async () => {
     if (!ready) return
+    if (!resolveBackendUserId()) {
+      setLists({ dolores: [], angulos: [], ctas: [] })
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const res = await apiFetch('/master-lists', {
-        headers: userId ? { 'X-User-Id': userId } : undefined,
+        headers: backendAuthHeaders(),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         const detail = typeof data === 'object' && data && 'detail' in data ? String((data as { detail: unknown }).detail) : res.statusText
         toast(`Error al cargar listas: ${detail}`)
       } else {
+        const norm = (v: unknown): string[] => {
+          if (!Array.isArray(v)) return []
+          return v.map((x) => String(x ?? '').trim()).filter(Boolean)
+        }
         setLists({
-          dolores: Array.isArray(data.dolores) ? data.dolores : [],
-          angulos: Array.isArray(data.angulos) ? data.angulos : [],
-          ctas: Array.isArray(data.ctas) ? data.ctas : [],
+          dolores: norm(data.dolores),
+          angulos: norm(data.angulos),
+          ctas: norm(data.ctas),
         })
       }
     } finally {
       setLoading(false)
     }
-  }, [ready, userId, toast])
+  }, [ready, toast])
 
-  useEffect(() => { fetchLists() }, [fetchLists])
+  useEffect(() => {
+    fetchLists()
+  }, [fetchLists])
 
-  const saveList = async (category: string, items: string[]) => {
-    if (!userId) return
-    const res = await apiFetch(`/master-lists/${encodeURIComponent(category)}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Id': userId,
-      },
-      body: JSON.stringify({ items }),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      const detail = typeof data === 'object' && data && 'detail' in data ? String((data as { detail: unknown }).detail) : res.statusText
-      toast(`Error al guardar: ${detail}`)
-      return
+  const applyListsResponse = (data: Record<string, unknown>) => {
+    const norm = (v: unknown): string[] => {
+      if (!Array.isArray(v)) return []
+      return v.map((x) => String(x ?? '').trim()).filter(Boolean)
     }
     setLists({
-      dolores: Array.isArray(data.dolores) ? data.dolores : [],
-      angulos: Array.isArray(data.angulos) ? data.angulos : [],
-      ctas: Array.isArray(data.ctas) ? data.ctas : [],
+      dolores: norm(data.dolores),
+      angulos: norm(data.angulos),
+      ctas: norm(data.ctas),
     })
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('master-lists-updated'))
@@ -69,59 +69,98 @@ export default function ListasMaestrasPage() {
   }
 
   const addItem = async (category: string, value: string) => {
-    if (!value.trim()) return
+    const clean = value.trim()
+    if (!clean) return
+    if (!resolveBackendUserId()) {
+      toast('Iniciá sesión para guardar listas')
+      return
+    }
     const current = lists[category] || []
-    if (current.includes(value.trim())) { toast('Ya existe'); return }
-    const updated = [...current, value.trim()]
-    await saveList(category, updated)
-    toast('Agregado ✓')
+    if (current.some((v) => v.toLowerCase() === clean.toLowerCase())) {
+      toast('Ya existe')
+      return
+    }
+    const res = await apiFetch(`/master-lists/${encodeURIComponent(category)}`, {
+      method: 'POST',
+      headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ item: clean }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const detail = typeof data === 'object' && data && 'detail' in data ? String((data as { detail: unknown }).detail) : res.statusText
+      toast(`Error al agregar: ${detail}`)
+      return
+    }
+    applyListsResponse(data as Record<string, unknown>)
+    toast('Guardado')
   }
 
   const removeItem = async (category: string, value: string) => {
-    const updated = (lists[category] || []).filter(v => v !== value)
-    await saveList(category, updated)
-    toast('Eliminado ✓')
+    if (!resolveBackendUserId()) {
+      toast('Iniciá sesión para editar listas')
+      return
+    }
+    const res = await apiFetch(
+      `/master-lists/${encodeURIComponent(category)}/${encodeURIComponent(value)}`,
+      { method: 'DELETE', headers: backendAuthHeaders() },
+    )
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      const detail = typeof data === 'object' && data && 'detail' in data ? String((data as { detail: unknown }).detail) : res.statusText
+      toast(`Error al eliminar: ${detail}`)
+      return
+    }
+    applyListsResponse(data as Record<string, unknown>)
   }
 
-  const seedDefaults = async (category: string, defaults: string[]) => {
-    await saveList(category, defaults)
-    toast('Lista restaurada ✓')
+  if (!ready || loading) {
+    return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
   }
-
-  if (loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-lg font-semibold tracking-tight">Listas Maestras</h2>
-        <p className="mt-1 text-[12px] text-[var(--text3)]">Configuracion de dolores, angulos y CTAs para clasificacion de contenido</p>
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold tracking-tight text-[var(--text)]">Listas Maestras</h2>
+        <p className="mt-1 text-[12px] text-[var(--text3)]">
+          Dolores, ángulos y CTAs para clasificar contenido. Se guardan al instante.
+        </p>
       </div>
 
       <div className="space-y-6">
         {CATEGORIES.map((cat) => {
           const items = lists[cat.key] || []
           return (
-            <div key={cat.key} className="glass-card p-6">
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-[12px] font-semibold uppercase tracking-wider text-[var(--text2)]">{cat.label}</h3>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-[var(--bg4)] px-3 py-0.5 font-mono-num text-[11px] text-[var(--text3)]">{items.length}</span>
-                  {items.length === 0 && (
-                    <button
-                      onClick={() => seedDefaults(cat.key, cat.defaults)}
-                      className="text-[10px] text-[var(--accent)] hover:underline"
-                    >
-                      Cargar defaults
-                    </button>
-                  )}
-                </div>
+            <div
+              key={cat.key}
+              className="rounded-2xl border border-[var(--border2)] bg-[var(--bg2)] p-6 shadow-[0_0_0_1px_rgba(200,70,80,0.12),0_0_28px_-8px_rgba(180,50,60,0.35)]"
+            >
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <h3 className="text-[12px] font-semibold uppercase tracking-[0.16em] text-[var(--text)]">
+                  {cat.label}
+                </h3>
+                <span
+                  className="flex h-7 min-w-[1.75rem] items-center justify-center rounded-full bg-[var(--bg4)] px-2 font-mono-num text-[11px] font-medium text-[var(--text3)]"
+                  aria-label={`${items.length} items`}
+                >
+                  {items.length}
+                </span>
               </div>
 
-              <div className="mb-4 flex flex-wrap gap-2">
-                {items.map((item) => (
-                  <span key={item} className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bg3)] px-3 py-1.5 text-[12px] text-[var(--text)]">
-                    {item}
-                    <button onClick={() => removeItem(cat.key, item)} className="text-[var(--text3)] hover:text-[var(--red)] text-[13px]">×</button>
+              <div className="mb-5 flex flex-wrap gap-2">
+                {items.map((item, idx) => (
+                  <span
+                    key={`${cat.key}-${idx}-${item}`}
+                    className="inline-flex max-w-full items-center gap-2 rounded-xl bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)]"
+                  >
+                    <span className="min-w-0 truncate">{item}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeItem(cat.key, item)}
+                      className="shrink-0 text-[14px] leading-none text-[var(--text3)] hover:text-[var(--red)]"
+                      aria-label={`Quitar ${item}`}
+                    >
+                      ×
+                    </button>
                   </span>
                 ))}
               </div>
@@ -135,19 +174,43 @@ export default function ListasMaestrasPage() {
   )
 }
 
-function AddItemInput({ onAdd }: { onAdd: (val: string) => void }) {
+function AddItemInput({ onAdd }: { onAdd: (val: string) => void | Promise<void> }) {
   const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const v = value.trim()
+    if (!v || busy) return
+    setBusy(true)
+    try {
+      await onAdd(v)
+      setValue('')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="flex gap-2">
+    <div className="flex w-full gap-2">
       <input
-        type="text" value={value} onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') { onAdd(value); setValue('') } }}
+        type="text"
+        value={value}
+        disabled={busy}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            void submit()
+          }
+        }}
         placeholder="Agregar nuevo..."
-        className="flex-1 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+        className="min-w-0 flex-1 rounded-xl border border-[var(--border2)] bg-[var(--bg3)] px-4 py-3 text-[13px] text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text3)] focus:border-[var(--accent)]/60 focus:ring-1 focus:ring-[var(--accent)]/20 disabled:opacity-50"
       />
       <button
-        onClick={() => { onAdd(value); setValue('') }}
-        className="rounded-lg border border-[var(--border2)] px-4 py-2 text-[11px] font-semibold uppercase text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+        type="button"
+        disabled={busy || !value.trim()}
+        onClick={() => void submit()}
+        className="shrink-0 rounded-xl border border-[var(--border2)] bg-[var(--bg3)] px-5 py-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--text)] transition-colors hover:border-[var(--accent)]/50 hover:text-[var(--accent)] disabled:pointer-events-none disabled:opacity-40"
       >
         Agregar
       </button>

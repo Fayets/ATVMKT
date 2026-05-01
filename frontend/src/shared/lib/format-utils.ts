@@ -1,10 +1,3 @@
-import { createClient } from '@/lib/supabase/client'
-
-// Generic typed query helpers for client-side CRUD
-export function getSupabase() {
-  return createClient()
-}
-
 export function getMonthRange(month: string): { start: string; end: string } {
   const [year, m] = month.split('-').map(Number)
   const start = new Date(year, m - 1, 1).toISOString()

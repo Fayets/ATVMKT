@@ -24,15 +24,42 @@ def require_user_id(
 def list_reels(
     user_id: Annotated[str, Depends(require_user_id)],
     month: str | None = Query(default=None, description="Formato YYYY-MM"),
+    months: str | None = Query(default=None, description="Varios meses YYYY-MM separados por coma (p. ej. comparación)"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=50),
 ) -> ReelsListResponse:
     try:
-        return service.list_reels(user_id, month, page, page_size)
+        return service.list_reels(user_id, month, page, page_size, months_csv=months)
     except HTTPException as e:
         raise e
     except Exception:
         raise HTTPException(status_code=500, detail="Error inesperado al listar reels.")
+
+
+@router.get("/sync-status")
+def get_sync_status(
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> dict[str, int | str]:
+    try:
+        return service.get_sync_status(user_id)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al obtener estado de sync de reels.")
+
+
+@router.get("/metrics", response_model=ReelsMetricsOut)
+def get_metrics(
+    user_id: Annotated[str, Depends(require_user_id)],
+    month: str | None = Query(default=None, description="Formato YYYY-MM"),
+    months: str | None = Query(default=None, description="Varios meses YYYY-MM separados por coma"),
+) -> ReelsMetricsOut:
+    try:
+        return service.get_metrics(user_id, month, months_csv=months)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al obtener métricas de reels.")
 
 
 @router.get("/{reel_id}", response_model=ReelResponse)
@@ -106,26 +133,14 @@ async def sync_instagram_range(
         raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels por rango.")
 
 
-@router.get("/sync-status")
-def get_sync_status(
+@router.post("/refresh-metrics")
+async def refresh_reels_metrics(
     user_id: Annotated[str, Depends(require_user_id)],
-) -> dict[str, int | str]:
+) -> dict[str, str]:
     try:
-        return service.get_sync_status(user_id)
+        service.trigger_refresh_metrics(user_id)
+        return {"status": "started"}
     except HTTPException as e:
         raise e
     except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al obtener estado de sync de reels.")
-
-
-@router.get("/metrics", response_model=ReelsMetricsOut)
-def get_metrics(
-    user_id: Annotated[str, Depends(require_user_id)],
-    month: str | None = Query(default=None, description="Formato YYYY-MM"),
-) -> ReelsMetricsOut:
-    try:
-        return service.get_metrics(user_id, month)
-    except HTTPException as e:
-        raise e
-    except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al obtener métricas de reels.")
+        raise HTTPException(status_code=500, detail="Error inesperado al actualizar metricas de reels.")

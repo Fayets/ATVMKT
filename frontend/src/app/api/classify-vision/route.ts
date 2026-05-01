@@ -1,11 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireNumericUserId } from '@/lib/request-user'
 import { NextResponse } from 'next/server'
 
 // POST /api/classify-vision — Classify content using Claude Vision on thumbnail images
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const uid = requireNumericUserId(request)
+  if (uid instanceof NextResponse) return uid
 
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 500 })
@@ -13,10 +12,7 @@ export async function POST(request: Request) {
   const { contentId, imageUrl } = await request.json()
   if (!contentId || !imageUrl) return NextResponse.json({ error: 'Missing contentId or imageUrl' }, { status: 400 })
 
-  // Get master lists
-  const { data: lists } = await supabase.from('master_lists').select('category, items').eq('user_id', user.id)
   const ml: Record<string, string[]> = {}
-  ;(lists || []).forEach((r: { category: string; items: unknown }) => { ml[r.category] = Array.isArray(r.items) ? r.items as string[] : [] })
 
   try {
     // Download image
@@ -59,13 +55,7 @@ Responde SOLO JSON: {"dolor":"","angulos":[""],"cta":"","titulo":""}
     const jsonStr = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim()
     const parsed = JSON.parse(jsonStr)
 
-    // Update the content item
-    await supabase.from('content_items').update({
-      classification: { dolor: parsed.dolor || '', angulos: parsed.angulos || [], cta: '', secuencia: '' },
-      updated_at: new Date().toISOString(),
-    }).eq('id', contentId)
-
-    return NextResponse.json({ success: true, classification: parsed })
+    return NextResponse.json({ success: true, classification: parsed, contentId, userId: uid })
   } catch (e) {
     return NextResponse.json({ error: `Vision classify failed: ${(e as Error).message}` }, { status: 500 })
   }

@@ -21,6 +21,7 @@ class AuthLoginRequest(BaseModel):
 class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user_id: int
 
 
 class AuthMeResponse(BaseModel):
@@ -29,6 +30,10 @@ class AuthMeResponse(BaseModel):
 
 class MasterListUpsertRequest(BaseModel):
     items: list[str] = Field(default_factory=list)
+
+
+class MasterListAddItemRequest(BaseModel):
+    item: str = ""
 
 
 class MasterListsResponse(BaseModel):
@@ -48,28 +53,6 @@ class ApiConnectionResponse(BaseModel):
 
 class ApiConnectionUpsertRequest(BaseModel):
     credentials: dict[str, Any] = Field(default_factory=dict)
-
-
-class AirtableVerifyResponse(BaseModel):
-    ok: bool
-    message: str
-    whoami_id: str | None = None
-    scopes: list[str] = Field(default_factory=list)
-    base_id: str | None = None
-    table_names: list[str] = Field(default_factory=list)
-    table_match: bool | None = None
-
-
-class AirtableLeadsListResponse(BaseModel):
-    """Registros crudos de la tabla configurada (id, createdTime, fields) para la vista Leads."""
-
-    base_id: str | None = None
-    table_name: str | None = None
-    """Si se usó Table ID (tbl...) en la URL de la API."""
-    table_id: str | None = None
-    """Vista Airtable (viw…) si está configurada; filtra/ordena como en el tablero."""
-    view_id: str | None = None
-    records: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReelResponse(BaseModel):
@@ -108,6 +91,11 @@ class ReelsListResponse(BaseModel):
 class ReelPatchRequest(BaseModel):
     cash: float | None = None
     chats: int | None = None
+    chats_manuales: int | None = None
+    dolor: str | None = None
+    angulos: str | None = None
+    cta: str | None = None
+
 
 
 class ReelKeywordPatchRequest(BaseModel):
@@ -134,7 +122,8 @@ class ReelsSyncResponse(BaseModel):
 class ReelsMetricsOut(BaseModel):
     chats_del_mes: int
     piezas_publicadas: int
-    sin_clasificar: int
+    reels_con_cta: int
+    reels_sin_cta: int
 
 
 class ManychatChatResponse(BaseModel):
@@ -149,8 +138,7 @@ class ManychatChatResponse(BaseModel):
     manychat_last_input: str | None = None
     """Resumen de custom fields del suscriptor (para contexto / bio)."""
     manychat_custom_fields_preview: str | None = None
-    # Enlace con Airtable (mismo IG que columna IG / Instagram en leads)
-    lead_airtable_record_id: str | None = None
+    lead_airtable_record_id: str | None = None  # ID externo legacy (opcional)
     lead_status: str | None = None
     lead_client_name: str | None = None
     lead_program_purchased: str | None = None
@@ -243,7 +231,7 @@ class BioLeadResponse(BaseModel):
     avatar_url: str | None = None
     subscribed_at: str | None = None
     keyword: str | None = None
-    """Valor del single select / texto \"Vía\" en Airtable (Perfil, Automático - ManyChat, etc.)."""
+    """Origen / canal (ej. Perfil, Automático - ManyChat)."""
     via: str | None = None
     airtable_found: bool = False
     airtable_record_id: str | None = None
@@ -258,12 +246,18 @@ class BioLeadResponse(BaseModel):
     notas: str | None = None
     manychat_chat_url: str | None = None
     respondio_auto: bool = False
+    # Campos tabla Lead (Neon)
+    content_url: str | None = None
+    manychat_contact_id: str | None = None
+    programa_ofrecido: str | None = None
+    fecha_bot: str | None = None
+    agendo: bool = False
 
 
 class BioLeadsListResponse(BaseModel):
     leads: list[BioLeadResponse] = Field(default_factory=list)
     manychat_active: bool = True
-    connected_to_airtable: bool = True
+    connected_to_airtable: bool = False
 
 
 class BioLeadStatusPatchRequest(BaseModel):
@@ -278,11 +272,13 @@ class BioMetricsResponse(BaseModel):
     total_leads: int = 0
     agendaron: int = 0
     cerrados: int = 0
+    tasa_agenda: float = 0
     cash_total: float = 0
-    cash_por_lead: float = 0
-    tasa_conversion: float = 0
     cash_por_chat: float = 0
+    respondio_auto: int = 0
     tasa_respuesta_auto: float | None = None
+    cash_por_lead: float = 0
+    tasa_conversion: float = Field(default=0, description="Alias de tasa_agenda (compatibilidad vista BIO)")
 
 
 class BioManychatStatusResponse(BaseModel):
@@ -292,7 +288,7 @@ class BioManychatStatusResponse(BaseModel):
 
 
 class BioViaOptionsResponse(BaseModel):
-    """Valores únicos del campo Vía en la tabla de leads (Airtable)."""
+    """Valores únicos del campo Vía en leads."""
 
     options: list[str] = Field(default_factory=list)
 
@@ -352,3 +348,60 @@ class StoriesMetricsOut(BaseModel):
     secuencias_con_cta: int
     secuencias_sin_cta: int
     stories_sincronizadas: int
+
+
+class LeadOut(BaseModel):
+    """Paridad con `Lead` en BD + campos que usa la tabla del frontend."""
+
+    id: str
+    lead_user_id: str = Field(..., description="user_id del dueño del lead (columna user_id en BD)")
+    client_name: str = ""
+    ig_handle: str | None = None
+    phone: str | None = None
+    avatar_type: str | None = None
+    status: str = "Pendiente"
+    origin: str | None = None
+    entry_channel: str | None = None
+    entry_funnel: str | None = None
+    keyword: str | None = Field(default=None, description="keyword en BD (ManyChat / reel)")
+    agenda_point: str | None = None
+    ctas_responded: int = 0
+    first_contact_at: str | None = None
+    fecha_bot: str | None = None
+    scheduled_at: str | None = None
+    agendo: bool | None = None
+    call_at: str | None = None
+    call: bool | None = Field(default=None, description="call en BD (hubo llamada)")
+    call_link: str | None = None
+    closer_report: str | None = None
+    program_offered: str | None = None
+    program_purchased: str | None = None
+    revenue: float = 0
+    payment: float = 0
+    owed: float = 0
+    closer: str | None = None
+    setter: str | None = None
+    notes: str | None = None
+    date: str
+    month: str | None = None
+    email: str | None = None
+    dolores_setting: str | None = None
+    dolores_setting_detail: str | None = None
+    dolores_llamada: str | None = None
+    razon_compra: str | None = None
+    pago_en_llamada: float = 0
+    dias_agendamiento: int | None = None
+    ingresos_mensuales: float = 0
+    compromiso: str | None = None
+    urgencia: str | None = None
+    disposicion_invertir: str | None = None
+    calendly_event_uri: str | None = None
+    calendly_invitee_uri: str | None = None
+    source_type: str | None = None
+    content_url: str | None = None
+    manychat_contact_id: str | None = None
+    respondio_auto: bool | None = None
+
+
+class LeadsListResponse(BaseModel):
+    leads: list[LeadOut] = Field(default_factory=list)

@@ -6,7 +6,6 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from datetime import date, datetime, time as dt_time, timezone
 from zoneinfo import ZoneInfo
 
@@ -14,27 +13,98 @@ import certifi
 from fastapi import HTTPException
 from pony.orm import ObjectNotFound, db_session, rollback
 
-from src.models import ApiConnection, ReelContent, db
+from src.models import ApiConnection, ReelContent
 from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse
-from src.services.airtable_service import AirtableService
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 _sync_lock = threading.Lock()
 _sync_states: dict[str, dict[str, int | str]] = {}
 _sync_tasks: dict[str, asyncio.Task] = {}
-SYNC_REELS_SINCE = datetime(2024, 12, 1, tzinfo=AR_TZ)
+_refresh_metrics_tasks: dict[str, asyncio.Task] = {}
+
+# Opciones de lista maestra que significan "sin CTA" (no cuentan en reels_con_cta).
+_CTA_NEGATIVE_FOR_METRICS = frozenset(
+    {
+        "no",
+        "ninguno",
+        "ninguna",
+        "sin cta",
+        "sin_cta",
+        "sin-cta",
+        "n/a",
+        "na",
+        "none",
+        "false",
+        "0",
+        "-",
+    }
+)
+
+
+def _cta_counts_as_reel_con_cta(cta: str | None) -> bool:
+    """True si el reel debe figurar en métricas como 'con CTA' (tiene CTA real o 'Sí')."""
+    s = (cta or "").strip().casefold().rstrip(".!¡?")
+    if not s:
+        return False
+    s = (
+        s.replace("í", "i")
+        .replace("á", "a")
+        .replace("é", "e")
+        .replace("ó", "o")
+        .replace("ú", "u")
+    )
+    return s not in _CTA_NEGATIVE_FOR_METRICS
 
 
 class ReelsServices:
-    def _normalize_keyword(self, value: str | None) -> str:
-        raw = str(value or "").strip().lower()
-        return re.sub(r"\s+", " ", raw)
+    @staticmethod
+    def _normalize_graph_timestamp_string(ts: str) -> str:
+        """Graph API suele enviar offset como +0000; fromisoformat requiere +00:00."""
+        s = ts.strip().replace("Z", "+00:00")
+        if re.search(r"[+-]\d{4}$", s) and not re.search(r"[+-]\d{2}:\d{2}$", s):
+            return s[:-2] + ":" + s[-2:]
+        return s
+
+    @classmethod
+    def _parse_graph_timestamp(cls, ts: str) -> datetime:
+        s = cls._normalize_graph_timestamp_string(ts)
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @staticmethod
+    def _as_utc(dt: datetime) -> datetime:
+        """Naive desde BD se interpreta como UTC (timestamptz de Postgres)."""
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    @classmethod
+    def _month_key_ar(cls, dt: datetime | None) -> str | None:
+        if dt is None:
+            return None
+        return cls._as_utc(dt).astimezone(AR_TZ).strftime("%Y-%m")
+
+    def _store_publication_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=AR_TZ)
+        return value.astimezone(timezone.utc)
 
     def _is_user_sync_running(self, user_id: str) -> bool:
         task = _sync_tasks.get(user_id)
         return task is not None and not task.done()
 
+    def _is_user_refresh_metrics_running(self, user_id: str) -> bool:
+        task = _refresh_metrics_tasks.get(user_id)
+        return task is not None and not task.done()
+
     def trigger_sync(self, user_id: str) -> None:
+        if self._is_user_refresh_metrics_running(user_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Ya hay una actualizacion de metricas en curso. Espera a que termine.",
+            )
         if self._is_user_sync_running(user_id):
             raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
 
@@ -46,6 +116,11 @@ class ReelsServices:
         _sync_tasks[user_id] = task
 
     def trigger_sync_range(self, user_id: str, date_from: date, date_to: date) -> None:
+        if self._is_user_refresh_metrics_running(user_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Ya hay una actualizacion de metricas en curso. Espera a que termine.",
+            )
         if self._is_user_sync_running(user_id):
             raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
 
@@ -55,6 +130,22 @@ class ReelsServices:
         task = asyncio.create_task(_runner())
         task.add_done_callback(lambda _: _sync_tasks.pop(user_id, None))
         _sync_tasks[user_id] = task
+
+    def trigger_refresh_metrics(self, user_id: str) -> None:
+        if self._is_user_sync_running(user_id):
+            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+        if self._is_user_refresh_metrics_running(user_id):
+            raise HTTPException(
+                status_code=409,
+                detail="Ya hay una actualizacion de metricas en curso.",
+            )
+
+        async def _runner() -> None:
+            await self.refresh_metrics(user_id)
+
+        task = asyncio.create_task(_runner())
+        task.add_done_callback(lambda _: _refresh_metrics_tasks.pop(user_id, None))
+        _refresh_metrics_tasks[user_id] = task
 
     def _set_sync_state(
         self,
@@ -75,57 +166,76 @@ class ReelsServices:
         }
 
     def _to_response(self, row: ReelContent) -> ReelResponse:
+        metrics = {
+            "plays": row.plays,
+            "reach": row.reach,
+            "likes": row.likes,
+            "comments": row.comentarios,
+            "comentarios": row.comentarios,
+            "shares": row.shares,
+            "guardados": row.guardados,
+            "thumbnail": row.thumbnail_url or "",
+        }
+        classification: dict = {}
+        if row.dolor:
+            classification["dolor"] = row.dolor
+        if row.angulos:
+            classification["angulos"] = row.angulos
+        if row.cta:
+            classification["cta"] = row.cta
+        pub = row.fecha_publicacion
+        published_at_api = self._as_utc(pub) if pub else None
+        chats_manuales = int(row.chats_manuales or 0)
+        chats_leads = self._chats_leads_for_reel(row)
+        chats_total = chats_manuales + chats_leads
         return ReelResponse(
-            id=row.id,
+            id=str(row.id),
             title=row.title,
-            content_type=row.content_type,
-            platform=row.platform,
-            metrics=row.metrics if isinstance(row.metrics, dict) else {},
-            classification=row.classification if isinstance(row.classification, dict) else {},
-            cash=row.cash,
-            chats=row.chats,
-            published_at=row.published_at,
-            url=row.url,
-            notes=row.notes,
-            external_id=row.external_id,
+            content_type="reel",
+            platform="instagram",
+            metrics=metrics,
+            classification=classification,
+            cash=float(row.cash),
+            chats=chats_total,
+            published_at=published_at_api,
+            url=row.permalink,
+            notes=None,
+            external_id=row.instagram_id,
             keyword=row.keyword,
-            content_url=row.content_url,
-            chats_count=row.chats_count,
-            manual_cash=row.manual_cash,
-            manual_chats=row.manual_chats,
+            content_url=row.permalink,
+            chats_count=0,
+            manual_cash=float(row.cash),
+            manual_chats=chats_manuales,
             cash_total=0,
-            cpc=0,
+            cpc=(float(row.cash) / chats_total) if chats_total > 0 else 0,
         )
 
-    def _apply_airtable_metrics(
+    def _chats_leads_for_reel(self, _row: ReelContent) -> int:
+        """Chats atribuibles a leads (tabla leads pendiente)."""
+        return 0
+
+    def _chats_leads_for_response(self, _reel: ReelResponse) -> int:
+        """Misma fuente que _chats_leads_for_reel cuando no hay fila Pony a mano."""
+        return 0
+
+    def _finalize_reel_response(
         self,
         *,
         user_id: str,
         reel: ReelResponse,
         refresh: bool = False,
     ) -> ReelResponse:
-        airtable = AirtableService()
-        normalized = self._normalize_keyword(reel.keyword)
-
-        if not normalized:
-            reel.cash = float(reel.manual_cash if reel.manual_cash is not None else 0)
-            reel.chats_count = 0
-            reel.chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
-            reel.cash_total = reel.cash
-            reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
-            return reel
-
-        if refresh:
-            airtable.clear_reel_metrics_cache(user_id, normalized, reel.content_url)
-
-        metrics = airtable.get_reel_metrics(user_id, normalized, reel.content_url)
-        airtable_chats = int(metrics.get("chats_count", 0))
-        airtable_cash = float(metrics.get("cash_total", 0) or 0)
-        reel.chats_count = airtable_chats
-        reel.cash_total = airtable_cash
+        """Ajusta cash/chats/CPC desde la BD únicamente (sin integración externa)."""
+        _ = (user_id, refresh)
         manual_chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
-        reel.chats = manual_chats + airtable_chats
-        reel.cash = float(reel.manual_cash if reel.manual_cash is not None else airtable_cash)
+        leads_chats = self._chats_leads_for_response(reel)
+        base_chats = manual_chats + leads_chats
+        db_cash = float(reel.manual_cash if reel.manual_cash is not None else reel.cash or 0)
+        reel.cash = db_cash
+        reel.manual_cash = db_cash
+        reel.chats_count = 0
+        reel.chats = base_chats
+        reel.cash_total = db_cash
         reel.cpc = (reel.cash / reel.chats) if reel.chats > 0 else 0
         return reel
 
@@ -134,78 +244,125 @@ class ReelsServices:
         self,
         *,
         user_id: str,
-        external_id: str,
-        title: str,
-        metrics_json: str,
-        published_at: datetime,
+        instagram_id: str,
+        title: str | None,
+        thumbnail_url: str | None,
         permalink: str | None,
-        caption: str,
+        fecha_publicacion: datetime,
+        plays: int,
+        reach: int,
+        likes: int,
+        comentarios: int,
+        shares: int,
+        guardados: int,
     ) -> bool:
-        now = datetime.now(AR_TZ)
-        result = db.execute(
-            """
-            SELECT id FROM reelcontent
-            WHERE user_id = $user_id AND external_id = $external_id
-            """
-        )
-        existing = result.fetchone()
+        uid = int(user_id)
+        now = datetime.now(timezone.utc)
+        fecha_utc = self._store_publication_utc(fecha_publicacion)
+        existing = ReelContent.get(instagram_id=instagram_id)
         if existing:
-            reel_id = existing[0]
-            db.execute(
-                """
-                UPDATE reelcontent
-                SET title = $title,
-                    metrics = CAST($metrics_json AS jsonb),
-                    published_at = $published_at,
-                    content_url = $permalink,
-                    url = $permalink,
-                    notes = $caption,
-                    updated_at = $now
-                WHERE id = $reel_id
-                """
-            )
+            if existing.user_id != uid:
+                return False
+            if title:
+                existing.title = title
+            if thumbnail_url:
+                existing.thumbnail_url = thumbnail_url
+            if permalink:
+                existing.permalink = permalink
+            existing.fecha_publicacion = fecha_utc
+            existing.plays = plays
+            existing.reach = reach
+            existing.likes = likes
+            existing.comentarios = comentarios
+            existing.shares = shares
+            existing.guardados = guardados
+            existing.updated_at = now
             return False
 
-        reel_id = str(uuid.uuid4())
-        db.execute(
-            """
-            INSERT INTO reelcontent
-            (id, user_id, external_id, title, content_type, platform, metrics, classification, cash, chats, manual_cash, manual_chats, chats_count, keyword, content_url, published_at, url, notes, updated_at)
-            VALUES (
-                $reel_id,
-                $user_id,
-                $external_id,
-                $title,
-                'reel',
-                'instagram',
-                CAST($metrics_json AS jsonb),
-                '{}'::jsonb,
-                0,
-                0,
-                NULL,
-                NULL,
-                0,
-                NULL,
-                $permalink,
-                $published_at,
-                $permalink,
-                $caption,
-                $now
-            )
-            """
-        )
+        insert_kw: dict = {
+            "user_id": uid,
+            "instagram_id": instagram_id,
+            "fecha_publicacion": fecha_utc,
+            "plays": plays,
+            "reach": reach,
+            "likes": likes,
+            "comentarios": comentarios,
+            "shares": shares,
+            "guardados": guardados,
+            "cash": 0,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if title:
+            insert_kw["title"] = title
+        if thumbnail_url:
+            insert_kw["thumbnail_url"] = thumbnail_url
+        if permalink:
+            insert_kw["permalink"] = permalink
+        ReelContent(**insert_kw)
         return True
 
-    def list_reels(self, user_id: str, month: str | None, page: int, page_size: int) -> ReelsListResponse:
+    def _month_filter_set(self, month: str | None, months_csv: str | None) -> set[str] | None:
+        """None = sin filtro; set de claves YYYY-MM."""
+        if months_csv is not None and str(months_csv).strip():
+            raw = [p.strip() for p in str(months_csv).split(",") if p.strip()]
+            if not raw:
+                return None
+            out: set[str] = set()
+            for p in raw:
+                parts = p.split("-", 1)
+                if len(parts) != 2:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Mes inválido: {p!r}. Usá formato YYYY-MM separados por coma.",
+                    )
+                try:
+                    y, mnum = int(parts[0]), int(parts[1])
+                except ValueError as e:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Cada mes debe tener formato YYYY-MM.",
+                    ) from e
+                if mnum < 1 or mnum > 12:
+                    raise HTTPException(status_code=400, detail="Mes inválido (1–12).")
+                out.add(f"{y:04d}-{mnum:02d}")
+            return out
+        if month is not None and str(month).strip():
+            m = str(month).strip()
+            parts = m.split("-", 1)
+            if len(parts) != 2:
+                raise HTTPException(status_code=400, detail="El parámetro month debe tener formato YYYY-MM.")
+            try:
+                y, mnum = int(parts[0]), int(parts[1])
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail="El parámetro month debe tener formato YYYY-MM.") from e
+            if mnum < 1 or mnum > 12:
+                raise HTTPException(status_code=400, detail="Mes inválido (1–12).")
+            return {f"{y:04d}-{mnum:02d}"}
+        return None
+
+    def list_reels(
+        self,
+        user_id: str,
+        month: str | None,
+        page: int,
+        page_size: int,
+        months_csv: str | None = None,
+    ) -> ReelsListResponse:
+        uid = int(user_id)
+        month_set = self._month_filter_set(month, months_csv)
         with db_session:
-            rows = [r for r in list(ReelContent.select()) if r.user_id == user_id]
+            rows = [r for r in list(ReelContent.select()) if r.user_id == uid]
             available_months = sorted(
-                {r.published_at.strftime("%Y-%m") for r in rows if r.published_at},
+                {mk for r in rows if r.fecha_publicacion and (mk := self._month_key_ar(r.fecha_publicacion))},
                 reverse=True,
             )
-            if month:
-                rows = [r for r in rows if r.published_at and r.published_at.strftime("%Y-%m") == month]
-            rows.sort(key=lambda r: r.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+            if month_set is not None:
+                rows = [r for r in rows if self._month_key_ar(r.fecha_publicacion) in month_set]
+            rows.sort(
+                key=lambda r: self._as_utc(r.fecha_publicacion) if r.fecha_publicacion else datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
             total = len(rows)
             total_cash = 0.0
             total_chats = 0
@@ -218,7 +375,7 @@ class ReelsServices:
             reels_out = [self._to_response(r) for r in page_rows]
 
         for reel in reels_out:
-            self._apply_airtable_metrics(user_id=user_id, reel=reel, refresh=False)
+            self._finalize_reel_response(user_id=user_id, reel=reel, refresh=False)
             total_cash += float(reel.cash or 0)
             total_chats += int(reel.chats or 0)
 
@@ -234,38 +391,52 @@ class ReelsServices:
         )
 
     def get_reel(self, user_id: str, reel_id: str, refresh: bool = False) -> ReelResponse:
+        uid = int(user_id)
         with db_session:
             try:
-                row = ReelContent.get(id=reel_id, user_id=user_id)
-            except ObjectNotFound as e:
+                row = ReelContent.get(id=int(reel_id), user_id=uid)
+            except (ObjectNotFound, ValueError) as e:
                 raise HTTPException(status_code=404, detail="Reel no encontrado.") from e
             response = self._to_response(row)
 
-        return self._apply_airtable_metrics(user_id=user_id, reel=response, refresh=refresh)
+        return self._finalize_reel_response(user_id=user_id, reel=response, refresh=refresh)
 
     def patch_reel(self, user_id: str, reel_id: str, body: ReelPatchRequest) -> ReelResponse:
-        if body.cash is None and body.chats is None:
-            raise HTTPException(status_code=400, detail="Envía al menos cash o chats para actualizar.")
+        patch = body.model_dump(exclude_unset=True)
+        if not patch:
+            raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
         now = datetime.now(timezone.utc)
+        uid = int(user_id)
         with db_session:
             try:
-                row = ReelContent.get(id=reel_id, user_id=user_id)
-            except ObjectNotFound as e:
+                row = ReelContent.get(id=int(reel_id), user_id=uid)
+            except (ObjectNotFound, ValueError) as e:
                 raise HTTPException(status_code=404, detail="Reel no encontrado.") from e
-            if body.cash is not None:
-                row.manual_cash = float(body.cash)
-            if body.chats is not None:
-                row.manual_chats = int(body.chats)
+            if "cash" in patch and patch["cash"] is not None:
+                row.cash = float(patch["cash"])
+            if "chats_manuales" in patch:
+                row.chats_manuales = max(0, int(patch["chats_manuales"]))
+            elif "chats" in patch:
+                row.chats_manuales = max(0, int(patch["chats"]))
+            for key in ("dolor", "angulos", "cta"):
+                if key not in patch:
+                    continue
+                raw = patch[key]
+                s = (raw or "").strip() if isinstance(raw, str) else ("" if raw is None else str(raw).strip())
+                setattr(row, key, s or None)
             row.updated_at = now
-            return self._to_response(row)
+            response = self._to_response(row)
+        return self._finalize_reel_response(user_id=str(uid), reel=response, refresh=False)
 
     def patch_reel_keyword(self, user_id: str, reel_id: str, body: ReelKeywordPatchRequest) -> ReelResponse:
         normalized_keyword = (body.keyword or "").strip()
         now = datetime.now(timezone.utc)
+        uid = int(user_id)
+        rid = int(reel_id)
         with db_session:
             try:
-                row = ReelContent.get(id=reel_id, user_id=user_id)
-            except ObjectNotFound as e:
+                row = ReelContent.get(id=rid, user_id=uid)
+            except (ObjectNotFound, ValueError) as e:
                 raise HTTPException(status_code=404, detail="Reel no encontrado.") from e
 
             if normalized_keyword:
@@ -273,8 +444,8 @@ class ReelsServices:
                     (
                         r
                         for r in list(ReelContent.select())
-                        if r.user_id == user_id
-                        and r.id != reel_id
+                        if r.user_id == uid
+                        and r.id != rid
                         and (r.keyword or "").strip().lower() == normalized_keyword.lower()
                     ),
                     None,
@@ -282,36 +453,22 @@ class ReelsServices:
                 if duplicated is not None:
                     raise HTTPException(status_code=409, detail="Ya existe otro reel con ese keyword.")
 
-            row.keyword = normalized_keyword or None
+            row.keyword = normalized_keyword
             row.updated_at = now
             return self._to_response(row)
 
     def increment_chats_count_by_keyword(self, user_id: str, keyword: str) -> bool:
-        normalized_keyword = (keyword or "").strip().lower()
-        if not normalized_keyword:
-            return False
-        with db_session:
-            row = next(
-                (
-                    r
-                    for r in list(ReelContent.select())
-                    if r.user_id == user_id and (r.keyword or "").strip().lower() == normalized_keyword
-                ),
-                None,
-            )
-            if row is None:
-                return False
-            row.chats_count = int(row.chats_count or 0) + 1
-            row.updated_at = datetime.now(timezone.utc)
-            return True
+        """Sin columna chats_count en ReelContent; reservado para integraciones futuras."""
+        return False
 
     def _resolve_instagram_conn(self, user_id: str) -> tuple[str, str]:
+        uid = int(user_id)
         with db_session:
             conn = next(
                 (
                     c
                     for c in list(ApiConnection.select())
-                    if c.user_id == user_id and c.platform == "instagram"
+                    if c.user_id == uid and c.platform == "instagram"
                 ),
                 None,
             )
@@ -366,49 +523,202 @@ class ReelsServices:
             return state
         return {"total": 0, "processed": 0, "status": "idle", "phase": "idle", "discovered": 0}
 
-    @db_session
-    def get_metrics(self, user_id: str, month: str | None) -> dict[str, int]:
-        rows = [r for r in list(ReelContent.select()) if r.user_id == user_id]
+    def get_metrics(self, user_id: str, month: str | None, months_csv: str | None = None) -> dict[str, int]:
+        uid = int(user_id)
+        uid_str = str(uid)
+        month_set = self._month_filter_set(month, months_csv)
+        with db_session:
+            rows = [r for r in list(ReelContent.select()) if r.user_id == uid]
+            if month_set is not None:
+                rows = [r for r in rows if self._month_key_ar(r.fecha_publicacion) in month_set]
+            payloads = [{"cta": (r.cta or "").strip(), "reel": self._to_response(r)} for r in rows]
 
-        if month:
-            try:
-                year, month_num = map(int, month.split("-"))
-            except Exception as e:
-                raise HTTPException(status_code=400, detail="El parámetro month debe tener formato YYYY-MM.") from e
-
-            rows = [
-                r
-                for r in rows
-                if r.published_at is not None
-                and r.published_at.astimezone(AR_TZ).year == year
-                and r.published_at.astimezone(AR_TZ).month == month_num
-            ]
-
-        chats_del_mes = sum(int(r.chats or 0) for r in rows)
-        piezas_publicadas = len(rows)
-        sin_clasificar = 0
-        for row in rows:
-            classification = row.classification if isinstance(row.classification, dict) else {}
-            dolor = classification.get("dolor")
-            if dolor is None or str(dolor).strip() == "":
-                sin_clasificar += 1
+        chats_del_mes = 0
+        reels_con_cta = 0
+        reels_sin_cta = 0
+        for p in payloads:
+            reel = self._finalize_reel_response(user_id=uid_str, reel=p["reel"], refresh=False)
+            chats_del_mes += int(reel.chats or 0)
+            if _cta_counts_as_reel_con_cta(p["cta"]):
+                reels_con_cta += 1
+            else:
+                reels_sin_cta += 1
 
         return {
             "chats_del_mes": chats_del_mes,
-            "piezas_publicadas": piezas_publicadas,
-            "sin_clasificar": sin_clasificar,
+            "piezas_publicadas": len(payloads),
+            "reels_con_cta": reels_con_cta,
+            "reels_sin_cta": reels_sin_cta,
         }
+
+    def _ig_fetch_reel_metrics(
+        self,
+        access_token: str,
+        media_id: str,
+        *,
+        like_count: int | None = None,
+        comments_count: int | None = None,
+    ) -> dict[str, int]:
+        """Métricas de un reel vía Graph API (plays, reach, likes, comentarios, shares, guardados)."""
+        headers = {"Accept": "application/json"}
+        insights = {
+            "ig_reels_avg_watch_time": 0,
+            "reach": 0,
+            "saved": 0,
+            "shares": 0,
+            "likes": 0,
+            "comments": 0,
+            "total_interactions": 0,
+        }
+        plays_result = 0
+        for plays_metric in ["video_views", "views"]:
+            plays_url = (
+                f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
+                f"?metric={urllib.parse.quote(plays_metric)}"
+                f"&access_token={urllib.parse.quote(access_token)}"
+            )
+            try:
+                plays_payload = self._http_json(plays_url, headers=headers)
+                plays_data = plays_payload.get("data")
+                metrics_rows = plays_data if isinstance(plays_data, list) else []
+                for m in metrics_rows:
+                    if not isinstance(m, dict):
+                        continue
+                    values = m.get("values")
+                    if isinstance(values, list) and values and isinstance(values[0], dict):
+                        plays_result = int(values[0].get("value") or 0)
+                        break
+                break
+            except Exception:
+                continue
+
+        for metric_name in [
+            "ig_reels_avg_watch_time",
+            "reach",
+            "saved",
+            "shares",
+            "likes",
+            "comments",
+            "total_interactions",
+        ]:
+            insights_url = (
+                f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
+                f"?metric={urllib.parse.quote(metric_name)}"
+                f"&access_token={urllib.parse.quote(access_token)}"
+            )
+            try:
+                insights_payload = self._http_json(insights_url, headers=headers)
+                metrics_rows = insights_payload.get("data") if isinstance(insights_payload.get("data"), list) else []
+                for m in metrics_rows:
+                    if not isinstance(m, dict):
+                        continue
+                    name = str(m.get("name") or "").strip()
+                    values = m.get("values")
+                    value = 0
+                    if isinstance(values, list) and values and isinstance(values[0], dict):
+                        value = int(values[0].get("value") or 0)
+                    if name in insights:
+                        insights[name] = value
+            except Exception:
+                continue
+
+        likes_base = 0 if like_count is None else int(like_count)
+        comments_base = 0 if comments_count is None else int(comments_count)
+        if like_count is None or comments_count is None:
+            try:
+                mf_url = (
+                    f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}"
+                    "?fields=like_count,comments_count"
+                    f"&access_token={urllib.parse.quote(access_token)}"
+                )
+                mf = self._http_json(mf_url, headers=headers)
+                if like_count is None:
+                    likes_base = int(mf.get("like_count") or 0)
+                if comments_count is None:
+                    comments_base = int(mf.get("comments_count") or 0)
+            except Exception:
+                pass
+
+        likes_out = max(likes_base, int(insights.get("likes", 0)))
+        comments_out = max(comments_base, int(insights.get("comments", 0)))
+        return {
+            "plays": int(plays_result),
+            "reach": int(insights.get("reach", 0)),
+            "likes": likes_out,
+            "comentarios": comments_out,
+            "shares": int(insights.get("shares", 0)),
+            "guardados": int(insights.get("saved", 0)),
+        }
+
+    def refresh_metrics_blocking(self, user_id: str) -> dict[str, int]:
+        uid = int(user_id)
+        access_token, _ = self._resolve_instagram_conn(user_id)
+        with db_session:
+            reel_rows = [(r.id, r.instagram_id) for r in list(ReelContent.select()) if r.user_id == uid]
+
+        total = len(reel_rows)
+        self._set_sync_state(user_id, total=total, processed=0, status="running", phase="processing", discovered=total)
+        updated = 0
+        errors = 0
+        processed = 0
+        try:
+            for rid, instagram_id in reel_rows:
+                try:
+                    m = self._ig_fetch_reel_metrics(access_token, instagram_id)
+                    now = datetime.now(timezone.utc)
+                    with db_session:
+                        row = ReelContent.get(id=rid)
+                        if row is None or row.user_id != uid:
+                            continue
+                        row.plays = m["plays"]
+                        row.reach = m["reach"]
+                        row.likes = m["likes"]
+                        row.comentarios = m["comentarios"]
+                        row.shares = m["shares"]
+                        row.guardados = m["guardados"]
+                        row.updated_at = now
+                        updated += 1
+                except Exception as e:
+                    try:
+                        rollback()
+                    except Exception:
+                        pass
+                    errors += 1
+                    print(f"[reels refresh-metrics] ERROR reel id={rid} ig={instagram_id}: {e}")
+                finally:
+                    processed += 1
+                    self._set_sync_state(
+                        user_id,
+                        total=total,
+                        processed=processed,
+                        status="running",
+                        phase="processing",
+                        discovered=total,
+                    )
+
+            self._set_sync_state(user_id, total=total, processed=processed, status="done", phase="done", discovered=total)
+            return {"updated": updated, "errors": errors, "total": total}
+        except Exception:
+            current = _sync_states.get(user_id, {"total": 0, "processed": 0, "discovered": 0})
+            self._set_sync_state(
+                user_id,
+                total=int(current.get("total", 0)),
+                processed=int(current.get("processed", 0)),
+                status="error",
+                phase="error",
+                discovered=int(current.get("discovered", 0)),
+            )
+            raise
 
     def _sync_instagram_blocking(
         self,
         user_id: str,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
+        limit: int = 70,
     ) -> dict[str, int]:
         self._set_sync_state(user_id, total=0, processed=0, status="running", phase="collecting", discovered=0)
         try:
-            lower_bound = date_from or SYNC_REELS_SINCE
-            upper_bound = date_to
             access_token, ig_user_id = self._resolve_instagram_conn(user_id)
             headers = {"Accept": "application/json"}
             media_url = (
@@ -421,6 +731,8 @@ class ReelsServices:
             max_pages = 100
             next_url = media_url
             stop_pagination = False
+            sync_by_date = date_from is not None
+
             while next_url and pages_fetched < max_pages and not stop_pagination:
                 payload = self._http_json(next_url, headers=headers)
                 rows = payload.get("data")
@@ -429,33 +741,51 @@ class ReelsServices:
                         if not isinstance(item, dict):
                             continue
                         media_type = str(item.get("media_type") or "").upper()
-                        if media_type in ("REELS", "VIDEO"):
-                            timestamp_raw = str(item.get("timestamp") or "").strip()
-                            if timestamp_raw:
-                                try:
-                                    published_at = datetime.fromisoformat(timestamp_raw.replace("Z", "+00:00")).astimezone(AR_TZ)
-                                    if published_at < lower_bound:
-                                        stop_pagination = True
-                                        break
-                                    if upper_bound is not None and published_at > upper_bound:
-                                        continue
-                                except Exception:
-                                    pass
-                            else:
+                        if media_type not in ("REELS", "VIDEO"):
+                            continue
+                        timestamp_raw = str(item.get("timestamp") or "").strip()
+                        if not timestamp_raw:
+                            continue
+                        try:
+                            published_at = self._parse_graph_timestamp(timestamp_raw)
+                        except Exception:
+                            continue
+
+                        pub_ar = published_at.astimezone(AR_TZ)
+                        if sync_by_date and date_from is not None:
+                            lower = date_from.astimezone(AR_TZ) if date_from.tzinfo else date_from.replace(tzinfo=AR_TZ)
+                            if pub_ar < lower:
+                                stop_pagination = True
+                                break
+                            if date_to is not None:
+                                upper = date_to.astimezone(AR_TZ) if date_to.tzinfo else date_to.replace(tzinfo=AR_TZ)
+                                if pub_ar > upper:
+                                    continue
+                        elif date_to is not None:
+                            upper = date_to.astimezone(AR_TZ) if date_to.tzinfo else date_to.replace(tzinfo=AR_TZ)
+                            if pub_ar > upper:
                                 continue
+
                         media_items.append(item)
+                        if not sync_by_date and len(media_items) >= limit:
+                            stop_pagination = True
+                            break
+
                 paging = payload.get("paging") if isinstance(payload, dict) else None
                 next_from_api = paging.get("next") if isinstance(paging, dict) else None
                 next_url = str(next_from_api).strip() if next_from_api else ""
                 pages_fetched += 1
-                discovered_reels = sum(
-                    1
-                    for media in media_items
-                    if isinstance(media, dict) and str(media.get("media_type") or "").upper() in ("REELS", "VIDEO")
+                discovered_reels = len(media_items)
+                self._set_sync_state(
+                    user_id,
+                    total=discovered_reels,
+                    processed=0,
+                    status="running",
+                    phase="collecting",
+                    discovered=discovered_reels,
                 )
-                self._set_sync_state(user_id, total=discovered_reels, processed=0, status="running", phase="collecting", discovered=discovered_reels)
 
-            reels = [item for item in media_items if isinstance(item, dict) and str(item.get("media_type") or "").upper() in ("REELS", "VIDEO")]
+            reels = media_items
             synced = 0
             created = 0
             errors = 0
@@ -469,89 +799,39 @@ class ReelsServices:
                     if not media_id:
                         continue
                     caption = str(item.get("caption") or "").strip()
-                    title = caption[:100]
+                    title = caption[:100] if caption else None
                     permalink = str(item.get("permalink") or "").strip() or None
                     thumbnail_url = str(item.get("thumbnail_url") or "").strip() or None
                     likes = int(item.get("like_count") or 0)
                     comments = int(item.get("comments_count") or 0)
                     timestamp = str(item.get("timestamp") or "").strip()
-                    published_at = datetime.now(AR_TZ)
+                    published_at = datetime.now(timezone.utc)
                     if timestamp:
                         try:
-                            published_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(AR_TZ)
+                            published_at = self._parse_graph_timestamp(timestamp)
                         except Exception:
                             pass
-                    if published_at < lower_bound:
-                        continue
-                    if upper_bound is not None and published_at > upper_bound:
-                        continue
 
-                    insights = {"ig_reels_avg_watch_time": 0, "reach": 0, "saved": 0, "shares": 0, "likes": 0, "comments": 0, "total_interactions": 0}
-                    plays_result = 0
-                    for plays_metric in ["video_views", "views"]:
-                        plays_url = (
-                            f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
-                            f"?metric={urllib.parse.quote(plays_metric)}"
-                            f"&access_token={urllib.parse.quote(access_token)}"
-                        )
-                        try:
-                            plays_payload = self._http_json(plays_url, headers=headers)
-                            plays_data = plays_payload.get("data")
-                            metrics_rows = plays_data if isinstance(plays_data, list) else []
-                            for m in metrics_rows:
-                                if not isinstance(m, dict):
-                                    continue
-                                values = m.get("values")
-                                if isinstance(values, list) and values and isinstance(values[0], dict):
-                                    plays_result = int(values[0].get("value") or 0)
-                                    break
-                            break
-                        except Exception:
-                            continue
-
-                    for metric_name in ["ig_reels_avg_watch_time", "reach", "saved", "shares", "likes", "comments", "total_interactions"]:
-                        insights_url = (
-                            f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
-                            f"?metric={urllib.parse.quote(metric_name)}"
-                            f"&access_token={urllib.parse.quote(access_token)}"
-                        )
-                        try:
-                            insights_payload = self._http_json(insights_url, headers=headers)
-                            metrics_rows = insights_payload.get("data") if isinstance(insights_payload.get("data"), list) else []
-                            for m in metrics_rows:
-                                if not isinstance(m, dict):
-                                    continue
-                                name = str(m.get("name") or "").strip()
-                                values = m.get("values")
-                                value = 0
-                                if isinstance(values, list) and values and isinstance(values[0], dict):
-                                    value = int(values[0].get("value") or 0)
-                                if name in insights:
-                                    insights[name] = value
-                        except Exception:
-                            continue
-
-                    metrics_json = json.dumps(
-                        {
-                            "plays": int(plays_result),
-                            "avg_watch_time": int(insights.get("ig_reels_avg_watch_time", 0)),
-                            "likes": likes,
-                            "comments": comments,
-                            "comments_count": comments,
-                            "saved": int(insights.get("saved", 0)),
-                            "shares": int(insights.get("shares", 0)),
-                            "reach": int(insights.get("reach", 0)),
-                            "thumbnail": thumbnail_url or "",
-                        }
+                    m = self._ig_fetch_reel_metrics(
+                        access_token,
+                        media_id,
+                        like_count=likes,
+                        comments_count=comments,
                     )
+
                     created_this_reel = self._upsert_reel_content(
                         user_id=user_id,
-                        external_id=media_id,
+                        instagram_id=media_id,
                         title=title,
-                        metrics_json=metrics_json,
-                        published_at=published_at,
+                        thumbnail_url=thumbnail_url,
                         permalink=permalink,
-                        caption=caption,
+                        fecha_publicacion=published_at,
+                        plays=m["plays"],
+                        reach=m["reach"],
+                        likes=m["likes"],
+                        comentarios=m["comentarios"],
+                        shares=m["shares"],
+                        guardados=m["guardados"],
                     )
                     if created_this_reel:
                         created += 1
@@ -584,7 +864,7 @@ class ReelsServices:
     async def sync_instagram(self, user_id: str) -> dict[str, int]:
         acquired = _sync_lock.acquire(blocking=False)
         if not acquired:
-            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+            raise HTTPException(status_code=409, detail="Ya hay una operacion de reels en curso.")
         try:
             return await asyncio.to_thread(self._sync_instagram_blocking, user_id)
         finally:
@@ -593,10 +873,19 @@ class ReelsServices:
     async def sync_instagram_range(self, user_id: str, date_from: date, date_to: date) -> dict[str, int]:
         acquired = _sync_lock.acquire(blocking=False)
         if not acquired:
-            raise HTTPException(status_code=409, detail="Ya hay una sincronizacion de reels en curso.")
+            raise HTTPException(status_code=409, detail="Ya hay una operacion de reels en curso.")
         try:
             start_dt = datetime.combine(date_from, dt_time.min).replace(tzinfo=AR_TZ)
             end_dt = datetime.combine(date_to, dt_time.max).replace(tzinfo=AR_TZ)
             return await asyncio.to_thread(self._sync_instagram_blocking, user_id, start_dt, end_dt)
+        finally:
+            _sync_lock.release()
+
+    async def refresh_metrics(self, user_id: str) -> dict[str, int]:
+        acquired = _sync_lock.acquire(blocking=False)
+        if not acquired:
+            raise HTTPException(status_code=409, detail="Ya hay una operacion de reels en curso.")
+        try:
+            return await asyncio.to_thread(self.refresh_metrics_blocking, user_id)
         finally:
             _sync_lock.release()

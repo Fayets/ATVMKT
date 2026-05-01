@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { apiFetch } from '@/lib/api'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
 
 type Reel = {
   id: string
@@ -40,7 +40,8 @@ type ReelsListResponse = {
 type ReelsMetrics = {
   chats_del_mes: number
   piezas_publicadas: number
-  sin_clasificar: number
+  reels_con_cta: number
+  reels_sin_cta: number
 }
 
 type SyncStatus = {
@@ -53,12 +54,17 @@ type SyncStatus = {
 
 export default function ReelsPage() {
   const { toast } = useToast()
-  const { ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [reels, setReels] = useState<Reel[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
   const [showRangeSyncModal, setShowRangeSyncModal] = useState(false)
+  const [showComparisonModal, setShowComparisonModal] = useState(false)
+  const [comparisonDraftA, setComparisonDraftA] = useState('')
+  const [comparisonDraftB, setComparisonDraftB] = useState('')
+  const [comparisonMonths, setComparisonMonths] = useState<[string, string] | null>(null)
+  const [availableMonths, setAvailableMonths] = useState<string[]>([])
   const [rangeFrom, setRangeFrom] = useState('')
   const [rangeTo, setRangeTo] = useState('')
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -69,7 +75,8 @@ export default function ReelsPage() {
   const [metrics, setMetrics] = useState<ReelsMetrics>({
     chats_del_mes: 0,
     piezas_publicadas: 0,
-    sin_clasificar: 0,
+    reels_con_cta: 0,
+    reels_sin_cta: 0,
   })
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ total: 0, processed: 0, status: 'idle' })
   const previousSyncStatus = useRef<SyncStatus['status']>('idle')
@@ -92,14 +99,25 @@ export default function ReelsPage() {
     return headers
   }
 
-  const selectedMonth = useMemo(() => {
-    const now = new Date()
-    const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    if (monthMode === 'all') return null
-    if (monthMode === 'current') return current
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
-  }, [monthMode])
+  const monthChoices = useMemo(() => {
+    const merged = [...new Set([...availableMonths, ...recentMonthOptions(36)])]
+    merged.sort((a, b) => b.localeCompare(a))
+    return merged
+  }, [availableMonths])
+
+  const filterSubtitle = useMemo(() => {
+    if (monthMode === 'all') return 'Todos los meses'
+    if (monthMode === 'current') {
+      const n = new Date()
+      const ym = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+      return formatMonthLabel(ym)
+    }
+    if (monthMode === 'comparison' && comparisonMonths) {
+      const [a, b] = comparisonMonths
+      return `${formatMonthLabel(a)} vs ${formatMonthLabel(b)}`
+    }
+    return 'Comparación'
+  }, [monthMode, comparisonMonths])
 
   const parseJson = async <T,>(res: Response): Promise<T> => {
     const text = await res.text()
@@ -121,8 +139,16 @@ export default function ReelsPage() {
     if (!ready) return
     setLoading(true)
     try {
-      const monthParam = selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ''
-      const res = await apiFetch(`/reels?page=${page}&page_size=${PAGE_SIZE}${monthParam}`, {
+      let monthQuery = ''
+      if (monthMode === 'current') {
+        const n = new Date()
+        const ym = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+        monthQuery = `&month=${encodeURIComponent(ym)}`
+      } else if (monthMode === 'comparison' && comparisonMonths && comparisonMonths.length === 2) {
+        const sorted = [...comparisonMonths].sort((a, b) => a.localeCompare(b))
+        monthQuery = `&months=${encodeURIComponent(sorted.join(','))}`
+      }
+      const res = await apiFetch(`/reels?page=${page}&page_size=${PAGE_SIZE}${monthQuery}`, {
         headers: authHeaders(),
       })
       const data = await parseJson<ReelsListResponse>(res)
@@ -132,26 +158,40 @@ export default function ReelsPage() {
         total_cash: Number(data.total_cash || 0),
         total_chats: Number(data.total_chats || 0),
       })
+      setAvailableMonths(Array.isArray(data.available_months) ? data.available_months : [])
     } catch (e) {
       toast(`Error al cargar reels: ${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
-  }, [page, selectedMonth, ready, userId, toast])
+  }, [page, monthMode, comparisonMonths, ready, userId, toast])
 
   const fetchMetrics = useCallback(async () => {
     if (!ready) return
     try {
-      const monthParam = selectedMonth ? `?month=${encodeURIComponent(selectedMonth)}` : ''
-      const res = await apiFetch(`/reels/metrics${monthParam}`, {
+      let q = ''
+      if (monthMode === 'current') {
+        const n = new Date()
+        const ym = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+        q = `?month=${encodeURIComponent(ym)}`
+      } else if (monthMode === 'comparison' && comparisonMonths && comparisonMonths.length === 2) {
+        const sorted = [...comparisonMonths].sort((a, b) => a.localeCompare(b))
+        q = `?months=${encodeURIComponent(sorted.join(','))}`
+      }
+      const res = await apiFetch(`/reels/metrics${q}`, {
         headers: authHeaders(),
       })
       const data = await parseJson<ReelsMetrics>(res)
-      setMetrics(data)
+      setMetrics({
+        chats_del_mes: Number(data.chats_del_mes ?? 0),
+        piezas_publicadas: Number(data.piezas_publicadas ?? 0),
+        reels_con_cta: Number(data.reels_con_cta ?? 0),
+        reels_sin_cta: Number(data.reels_sin_cta ?? 0),
+      })
     } catch (e) {
       toast(`Error al cargar métricas de reels: ${(e as Error).message}`)
     }
-  }, [selectedMonth, ready, userId, toast])
+  }, [monthMode, comparisonMonths, ready, userId, toast])
 
   const fetchSyncStatus = useCallback(async () => {
     if (!ready) return
@@ -231,10 +271,28 @@ export default function ReelsPage() {
     previousSyncStatus.current = current
   }, [syncStatus.status, fetchData, fetchMetrics])
 
-  const handleSync = async () => {
+  const handleRefreshMetrics = async () => {
     if (!ready || syncStatus.status === 'running') return
     setSyncing(true)
-    setSyncMessage('Sincronizando...')
+    setSyncMessage('Actualizando métricas...')
+    setSyncStatus((prev) => ({ ...prev, status: 'running', processed: 0 }))
+    fetchSyncStatus()
+    try {
+      const res = await apiFetch('/reels/refresh-metrics', { method: 'POST', headers: authHeaders() })
+      await parseJson<{ status: string }>(res)
+      await fetchSyncStatus()
+    } catch (e) {
+      setSyncMessage(`Error: ${(e as Error).message}`)
+      setSyncing(false)
+    } finally {
+      await fetchSyncStatus()
+    }
+  }
+
+  const handleSyncNewReels = async () => {
+    if (!ready || syncStatus.status === 'running') return
+    setSyncing(true)
+    setSyncMessage('Buscando nuevos reels...')
     setSyncStatus((prev) => ({ ...prev, status: 'running', processed: 0 }))
     fetchSyncStatus()
     try {
@@ -301,7 +359,7 @@ export default function ReelsPage() {
   }
 
   const updateKeyword = async (id: string, keyword: string) => {
-    if (!ready) return
+    if (!ready) throw new Error('Sesión no lista')
     const cleanKeyword = keyword.trim()
     try {
       const res = await apiFetch(`/reels/${encodeURIComponent(id)}/keyword`, {
@@ -314,7 +372,20 @@ export default function ReelsPage() {
       toast('Keyword guardado')
     } catch (e) {
       toast(`No se pudo guardar keyword: ${(e as Error).message}`)
+      throw e
     }
+  }
+
+  const updateClassification = async (id: string, partial: { dolor?: string; angulos?: string; cta?: string }) => {
+    if (!ready) throw new Error('Sesión no lista')
+    const res = await apiFetch(`/reels/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(partial),
+    })
+    const updated = await parseJson<Reel>(res)
+    setReels((rows) => rows.map((r) => (r.id === id ? { ...r, classification: updated.classification } : r)))
+    void fetchMetrics()
   }
 
   const refreshReel = async (id: string) => {
@@ -338,7 +409,7 @@ export default function ReelsPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-semibold tracking-tight">
-          Reels <span className="text-[var(--text3)] text-sm font-normal">{selectedMonth || 'Todos los meses'}</span>
+          Reels <span className="text-[var(--text3)] text-sm font-normal">{filterSubtitle}</span>
         </h2>
         <div className="inline-flex gap-2 rounded-xl border border-[var(--border2)] bg-[var(--bg2)] p-1">
           <button
@@ -361,8 +432,12 @@ export default function ReelsPage() {
           </button>
           <button
             onClick={() => {
-              setMonthMode('comparison')
-              setPage(1)
+              const opts = monthChoices
+              const a = comparisonMonths?.[0] || opts[0] || ''
+              const b = comparisonMonths?.[1] || opts[1] || opts[0] || ''
+              setComparisonDraftA(a)
+              setComparisonDraftB(b)
+              setShowComparisonModal(true)
             }}
             className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'comparison' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
           >
@@ -371,7 +446,7 @@ export default function ReelsPage() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-4 gap-4">
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
         <div className="glass-card p-5">
           <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Chats del mes</div>
           <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.chats_del_mes}</div>
@@ -385,14 +460,29 @@ export default function ReelsPage() {
           <div className="font-mono-num mt-1 text-3xl font-bold text-[var(--green)]">{formatCash(aggregateTotals.total_cash)}</div>
         </div>
         <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Sin clasificar</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.sin_clasificar}</div>
+          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Reels con CTA</div>
+          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.reels_con_cta}</div>
+        </div>
+        <div className="glass-card p-5">
+          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Reels sin CTA</div>
+          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.reels_sin_cta}</div>
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-3">
-        <button onClick={handleSync} disabled={isSyncRunning} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
-          ACTUALIZAR DATOS
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <button
+          onClick={handleRefreshMetrics}
+          disabled={isSyncRunning}
+          className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30"
+        >
+          Actualizar métricas
+        </button>
+        <button
+          onClick={handleSyncNewReels}
+          disabled={isSyncRunning}
+          className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text)] hover:opacity-90 disabled:opacity-30"
+        >
+          Buscar nuevos reels
         </button>
         <button
           onClick={() => setShowRangeSyncModal(true)}
@@ -406,7 +496,9 @@ export default function ReelsPage() {
         <div className="mb-4 glass-card p-4">
           <div className="mb-2 flex items-center gap-2 text-[12px] text-[var(--text)]">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
-            {syncStatus.phase === 'collecting' ? 'Buscando reels en Instagram...' : 'Recolectando metricas de Instagram...'}
+            {syncStatus.phase === 'collecting'
+              ? 'Buscando reels en Instagram...'
+              : 'Sincronizando con Instagram (metricas o nuevos reels)...'}
           </div>
           <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-[var(--bg4)]">
             <div
@@ -439,6 +531,7 @@ export default function ReelsPage() {
               onToggle={() => setExpanded(expanded === reel.id ? null : reel.id)}
               onUpdate={updateField}
               onKeywordUpdate={updateKeyword}
+              onClassificationUpdate={updateClassification}
               onRefresh={refreshReel}
             />
           ))}
@@ -462,6 +555,69 @@ export default function ReelsPage() {
           >
             Siguiente
           </button>
+        </div>
+      )}
+      {showComparisonModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-5">
+            <div className="mb-4 text-[14px] font-semibold">Comparar meses</div>
+            <p className="mb-4 text-[12px] text-[var(--text3)]">Elegí dos meses para ver reels y métricas combinadas de ambos.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Primer mes</label>
+                <select
+                  value={comparisonDraftA}
+                  onChange={(e) => setComparisonDraftA(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                >
+                  {monthChoices.map((ym) => (
+                    <option key={ym} value={ym}>
+                      {formatMonthLabel(ym)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Segundo mes</label>
+                <select
+                  value={comparisonDraftB}
+                  onChange={(e) => setComparisonDraftB(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                >
+                  {monthChoices.map((ym) => (
+                    <option key={`b-${ym}`} value={ym}>
+                      {formatMonthLabel(ym)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowComparisonModal(false)}
+                className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!comparisonDraftA || !comparisonDraftB) {
+                    toast('Elegí los dos meses a comparar.')
+                    return
+                  }
+                  setComparisonMonths([comparisonDraftA, comparisonDraftB])
+                  setMonthMode('comparison')
+                  setPage(1)
+                  setShowComparisonModal(false)
+                }}
+                className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
+              >
+                Comparar
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {showRangeSyncModal && (
@@ -518,6 +674,7 @@ function ReelCard({
   onToggle,
   onUpdate,
   onKeywordUpdate,
+  onClassificationUpdate,
   onRefresh,
 }: {
   reel: Reel
@@ -525,23 +682,52 @@ function ReelCard({
   isExpanded: boolean
   onToggle: () => void
   onUpdate: (id: string, field: 'cash' | 'chats', value: number) => void
-  onKeywordUpdate: (id: string, keyword: string) => void
+  onKeywordUpdate: (id: string, keyword: string) => Promise<void>
+  onClassificationUpdate: (id: string, partial: { dolor?: string; angulos?: string; cta?: string }) => Promise<void>
   onRefresh: (id: string) => void
 }) {
+  const { toast } = useToast()
   const [imgErr, setImgErr] = useState(false)
   const [dolor, setDolor] = useState(reel.classification?.dolor || '')
-  const [angulos, setAngulos] = useState((reel.classification?.angulos || []).join(', '))
+  const [angulos, setAngulos] = useState(() => {
+    const a = reel.classification?.angulos
+    if (Array.isArray(a)) return a.join(', ')
+    if (typeof a === 'string') return a
+    return ''
+  })
   const [cta, setCta] = useState(reel.classification?.cta || '')
+  const [classifySaving, setClassifySaving] = useState(false)
   const [keyword, setKeyword] = useState(reel.keyword || '')
+  const [keywordSaveFlash, setKeywordSaveFlash] = useState(false)
+  const [keywordSaving, setKeywordSaving] = useState(false)
   const rawThumb = String(reel.metrics?.thumbnail || '')
 
   useEffect(() => {
     setImgErr(false)
     setDolor(reel.classification?.dolor || '')
-    setAngulos((reel.classification?.angulos || []).join(', '))
+    const a = reel.classification?.angulos
+    setAngulos(Array.isArray(a) ? a.join(', ') : typeof a === 'string' ? a : '')
     setCta(reel.classification?.cta || '')
     setKeyword(reel.keyword || '')
   }, [rawThumb, reel.classification?.dolor, reel.classification?.angulos, reel.classification?.cta, reel.keyword])
+
+  useEffect(() => {
+    setKeywordSaveFlash(false)
+    setKeywordSaving(false)
+    setClassifySaving(false)
+  }, [reel.id])
+
+  const persistClassification = async (partial: { dolor?: string; angulos?: string; cta?: string }) => {
+    setClassifySaving(true)
+    try {
+      await onClassificationUpdate(reel.id, partial)
+    } catch (e) {
+      toast(`No se guardó la clasificación: ${(e as Error).message}`)
+      throw e
+    } finally {
+      setClassifySaving(false)
+    }
+  }
 
   const thumb = rawThumb && !imgErr ? `/api/proxy-image?url=${encodeURIComponent(rawThumb)}` : ''
   const plays = Number(reel.metrics?.plays) || 0
@@ -667,7 +853,7 @@ function ReelCard({
                 type="button"
                 onClick={() => onRefresh(reel.id)}
                 className="absolute top-2 right-2 rounded bg-[var(--bg3)] px-2 py-0.5 text-[9px] text-[var(--text3)] hover:text-[var(--text)]"
-                title="Refrescar desde Airtable"
+                title="Actualizar métricas del reel"
               >
                 Refrescar
               </button>
@@ -712,7 +898,7 @@ function ReelCard({
                 type="button"
                 onClick={() => onRefresh(reel.id)}
                 className="absolute top-2 right-2 rounded bg-[var(--bg3)] px-2 py-0.5 text-[9px] text-[var(--text3)] hover:text-[var(--text)]"
-                title="Refrescar desde Airtable"
+                title="Actualizar métricas del reel"
               >
                 Refrescar
               </button>
@@ -739,10 +925,25 @@ function ReelCard({
               />
               <button
                 type="button"
-                onClick={() => onKeywordUpdate(reel.id, keyword)}
-                className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-[10px] font-semibold uppercase text-white"
+                disabled={keywordSaving}
+                onClick={async () => {
+                  if (keywordSaving) return
+                  setKeywordSaving(true)
+                  try {
+                    await onKeywordUpdate(reel.id, keyword)
+                    setKeywordSaveFlash(true)
+                    window.setTimeout(() => setKeywordSaveFlash(false), 2200)
+                  } catch {
+                    /* toast en el padre */
+                  } finally {
+                    setKeywordSaving(false)
+                  }
+                }}
+                className={`rounded-md px-3 py-1.5 text-[10px] font-semibold uppercase text-white transition-colors duration-300 disabled:opacity-50 ${
+                  keywordSaveFlash ? 'bg-[var(--green)] shadow-[0_0_0_1px_rgba(74,222,128,0.5)]' : 'bg-[var(--accent)]'
+                }`}
               >
-                Guardar
+                {keywordSaveFlash ? 'Guardado' : 'Guardar'}
               </button>
             </div>
           </div>
@@ -771,8 +972,18 @@ function ReelCard({
               <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-[var(--text3)]">Dolor</div>
               <select
                 value={dolor}
-                onChange={(e) => setDolor(e.target.value)}
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer"
+                disabled={classifySaving}
+                onChange={async (e) => {
+                  const v = e.target.value
+                  const prev = dolor
+                  setDolor(v)
+                  try {
+                    await persistClassification({ dolor: v })
+                  } catch {
+                    setDolor(prev)
+                  }
+                }}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer disabled:opacity-50"
               >
                 <option value="">Seleccionar...</option>
                 {masterLists.dolores.map((item) => (
@@ -784,8 +995,18 @@ function ReelCard({
               <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-[var(--text3)]">Angulos</div>
               <select
                 value={angulos}
-                onChange={(e) => setAngulos(e.target.value)}
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer"
+                disabled={classifySaving}
+                onChange={async (e) => {
+                  const v = e.target.value
+                  const prev = angulos
+                  setAngulos(v)
+                  try {
+                    await persistClassification({ angulos: v })
+                  } catch {
+                    setAngulos(prev)
+                  }
+                }}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer disabled:opacity-50"
               >
                 <option value="">Seleccionar...</option>
                 {masterLists.angulos.map((item) => (
@@ -797,8 +1018,18 @@ function ReelCard({
               <div className="mb-1 text-[9px] font-medium uppercase tracking-wider text-[var(--text3)]">CTA</div>
               <select
                 value={cta}
-                onChange={(e) => setCta(e.target.value)}
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer"
+                disabled={classifySaving}
+                onChange={async (e) => {
+                  const v = e.target.value
+                  const prev = cta
+                  setCta(v)
+                  try {
+                    await persistClassification({ cta: v })
+                  } catch {
+                    setCta(prev)
+                  }
+                }}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none cursor-pointer disabled:opacity-50"
               >
                 <option value="">Seleccionar...</option>
                 {masterLists.ctas.map((item) => (
@@ -813,6 +1044,25 @@ function ReelCard({
   )
 }
 
+function recentMonthOptions(count: number): string[] {
+  const out: string[] = []
+  const d = new Date()
+  for (let i = 0; i < count; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth() - i, 1)
+    out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return out
+}
+
+function formatMonthLabel(ym: string): string {
+  const parts = ym.split('-')
+  const y = Number(parts[0])
+  const m = Number(parts[1])
+  if (!y || !m) return ym
+  const d = new Date(y, m - 1, 1)
+  return d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+}
+
 function formatCash(value: number): string {
   const n = Number(value || 0)
   return `$${Math.round(n).toLocaleString('es-AR')}`
@@ -823,13 +1073,16 @@ function formatInt(value: number): string {
   return Math.trunc(n).toLocaleString('es-AR')
 }
 
+/** Fecha de publicación en calendario Argentina (alineado con Instagram AR). */
 function formatDateDMY(value: string | null | undefined): string {
   if (!value) return 'Sin fecha'
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return 'Sin fecha'
-  const dd = String(d.getDate()).padStart(2, '0')
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  return `${dd}/${mm}/${yyyy}`
+  return new Intl.DateTimeFormat('es-AR', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(d)
 }
 

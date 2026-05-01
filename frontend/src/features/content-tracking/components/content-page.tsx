@@ -5,8 +5,8 @@ import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { Modal } from '@/shared/components/modal'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { getMonthRange, formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { getMonthRange, formatCash } from '@/shared/lib/format-utils'
 
 type ContentType = 'reel' | 'historia' | 'story' | 'video'
 
@@ -58,7 +58,7 @@ function parseContentRef(text: string | null): { type: string; date: string } | 
 export function ContentPage({ contentType, platform, title, columns }: ContentPageProps) {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [items, setItems] = useState<ContentItem[]>([])
   const [leads, setLeads] = useState<LeadAttribution[]>([])
   const [loading, setLoading] = useState(true)
@@ -71,25 +71,13 @@ export function ContentPage({ contentType, platform, title, columns }: ContentPa
     const { start, end } = getMonthRange(month)
     const types = contentType === 'historia' ? ['historia', 'story'] : [contentType]
 
-    const [contentRes, leadsRes] = await Promise.all([
-      supabase
-        .from('content_items')
-        .select('*')
-        .in('content_type', types)
-        .eq('platform', platform)
-        .gte('published_at', start)
-        .lte('published_at', end)
-        .order('published_at', { ascending: false }),
-      supabase
-        .from('leads')
-        .select('agenda_point, entry_funnel, status, payment, client_name')
-        .or('agenda_point.ilike.Historia%,agenda_point.ilike.Reel%'),
-    ])
-
-    setItems((contentRes.data as ContentItem[]) || [])
-    setLeads((leadsRes.data as LeadAttribution[]) || [])
+    void types
+    void start
+    void end
+    setItems([])
+    setLeads([])
     setLoading(false)
-  }, [month, contentType, platform, ready, supabase])
+  }, [month, contentType, platform, ready])
 
   useEffect(() => { fetchItems() }, [fetchItems])
 
@@ -146,22 +134,17 @@ export function ContentPage({ contentType, platform, title, columns }: ContentPa
       manychat_tag_name: formData.manychat_tag_name || null,
     }
 
-    if (editItem) {
-      await supabase.from('content_items').update({ ...row, updated_at: new Date().toISOString() }).eq('id', editItem.id)
-      toast('Actualizado ✓')
-    } else {
-      await supabase.from('content_items').insert(row)
-      toast('Agregado ✓')
-    }
+    void row
+    void editItem
+    toast('Contenido: persistencia vía FastAPI pendiente.')
     setEditItem(null)
     setShowAdd(false)
     fetchItems()
   }
 
   const handleDelete = async (id: string) => {
-    await supabase.from('content_items').delete().eq('id', id)
-    toast('Eliminado ✓')
-    fetchItems()
+    void id
+    toast('Eliminación no disponible sin API.')
   }
 
   // Stats
@@ -338,6 +321,7 @@ type ContentFormModalProps = {
 }
 
 function ContentFormModal({ open, onClose, item, onSave, title, contentType }: ContentFormModalProps) {
+  const { userId } = useAuthUser()
   const [form, setForm] = useState<Record<string, string>>({})
   const [mcTags, setMcTags] = useState<ManyChatTag[]>([])
   const [mcLoading, setMcLoading] = useState(false)
@@ -377,9 +361,10 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
   const set = (key: string, val: string) => setForm(prev => ({ ...prev, [key]: val }))
 
   const loadTags = async () => {
+    if (!userId) return
     setMcLoading(true)
     try {
-      const res = await fetch('/api/sync/manychat?action=tags')
+      const res = await fetch('/api/sync/manychat?action=tags', { headers: { 'X-User-Id': userId } })
       const data = await res.json()
       setMcTags(data.tags || [])
       setShowTagPicker(true)
@@ -388,13 +373,14 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
   }
 
   const selectTag = async (tag: ManyChatTag) => {
+    if (!userId) return
     set('manychat_tag_id', String(tag.id))
     set('manychat_tag_name', tag.name)
     setShowTagPicker(false)
     // Auto-sync chats count
     setMcSyncing(true)
     try {
-      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tag.id}${item ? `&content_id=${item.id}` : ''}`)
+      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tag.id}${item ? `&content_id=${item.id}` : ''}`, { headers: { 'X-User-Id': userId } })
       const data = await res.json()
       if (data.chats !== undefined) set('chats', String(data.chats))
     } catch { /* ignore */ }
@@ -403,10 +389,10 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
 
   const syncChats = async () => {
     const tagId = form.manychat_tag_id
-    if (!tagId) return
+    if (!tagId || !userId) return
     setMcSyncing(true)
     try {
-      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tagId}${item ? `&content_id=${item.id}` : ''}`)
+      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tagId}${item ? `&content_id=${item.id}` : ''}`, { headers: { 'X-User-Id': userId } })
       const data = await res.json()
       if (data.chats !== undefined) set('chats', String(data.chats))
     } catch { /* ignore */ }

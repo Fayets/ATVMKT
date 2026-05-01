@@ -4,14 +4,13 @@ import { useState, useEffect, useCallback } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { getMonthRange, formatCash, formatK } from '@/shared/lib/supabase/queries'
-import { calcFunnel, type LeadRow } from '@/features/leads/services/leads-analytics'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { getMonthRange, formatCash, formatK } from '@/shared/lib/format-utils'
 
 export default function ObjetivosPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [objectives, setObjectives] = useState({ cash_target: 100000, chats_target: 1500, views_target: 800000, followers_target: 2000, pieces_target: 16, cierres_target: 15, ventas_cash_target: 50000, scenario: '' })
   const [current, setCurrent] = useState({ cash: 0, chats: 0, piezas: 0, views: 0, cierres: 0, ventasCash: 0 })
   const [loading, setLoading] = useState(true)
@@ -19,40 +18,10 @@ export default function ObjetivosPage() {
   const fetchData = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const { start, end } = getMonthRange(month)
-
-    const [objRes, contentRes, bioRes, acctRes, leadsRes] = await Promise.all([
-      supabase.from('objectives').select('*').eq('month', month).maybeSingle(),
-      supabase.from('content_items').select('cash, chats').gte('published_at', start).lte('published_at', end),
-      supabase.from('bio_entries').select('cash, chats').eq('month', month),
-      supabase.from('account_metrics').select('account_views').eq('month', month).maybeSingle(),
-      supabase.from('leads').select('*').eq('month', month),
-    ])
-
-    if (objRes.data) {
-      setObjectives({
-        cash_target: Number(objRes.data.cash_target) || 100000,
-        chats_target: Number(objRes.data.chats_target) || 1500,
-        views_target: Number(objRes.data.views_target) || 800000,
-        followers_target: Number(objRes.data.followers_target) || 2000,
-        pieces_target: Number(objRes.data.pieces_target) || 16,
-        cierres_target: Number(objRes.data.cierres_target) || 15,
-        ventas_cash_target: Number(objRes.data.ventas_cash_target) || 50000,
-        scenario: objRes.data.scenario || '',
-      })
-    }
-
-    const content = contentRes.data || []
-    const bio = bioRes.data || []
-    const cash = content.reduce((s: number, i: { cash: number }) => s + (Number(i.cash) || 0), 0) + bio.reduce((s: number, i: { cash: number }) => s + (Number(i.cash) || 0), 0)
-    const chats = content.reduce((s: number, i: { chats: number }) => s + (Number(i.chats) || 0), 0) + bio.reduce((s: number, i: { chats: number }) => s + (Number(i.chats) || 0), 0)
-
-    // Sales from leads
-    const leadsFunnel = calcFunnel((leadsRes.data || []) as LeadRow[])
-
-    setCurrent({ cash, chats, piezas: content.length, views: Number(acctRes.data?.account_views) || 0, cierres: leadsFunnel.cierres, ventasCash: leadsFunnel.ingresos })
+    void getMonthRange(month)
+    setCurrent({ cash: 0, chats: 0, piezas: 0, views: 0, cierres: 0, ventasCash: 0 })
     setLoading(false)
-  }, [month, ready, supabase])
+  }, [month, ready])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -60,8 +29,7 @@ export default function ObjetivosPage() {
     if (!userId) return
     const updated = { ...objectives, [field]: value }
     setObjectives(updated)
-    await supabase.from('objectives').upsert({ user_id: userId, month, ...updated, updated_at: new Date().toISOString() }, { onConflict: 'user_id,month' })
-    toast('Objetivo guardado ✓')
+    toast('Cambio local. Persistencia en backend pendiente.')
   }
 
   if (loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>

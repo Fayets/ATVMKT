@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
 import { canonicalLeadStatus } from '@/features/leads/types'
 
 type BioLead = {
@@ -15,9 +15,11 @@ type BioLead = {
   avatar_url: string | null
   subscribed_at: string | null
   keyword: string | null
-  /** Vía (Airtable): Perfil, Automático - ManyChat, etc. */
+  /** Origen / canal (ej. Perfil, Automático - ManyChat). */
   via?: string | null
+  /** Legacy: había fila enlazada en CRM externo. */
   airtable_found: boolean
+  /** Legacy: id de registro externo para PATCH de estado. */
   airtable_record_id: string | null
   status: string | null
   setter: string | null
@@ -53,7 +55,7 @@ type BioViaOptionsResponse = {
   options?: string[]
 }
 
-/** Opciones del Status en Airtable (sin Pendiente en el dropdown BIO). */
+/** Opciones de estado en BIO (sin Pendiente en el dropdown). */
 const STATUS_OPTIONS = [
   'Seguimiento',
   'Descalificado',
@@ -91,7 +93,7 @@ function formatFechaAgendoDisplay(raw: string | null | undefined): string {
 export default function BioPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
 
   const [loading, setLoading] = useState(true)
   const [loadingMetrics, setLoadingMetrics] = useState(true)
@@ -119,7 +121,8 @@ export default function BioPage() {
     if (!ready || !userId) return
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/api/bio/leads?month=${encodeURIComponent(month)}`, {
+      const q = month ? `?month=${encodeURIComponent(month)}` : ''
+      const res = await fetch(`${apiBase}/api/bio/leads${q}`, {
         headers: { 'X-User-Id': userId },
       })
       const txt = await res.text()
@@ -142,7 +145,8 @@ export default function BioPage() {
     if (!ready || !userId) return
     setLoadingMetrics(true)
     try {
-      const res = await fetch(`${apiBase}/api/bio/metrics?month=${encodeURIComponent(month)}`, {
+      const qm = month ? `?month=${encodeURIComponent(month)}` : ''
+      const res = await fetch(`${apiBase}/api/bio/metrics${qm}`, {
         headers: { 'X-User-Id': userId },
       })
       const txt = await res.text()
@@ -199,13 +203,13 @@ export default function BioPage() {
   }, [fetchViaOptions])
 
   const patchStatusOptimistic = async (lead: BioLead, nextStatus: string) => {
-    if (!userId || !lead.airtable_record_id) return
+    if (!userId || !lead.id) return
     const prevRows = rows
     setUpdatingStatusId(lead.id)
     const normalized = canonicalLeadStatus(nextStatus)
     setRows((prev) => prev.map((r) => (r.id === lead.id ? { ...r, status: normalized } : r)))
     try {
-      const res = await fetch(`${apiBase}/api/bio/leads/${encodeURIComponent(lead.airtable_record_id)}/status`, {
+      const res = await fetch(`${apiBase}/api/bio/leads/${encodeURIComponent(lead.id)}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
         body: JSON.stringify({ status: normalized }),

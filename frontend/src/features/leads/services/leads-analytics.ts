@@ -1,4 +1,3 @@
-import { getMonthRange } from '@/shared/lib/supabase/queries'
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TYPES
@@ -82,21 +81,10 @@ export function distribute(total: number, n: number): number[] {
 // FULL ANALYTICS (for sales-dashboard)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export async function getLeadsAnalytics(
-  supabase: { from: (table: string) => { select: (fields?: string) => { eq: (field: string, value: string) => Promise<{ data: Record<string, unknown>[] }> } } },
-  month: string
-): Promise<{ leads: LeadRow[]; analytics: LeadsAnalytics; conversaciones: number }> {
-  const { start, end } = getMonthRange(month)
-
-  const [leadsRes, dailySetterRes, dailyCloserRes] = await Promise.all([
-    supabase.from('leads').select('*').eq('month', month),
-    supabase.from('daily_reports').select('*').eq('role', 'setter').eq('month', month),
-    supabase.from('daily_reports').select('*').eq('role', 'closer').eq('month', month),
-  ])
-
-  const leads = (leadsRes.data || []) as LeadRow[]
-  const setterReports = dailySetterRes.data || []
-  const closerReports = dailyCloserRes.data || []
+export async function getLeadsAnalytics(_month: string): Promise<{ leads: LeadRow[]; analytics: LeadsAnalytics; conversaciones: number }> {
+  const leads = [] as LeadRow[]
+  const setterReports: Record<string, unknown>[] = []
+  const closerReports: Record<string, unknown>[] = []
 
   // Fuente de datos: daily_reports del setter y closer
   const sumField = (reports: Record<string, unknown>[], field: string) =>

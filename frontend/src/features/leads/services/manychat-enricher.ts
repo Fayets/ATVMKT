@@ -1,16 +1,7 @@
-import { createClient } from '@/lib/supabase/client'
-
 const MANYCHAT_BASE_URL = 'https://api.manychat.com/fb'
 
 async function getManychatApiKey(): Promise<string> {
-  const fromEnv = process.env.MANYCHAT_API_KEY?.trim()
-  if (fromEnv) return fromEnv
-  try {
-    const sb = createClient()
-    const { data } = await sb.from('api_connections').select('credentials').eq('platform', 'manychat').limit(1).single()
-    if (data?.credentials?.api_key) return data.credentials.api_key as string
-  } catch { /* fallback */ }
-  return ''
+  return process.env.MANYCHAT_API_KEY?.trim() || ''
 }
 
 type ManychatTag = { id: number; name: string }
@@ -73,44 +64,6 @@ async function findSubscriber(name: string, igUsername: string, email?: string |
       if (match) return match
     }
   }
-
-  // Estrategia 3: cache local (manychat_contacts)
-  try {
-    const supabase = createClient()
-    const { data: cached } = await supabase
-      .from('manychat_contacts')
-      .select('subscriber_id, tags, subscribed_at')
-      .eq('ig_username', target)
-      .limit(1)
-
-    if (cached?.[0]?.subscriber_id) {
-      const res = await fetch(`${MANYCHAT_BASE_URL}/subscriber/getInfo?subscriber_id=${cached[0].subscriber_id}`, { headers })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.status === 'success') return data.data
-      }
-      const tags = typeof cached[0].tags === 'string' ? JSON.parse(cached[0].tags) : cached[0].tags
-      return { id: cached[0].subscriber_id, ig_username: target, subscribed: cached[0].subscribed_at, tags: tags || [], name: '' }
-    }
-  } catch { /* ignore */ }
-
-  // Estrategia 4: manychat_chats por ig_username
-  try {
-    const supabase = createClient()
-    const { data: chats } = await supabase
-      .from('manychat_chats')
-      .select('manychat_contact_id')
-      .eq('contact_ig_username', igUsername)
-      .limit(1)
-
-    if (chats?.[0]?.manychat_contact_id && !chats[0].manychat_contact_id.includes('{{')) {
-      const res = await fetch(`${MANYCHAT_BASE_URL}/subscriber/getInfo?subscriber_id=${chats[0].manychat_contact_id}`, { headers })
-      if (res.ok) {
-        const data = await res.json()
-        if (data.status === 'success') return data.data
-      }
-    }
-  } catch { /* ignore */ }
 
   return null
 }

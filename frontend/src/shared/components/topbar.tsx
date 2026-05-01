@@ -23,7 +23,6 @@ const titles: Record<string, string> = {
 
 const subtitles: Record<string, string> = {
   '/dashboard': 'Contenido',
-  '/leads': 'Tracking de leads',
   '/sales-dashboard': 'Dashboard',
   '/setter': 'Metricas',
   '/closer': 'Metricas',

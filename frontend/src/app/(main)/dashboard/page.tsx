@@ -3,12 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { getMonthRange, formatCash, formatK } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
+import { apiFetch } from '@/lib/api'
 import { Line, Doughnut, Bar } from '@/shared/components/charts'
 import { calcFunnel, type LeadRow } from '@/features/leads/services/leads-analytics'
-import { ReelsMetricsPanel } from '@/features/reels-metrics/components/reels-metrics-panel'
-import type { DashData } from './dashboard-data-types'
+import type { DashContentRow, DashData } from './dashboard-data-types'
 
 // ── Custom Bar Chart ──
 function CashBarChart({ labels, values, prevValues, activeIndex, onBarClick, compact }: {
@@ -124,9 +124,102 @@ function asFiniteNumber(v: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/** Suma `amount` al bucket del día de publicación si cae en `year`–`month` (según fecha ISO YYYY-MM-DD). */
+function addToMonthDayBucket(
+  buckets: number[],
+  year: number,
+  month: number,
+  publishedAt: string | undefined,
+  amount: number,
+) {
+  if (!publishedAt || !amount) return
+  const dayPart = String(publishedAt).slice(0, 10)
+  const parts = dayPart.split('-')
+  if (parts.length !== 3) return
+  const py = Number(parts[0])
+  const pm = Number(parts[1])
+  const pd = Number(parts[2])
+  if (py !== year || pm !== month || pd < 1 || pd > buckets.length) return
+  buckets[pd - 1] += amount
+}
+
+async function fetchReelsAsContent(monthKey: string): Promise<DashContentRow[]> {
+  const out: DashContentRow[] = []
+  let page = 1
+  const pageSize = 50
+  for (;;) {
+    const res = await apiFetch(
+      `/reels?page=${page}&page_size=${pageSize}&month=${encodeURIComponent(monthKey)}`,
+    )
+    if (!res.ok) break
+    const body = (await res.json()) as {
+      reels?: Array<{ cash?: number; chats?: number; published_at?: string | null }>
+      total_pages?: number
+    }
+    const reels = body.reels ?? []
+    for (const r of reels) {
+      out.push({
+        content_type: 'reel',
+        cash: Number(r.cash) || 0,
+        chats: Number(r.chats) || 0,
+        published_at: r.published_at ? String(r.published_at) : '',
+      })
+    }
+    const tp = Math.max(0, Number(body.total_pages) || 0)
+    if (reels.length === 0) break
+    if (tp > 0 && page >= tp) break
+    if (reels.length < pageSize) break
+    page += 1
+  }
+  return out
+}
+
+function emptyDashForMonth(month: string): DashData {
+  const [y, m] = month.split('-').map(Number)
+  const daysInMonth = new Date(y, m, 0).getDate()
+  const z = () => Array(daysInMonth).fill(0)
+  return {
+    cash: 0,
+    prevCash: 0,
+    prevCashAtDay: 0,
+    chats: 0,
+    prevChats: 0,
+    reelsChats: 0,
+    historiasChats: 0,
+    bioChats: 0,
+    igCash: 0,
+    ytCash: 0,
+    refCash: 0,
+    defCash: 0,
+    bioCash: 0,
+    historiasCash: 0,
+    reelsCash: 0,
+    dailyCash: z(),
+    prevDailyCash: z(),
+    rawDailyCash: z(),
+    rawPrevDailyCash: z(),
+    dailyChats: z(),
+    dailyAgendas: z(),
+    dailyCierres: z(),
+    rawLeads: [],
+    rawContent: [],
+    rawBio: [],
+    calls: [],
+    programCounts: [],
+    ventas: {
+      cierres: 0,
+      cashCollected: 0,
+      ticketPromedio: 0,
+      closeRate: 0,
+      agendas: 0,
+      leads: 0,
+    },
+  }
+}
+
 export default function DashboardPage() {
   const { month, options, setMonth } = useMonthContext()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [data, setData] = useState<DashData | null>(null)
   const [bioMetrics, setBioMetrics] = useState<BioMetrics | null>(null)
   const [loadingBioMetrics, setLoadingBioMetrics] = useState(false)
@@ -141,25 +234,32 @@ export default function DashboardPage() {
 
   const fetchData = useCallback(async () => {
     if (!ready) return
-    const { start, end } = getMonthRange(month)
+    if (!userId) {
+      setData(emptyDashForMonth(month))
+      return
+    }
+
     const prev = getPrevMonth(month)
-    const { start: pStart, end: pEnd } = getMonthRange(prev)
 
-    const [contentRes, bioRes, defRes, pContentRes, pBioRes, pDefRes, leadsRes, pLeadsRes, metricsRes] = await Promise.all([
-      supabase.from('content_items').select('content_type, cash, chats, published_at').gte('published_at', start).lte('published_at', end),
-      supabase.from('bio_entries').select('cash, chats').eq('month', month),
-      supabase.from('deferred_entries').select('cash').eq('month', month),
-      supabase.from('content_items').select('content_type, cash, chats').gte('published_at', pStart).lte('published_at', pEnd),
-      supabase.from('bio_entries').select('cash, chats').eq('month', prev),
-      supabase.from('deferred_entries').select('cash').eq('month', prev),
-      supabase.from('leads').select('*').eq('month', month),
-      supabase.from('leads').select('*').eq('month', prev),
-      supabase.from('daily_metrics').select('date, conversaciones, agendas, cierres').eq('month', month),
-    ])
+    let items: Record<string, unknown>[] = []
+    let pItems: Record<string, unknown>[] = []
+    try {
+      const [currRows, prevRows] = await Promise.all([
+        fetchReelsAsContent(month),
+        fetchReelsAsContent(prev),
+      ])
+      items = currRows as unknown as Record<string, unknown>[]
+      pItems = prevRows as unknown as Record<string, unknown>[]
+    } catch {
+      setData(emptyDashForMonth(month))
+      return
+    }
 
-    const items = contentRes.data || []
-    const bio = bioRes.data || []
-    const def_ = defRes.data || []
+    const bio: Record<string, unknown>[] = []
+    const def_: Record<string, unknown>[] = []
+    const leadsRes = { data: [] as Record<string, unknown>[] }
+    const pLeadsRes = { data: [] as Record<string, unknown>[] }
+    const metricsRes = { data: [] as Record<string, unknown>[] }
     const sum = (arr: Record<string, unknown>[], key: string) => arr.reduce((s, i) => s + (Number(i[key]) || 0), 0)
     const byType = (type: string) => items.filter((i: Record<string, unknown>) => i.content_type === type || (type === 'historia' && i.content_type === 'story'))
 
@@ -183,16 +283,24 @@ export default function DashboardPage() {
     const reelsCash = sum(byType('reel'), 'cash')
     const historiasCash = sum(byType('historia'), 'cash')
     const bioCash = sum(bio, 'cash')
-    const cash = currFunnel.ingresos + defCash
+    const leadCashTotal = currFunnel.ingresos + defCash
+    const contentCashTotal = reelsCash + historiasCash + bioCash
+    const cash = leadCashTotal > 0 ? leadCashTotal : contentCashTotal
 
-    // Previous month
-    const pItems = pContentRes.data || []
-    const prevCash = prevFunnel.ingresos + sum(pDefRes.data || [], 'cash')
-    const prevChats = sum(pItems, 'chats') + sum(pBioRes.data || [], 'chats')
+    const byTypePrev = (type: string) =>
+      pItems.filter((i: Record<string, unknown>) => i.content_type === type || (type === 'historia' && i.content_type === 'story'))
+    const prevReelsCash = sum(byTypePrev('reel'), 'cash')
+    const prevHistoriasCash = sum(byTypePrev('historia'), 'cash')
+    const prevBioCash = 0
+    const prevLeadCash = prevFunnel.ingresos
+    const prevContentCash = prevReelsCash + prevHistoriasCash + prevBioCash
+    const prevCash = prevLeadCash > 0 ? prevLeadCash : prevContentCash
+    const prevChats = sum(pItems, 'chats')
 
     // Daily cash from leads (by payment date or call_at)
     const [y, m] = month.split('-').map(Number)
     const daysInMonth = new Date(y, m, 0).getDate()
+    const [py, pm] = prev.split('-').map(Number)
     const dailyCash = Array(daysInMonth).fill(0)
     const prevDailyCash = Array(daysInMonth).fill(0)
 
@@ -200,6 +308,11 @@ export default function DashboardPage() {
       const d = l.call_at || l.date
       if (d) { const day = new Date(String(d)).getDate(); if (day >= 1 && day <= daysInMonth) dailyCash[day - 1] += Number(l.payment) || 0 }
     })
+    if (leadCashTotal <= 0) {
+      items.forEach((row: Record<string, unknown>) => {
+        addToMonthDayBucket(dailyCash, y, m, String(row.published_at || ''), Number(row.cash) || 0)
+      })
+    }
     const rawDailyCash = [...dailyCash]
     for (let i = 1; i < dailyCash.length; i++) dailyCash[i] += dailyCash[i - 1]
 
@@ -207,6 +320,11 @@ export default function DashboardPage() {
       const d = l.call_at || l.date
       if (d) { const day = new Date(String(d)).getDate(); if (day >= 1 && day <= daysInMonth) prevDailyCash[day - 1] += Number(l.payment) || 0 }
     })
+    if (prevLeadCash <= 0) {
+      pItems.forEach((row: Record<string, unknown>) => {
+        addToMonthDayBucket(prevDailyCash, py, pm, String(row.published_at || ''), Number(row.cash) || 0)
+      })
+    }
     const rawPrevDailyCash = [...prevDailyCash]
     for (let i = 1; i < prevDailyCash.length; i++) prevDailyCash[i] += prevDailyCash[i - 1]
 
@@ -250,6 +368,11 @@ export default function DashboardPage() {
         dailyCierres[day - 1] = Number(row.cierres) || 0
       }
     })
+    if (!metricsData.length) {
+      items.forEach((row: Record<string, unknown>) => {
+        addToMonthDayBucket(dailyChats, y, m, String(row.published_at || ''), Number(row.chats) || 0)
+      })
+    }
 
     setData({
       cash, prevCash, prevCashAtDay, chats, prevChats,
@@ -261,9 +384,16 @@ export default function DashboardPage() {
       rawContent: items.map((i: Record<string, unknown>) => ({ content_type: String(i.content_type), cash: Number(i.cash) || 0, chats: Number(i.chats) || 0, published_at: String(i.published_at || '') })),
       rawBio: bio.map((b: Record<string, unknown>) => ({ cash: Number(b.cash) || 0, chats: Number(b.chats) || 0 })),
       calls, programCounts,
-      ventas: { cierres: currFunnel.cierres, cashCollected: currFunnel.ingresos, ticketPromedio: currFunnel.ticketPromedio, closeRate: currFunnel.closeRate, agendas: currFunnel.agendas, leads: currLeads.length },
+      ventas: {
+        cierres: currFunnel.cierres,
+        cashCollected: leadCashTotal > 0 ? currFunnel.ingresos : contentCashTotal,
+        ticketPromedio: currFunnel.ticketPromedio,
+        closeRate: currFunnel.closeRate,
+        agendas: currFunnel.agendas,
+        leads: currLeads.length,
+      },
     })
-  }, [month, ready, supabase])
+  }, [month, ready, userId])
 
   useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => {
@@ -386,9 +516,6 @@ export default function DashboardPage() {
       })
     : dashData.rawLeads
 
-  // Recompute view-specific metrics
-  const viewCash = viewLeads.filter(l => Number(l.payment) > 0).reduce((s, l) => s + (Number(l.payment) || 0), 0) + (viewRange ? 0 : dashData.defCash)
-
   // Attribute lead cash by agenda_point content type (what actually drove the sale)
   const classifyLeadSource = (l: LeadRow): string => {
     const ap = String(l.agenda_point || '').toLowerCase()
@@ -447,6 +574,12 @@ export default function DashboardPage() {
     ? asFiniteNumber(bioDisplay.cash_total)
     : asFiniteNumber(viewBioCashFromSupabase)
 
+  const leadPayInView = viewLeads.filter(l => Number(l.payment) > 0).reduce((s, l) => s + (Number(l.payment) || 0), 0)
+  const defPart = viewRange ? 0 : dashData.defCash
+  const fromLeadsCash = leadPayInView + defPart
+  const fromContentCash = viewReelsCash + viewHistoriasCash + viewBioCash
+  const viewCash = fromLeadsCash > 0 ? fromLeadsCash : fromContentCash
+
   // View period label
   const viewLabel = (() => {
     if (view === 'diaria') {
@@ -463,12 +596,16 @@ export default function DashboardPage() {
     return `${monthNames[m - 1]} ${y}`
   })()
 
-  // Donut sources — ALL from leads.payment attributed by agenda_point content type
-  const viewDonutTotal = viewHistoriasCashFromLeads + viewReelsCashFromLeads + viewPerfilCash + viewYtCash + viewRefCash + viewOtrosCash
+  // Donut: lead attribution; si no hay CRM, usar cash por pieza (contenido) + bio
+  const donutHistoriasVal = viewHistoriasCashFromLeads || viewHistoriasCash
+  const donutReelsVal = viewReelsCashFromLeads || viewReelsCash
+  const donutPerfilVal = viewPerfilCash || viewBioCash
+  const viewDonutTotal =
+    donutHistoriasVal + donutReelsVal + donutPerfilVal + viewYtCash + viewRefCash + viewOtrosCash
   const donutSources = [
-    { label: 'Historias', value: viewHistoriasCashFromLeads, color: '#F59E0B' },
-    { label: 'Reels', value: viewReelsCashFromLeads, color: '#3B82F6' },
-    { label: 'Perfil', value: viewPerfilCash, color: '#8B5CF6' },
+    { label: 'Historias', value: donutHistoriasVal, color: '#F59E0B' },
+    { label: 'Reels', value: donutReelsVal, color: '#3B82F6' },
+    { label: 'Perfil', value: donutPerfilVal, color: '#8B5CF6' },
     { label: 'YouTube', value: viewYtCash, color: '#FF0000' },
     { label: 'Referidos', value: viewRefCash, color: '#22C55E' },
     { label: 'Otros', value: viewOtrosCash, color: '#6B7280' },
@@ -482,10 +619,12 @@ export default function DashboardPage() {
 
   // CPC per channel — BIO = Perfil (same source)
   const viewBioCashReal = asFiniteNumber(viewPerfilCash) + asFiniteNumber(viewBioCash)
-  const cpcReel = viewReelsChats > 0 ? viewReelsCashFromLeads / viewReelsChats : 0
-  const cpcHistoria = viewHistoriasChats > 0 ? viewHistoriasCashFromLeads / viewHistoriasChats : 0
+  const reelCashForCpc = viewReelsCashFromLeads || viewReelsCash
+  const histCashForCpc = viewHistoriasCashFromLeads || viewHistoriasCash
+  const cpcReel = viewReelsChats > 0 ? reelCashForCpc / viewReelsChats : 0
+  const cpcHistoria = viewHistoriasChats > 0 ? histCashForCpc / viewHistoriasChats : 0
   const cpcBio = viewBioChats > 0 ? asFiniteNumber(viewBioCashReal / viewBioChats) : 0
-  const contentCashTotal = asFiniteNumber(viewReelsCashFromLeads) + asFiniteNumber(viewHistoriasCashFromLeads) + asFiniteNumber(viewBioCashReal)
+  const contentCashTotal = asFiniteNumber(reelCashForCpc) + asFiniteNumber(histCashForCpc) + asFiniteNumber(viewBioCashReal)
   const cpcTotal = viewTotalChats > 0 ? contentCashTotal / viewTotalChats : 0
 
   return (
@@ -748,8 +887,8 @@ export default function DashboardPage() {
             </div>
             <div className="space-y-2.5">
               {[
-                { label: 'Historias', chats: viewHistoriasChats, cash: viewHistoriasCashFromLeads, cpc: cpcHistoria, color: '#F59E0B' },
-                { label: 'Reels', chats: viewReelsChats, cash: viewReelsCashFromLeads, cpc: cpcReel, color: '#EF4444' },
+                { label: 'Historias', chats: viewHistoriasChats, cash: histCashForCpc, cpc: cpcHistoria, color: '#F59E0B' },
+                { label: 'Reels', chats: viewReelsChats, cash: reelCashForCpc, cpc: cpcReel, color: '#EF4444' },
                 { label: 'BIO / Perfil', chats: viewBioChats, cash: viewBioCashReal, cpc: cpcBio, color: '#A855F7' },
               ].map(ch => {
                 const pct = viewTotalChats > 0 ? ((ch.chats / viewTotalChats) * 100).toFixed(0) : '0'
@@ -779,8 +918,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Row 3: Métricas de Reels */}
-      <ReelsMetricsPanel />
     </div>
   )
 }

@@ -33,11 +33,7 @@ def _create_access_token(username: str) -> str:
 @router.post("/register", response_model=AuthTokenResponse)
 def register_user(
     body: AuthRegisterRequest,
-    x_register_key: str = Header(default="", alias="X-Register-Key"),
 ):
-    if x_register_key != REGISTER_ADMIN_KEY:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid register key")
-
     username = body.username.strip()
     password = body.password
     if not username or not password:
@@ -49,9 +45,10 @@ def register_user(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists")
 
         password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        AuthUser(username=username, password_hash=password_hash, updated_at=datetime.utcnow())
+        user = AuthUser(username=username, password_hash=password_hash, updated_at=datetime.utcnow())
+        uid = user.id
 
-    return AuthTokenResponse(access_token=_create_access_token(username))
+    return AuthTokenResponse(access_token=_create_access_token(username), user_id=uid)
 
 
 @router.post("/login", response_model=AuthTokenResponse)
@@ -70,7 +67,9 @@ def login_user(body: AuthLoginRequest):
         if not valid_password:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    return AuthTokenResponse(access_token=_create_access_token(username))
+        uid = user.id
+
+    return AuthTokenResponse(access_token=_create_access_token(username), user_id=uid)
 
 
 def get_current_username(token: str = Depends(oauth2_scheme)) -> str:
@@ -82,6 +81,14 @@ def get_current_username(token: str = Depends(oauth2_scheme)) -> str:
         return username
     except JWTError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+
+def get_current_user_id(username: str = Depends(get_current_username)) -> int:
+    with db_session:
+        user = AuthUser.get(username=username)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        return user.id
 
 
 @router.get("/me", response_model=AuthMeResponse)

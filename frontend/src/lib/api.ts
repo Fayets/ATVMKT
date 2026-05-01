@@ -1,6 +1,19 @@
 const API_BASE =
   (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
 
+const BACKEND_USER_ID_KEYS = ['auth_user_id', 'user_id', 'evoluciona_user_id'] as const
+
+/** ID numérico de AuthUser (FastAPI / Pony). Prioriza localStorage. */
+export function readBackendUserId(): string | null {
+  if (typeof window === 'undefined') return null
+  for (const key of BACKEND_USER_ID_KEYS) {
+    const raw = localStorage.getItem(key) || sessionStorage.getItem(key)
+    const v = raw?.trim()
+    if (v && /^\d+$/.test(v)) return v
+  }
+  return null
+}
+
 function readSessionToken(): string | null {
   if (typeof window === 'undefined') return null
   return (
@@ -25,16 +38,36 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
 }
 
 function readUserIdFromSession(token: string | null): string | null {
-  if (typeof window === 'undefined') return null
-  const fromSession =
-    sessionStorage.getItem('evoluciona_user_id') ||
-    sessionStorage.getItem('user_id') ||
-    sessionStorage.getItem('auth_user_id')
-  if (fromSession) return fromSession
+  const fromStorage = readBackendUserId()
+  if (fromStorage) return fromStorage
   if (!token) return null
   const payload = decodeJwtPayload(token)
-  const candidate = payload?.sub ?? payload?.user_id ?? payload?.uid
-  return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : null
+  const uid = payload?.user_id
+  if (typeof uid === 'number' && Number.isFinite(uid)) return String(uid)
+  if (typeof uid === 'string' && /^\d+$/.test(uid.trim())) return uid.trim()
+  return null
+}
+
+/** Mismo user id que envía `apiFetch` (storage + JWT). */
+export function resolveBackendUserId(): string | null {
+  return readUserIdFromSession(readSessionToken())
+}
+
+/**
+ * Headers para fetch directo al backend (p. ej. `/api-backend/conexiones`).
+ * Incluye `Authorization: Bearer` y `X-User-Id` cuando hay sesión de login.
+ */
+export function backendAuthHeaders(init?: HeadersInit): Headers {
+  const token = readSessionToken()
+  const userId = readUserIdFromSession(token)
+  const headers = new Headers(init ?? undefined)
+  if (token && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  if (userId && !headers.has('X-User-Id')) {
+    headers.set('X-User-Id', userId)
+  }
+  return headers
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -52,4 +85,3 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   const url = `${API_BASE}/api${normalizedPath}`
   return fetch(url, { ...init, headers })
 }
-

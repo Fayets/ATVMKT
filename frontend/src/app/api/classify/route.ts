@@ -1,11 +1,10 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireNumericUserId } from '@/lib/request-user'
 import { NextResponse } from 'next/server'
 
 // POST /api/classify — Classify content using Claude AI
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const uid = requireNumericUserId(request)
+  if (uid instanceof NextResponse) return uid
 
   const body = await request.json()
   const { contentId, transcript, type = 'reel' } = body
@@ -14,16 +13,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Transcript too short' }, { status: 400 })
   }
 
-  // Get master lists for context
-  const { data: lists } = await supabase.from('master_lists').select('category, items').eq('user_id', user.id)
-  const masterLists: Record<string, string[]> = {}
-  ;(lists || []).forEach((r: { category: string; items: unknown }) => {
-    masterLists[r.category] = Array.isArray(r.items) ? r.items as string[] : []
-  })
-
-  const dolores = masterLists.dolores || []
-  const angulos = masterLists.angulos || []
-  const ctas = masterLists.ctas || []
+  const dolores: string[] = []
+  const angulos: string[] = []
+  const ctas: string[] = []
 
   // Build prompt
   const listLines: string[] = []
@@ -98,35 +90,7 @@ ${transcript}
     // Remove CTA from AI output — CTA is always manual
     classification.cta = ''
 
-    // Auto-create new dolores/angulos in master lists if they don't exist
-    const newDolor = classification.dolor && !dolores.includes(classification.dolor)
-    if (newDolor) {
-      await supabase.from('master_lists').upsert(
-        { user_id: user.id, category: 'dolores', items: [...dolores, classification.dolor], updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,category' }
-      )
-    }
-    const newAngulos = (classification.angulos || []).filter(a => a && !angulos.includes(a))
-    if (newAngulos.length > 0) {
-      await supabase.from('master_lists').upsert(
-        { user_id: user.id, category: 'angulos', items: [...angulos, ...newAngulos], updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,category' }
-      )
-    }
-
-    // Update content_items if contentId provided
-    if (contentId) {
-      await supabase.from('content_items').update({
-        classification: {
-          dolor: classification.dolor || '',
-          angulos: classification.angulos || [],
-          cta: '', // CTA always empty — user fills manually
-        },
-        updated_at: new Date().toISOString(),
-      }).eq('id', contentId).eq('user_id', user.id)
-    }
-
-    return NextResponse.json({ success: true, classification })
+    return NextResponse.json({ success: true, classification, contentId: contentId || null, userId: uid })
   } catch (e) {
     return NextResponse.json({ error: `Classification failed: ${(e as Error).message}` }, { status: 500 })
   }

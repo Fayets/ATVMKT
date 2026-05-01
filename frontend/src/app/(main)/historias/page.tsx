@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
 import { Line } from '@/shared/components/charts'
 import { apiFetch } from '@/lib/api'
 import { LineChart, Line as ReLine, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -96,7 +96,7 @@ const hasCtaValue = (value: string | null | undefined): boolean => {
 export default function HistoriasPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [sequences, setSequences] = useState<StorySequence[]>([])
   const [metrics, setMetrics] = useState<StoriesMetrics>({
     chats_del_mes: 0,
@@ -178,7 +178,7 @@ export default function HistoriasPage() {
     } finally {
       setLoading(false)
     }
-  }, [month, ready])
+  }, [month, ready, userId])
 
   const fetchMasterLists = useCallback(async () => {
     if (!ready || !userId) return
@@ -476,11 +476,10 @@ export default function HistoriasPage() {
       toast('Ya existe')
       return
     }
-    const updated = [...existing, clean]
     const res = await apiFetch(`/master-lists/${category}`, {
-      method: 'PUT',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ items: updated }),
+      body: JSON.stringify({ item: clean }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {

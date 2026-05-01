@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useSupabase } from '@/shared/hooks/use-supabase'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { useToast } from '@/shared/components/toast'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { formatCash } from '@/shared/lib/format-utils'
 
 type DailyReport = {
   id?: string
@@ -28,7 +28,7 @@ type Props = {
 }
 
 export function DailyReportSection({ role }: Props) {
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const { toast } = useToast()
   const [members, setMembers] = useState<{ name: string }[]>([])
   const [reports, setReports] = useState<DailyReport[]>([])
@@ -59,17 +59,10 @@ export function DailyReportSection({ role }: Props) {
   const fetchData = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const [membersRes, reportsRes] = await Promise.all([
-      supabase.from('team_members').select('name').eq('role', role).eq('is_active', true),
-      supabase.from('daily_reports').select('*').eq('role', role).order('date', { ascending: false }).limit(30),
-    ])
-    setMembers(membersRes.data || [])
-    setReports((reportsRes.data || []) as DailyReport[])
-    if (membersRes.data?.[0]) {
-      setForm(f => ({ ...f, member_name: f.member_name || membersRes.data![0].name }))
-    }
+    setMembers([])
+    setReports([])
     setLoading(false)
-  }, [ready, role, supabase])
+  }, [ready, role])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -85,34 +78,9 @@ export function DailyReportSection({ role }: Props) {
     if (!userId || !form.member_name) { toast('Seleccioná un miembro'); return }
     setSaving(true)
 
-    const payload = {
-      user_id: userId,
-      date: form.date,
-      role,
-      member_name: form.member_name,
-      conversaciones: form.conversaciones,
-      agendas: form.agendas,
-      calendly_links: form.calendly_links,
-      calls_scheduled: form.calls_scheduled,
-      shows: form.shows,
-      cierres: form.cierres,
-      calificados: form.calificados,
-      descalificados: form.descalificados,
-      ingreso: form.ingreso,
-      notes: form.notes,
-      month: form.month,
-      updated_at: new Date().toISOString(),
-    }
-
-    const { error } = await supabase.from('daily_reports').upsert(payload, { onConflict: 'user_id,member_name,date' })
-
-    if (error) {
-      toast(`Error: ${error.message}`)
-    } else {
-      toast('Reporte guardado ✓')
-      setShowForm(false)
-      fetchData()
-    }
+    toast('Reportes diarios: persistencia en backend pendiente.')
+    setShowForm(false)
+    fetchData()
     setSaving(false)
   }
 
@@ -170,7 +138,7 @@ export function DailyReportSection({ role }: Props) {
                 onChange={e => setForm(f => ({ ...f, member_name: e.target.value }))}
                 className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none cursor-pointer focus:border-[var(--text3)]"
               >
-                {members.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                {members.length === 0 ? <option value="">Sin miembros (Equipo)</option> : members.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
               </select>
             </div>
           </div>

@@ -1,20 +1,17 @@
+"""CRM BIO (ManyChat / perfil): endpoints sobre tabla `Lead` (Neon / Pony)."""
+
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pony.orm import ObjectNotFound, db_session
 
-from src.schemas import (
-    BioManychatStatusResponse,
-    BioLeadResponse,
-    BioLeadsListResponse,
-    BioLeadStatusPatchRequest,
-    BioMetricsResponse,
-    BioViaOptionsResponse,
-)
-from src.services.bio_service import BioService
+from src.models import Lead as LeadEntity
+from src.schemas import BioLeadResponse, BioLeadStatusPatchRequest, BioLeadsListResponse, BioMetricsResponse, BioViaOptionsResponse
 
 router = APIRouter(prefix="/api/bio", tags=["bio"], redirect_slashes=False)
-service = BioService()
+
+VIA_OPTIONS_FIXED = ["Perfil", "Automático - ManyChat", "Referido", "Otro"]
 
 
 def require_user_id(
@@ -28,67 +25,185 @@ def require_user_id(
     return x_user_id.strip()
 
 
+def _parse_month(month: str | None) -> tuple[int, int] | None:
+    if not month or not str(month).strip():
+        return None
+    parts = str(month).strip().split("-", 1)
+    if len(parts) != 2:
+        raise HTTPException(status_code=400, detail="month debe tener formato YYYY-MM.")
+    try:
+        y, m = int(parts[0]), int(parts[1])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="month inválido.") from e
+    if m < 1 or m > 12:
+        raise HTTPException(status_code=400, detail="Mes inválido (1–12).")
+    return y, m
+
+
+def _anchor_dt(row: LeadEntity) -> datetime | None:
+    """Mes operativo BIO: fecha_bot si existe; si no, created_at."""
+    return row.fecha_bot or row.created_at
+
+
+def _in_month(row: LeadEntity, y: int, mn: int) -> bool:
+    ref = _anchor_dt(row)
+    if ref is None:
+        return False
+    dt = ref.replace(tzinfo=None) if ref.tzinfo else ref
+    return dt.year == y and dt.month == mn
+
+
+def _dt_iso(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return dt.isoformat()
+
+
+def _is_cerrado(row: LeadEntity) -> bool:
+    s = (row.status or row.estado or "").strip().lower()
+    return s == "cerrado"
+
+
+def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
+    st = (row.status or row.estado or "").strip() or None
+    prog = row.programa_ofrecido
+    subscribed = _anchor_dt(row)
+    agendo_dt = row.agendo_en
+    return BioLeadResponse(
+        id=str(row.id),
+        handle=(row.ig or "").strip() or "",
+        nombre=row.nombre,
+        avatar_url=None,
+        subscribed_at=_dt_iso(subscribed),
+        keyword=row.keyword,
+        via=row.via or row.origen,
+        airtable_found=True,
+        airtable_record_id=str(row.id),
+        status=st,
+        setter=None,
+        programa=prog,
+        pago=float(row.pago) if row.pago is not None else None,
+        fecha_agendo=_dt_iso(agendo_dt),
+        llamada_url=row.link_llamada,
+        dolores=row.dolores_setting or row.dolores_llamada,
+        razon_compra=row.razon_compra,
+        notas=row.notas,
+        manychat_chat_url=row.content_url,
+        respondio_auto=bool(row.respondio_auto),
+        content_url=row.content_url,
+        manychat_contact_id=row.manychat_contact_id,
+        programa_ofrecido=prog,
+        fecha_bot=_dt_iso(row.fecha_bot),
+        agendo=bool(row.agendo) if row.agendo is not None else False,
+    )
+
+
+def _rows_for_user_month(uid: int, month_key: tuple[int, int] | None) -> list[LeadEntity]:
+    with db_session:
+        rows = [r for r in list(LeadEntity.select()) if int(r.user_id) == uid]
+    if month_key is None:
+        return rows
+    y, mn = month_key
+    return [r for r in rows if _in_month(r, y, mn)]
+
+
 @router.get("/leads", response_model=BioLeadsListResponse)
 def list_bio_leads(
     user_id: Annotated[str, Depends(require_user_id)],
-    month: str | None = Query(default=None, description="Formato YYYY-MM"),
+    month: str | None = Query(default=None, description="YYYY-MM; filtra por fecha_bot o created_at"),
 ) -> BioLeadsListResponse:
     try:
-        effective_month = month or datetime.utcnow().strftime("%Y-%m")
-        return service.list_leads(user_id, effective_month)
-    except HTTPException as e:
-        raise e
-    except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al cargar leads de BIO.")
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="user_id inválido") from e
+
+    month_key = _parse_month(month)
+    rows = _rows_for_user_month(uid, month_key)
+
+    def _sort_key(r: LeadEntity) -> float:
+        c = _anchor_dt(r)
+        return float(c.timestamp()) if c is not None else 0.0
+
+    rows.sort(key=_sort_key, reverse=True)
+    return BioLeadsListResponse(
+        leads=[_lead_to_response(r) for r in rows],
+        manychat_active=True,
+        connected_to_airtable=False,
+    )
 
 
-@router.patch("/leads/{record_id}/status", response_model=BioLeadResponse)
-def patch_bio_lead_status(
-    record_id: str,
+@router.get("/metrics", response_model=BioMetricsResponse)
+def bio_metrics(
+    user_id: Annotated[str, Depends(require_user_id)],
+    month: str | None = Query(default=None, description="YYYY-MM; mismo criterio que /leads"),
+) -> BioMetricsResponse:
+    try:
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="user_id inválido") from e
+
+    month_key = _parse_month(month)
+    rows = _rows_for_user_month(uid, month_key)
+
+    total = len(rows)
+    agendaron = sum(1 for r in rows if r.agendo is True)
+    cerrados = sum(1 for r in rows if _is_cerrado(r))
+    respondio_auto_n = sum(1 for r in rows if r.respondio_auto is True)
+
+    cash_total = sum(float(r.pago or 0) for r in rows)
+
+    tasa_agenda = (agendaron / total * 100.0) if total else 0.0
+    cash_por_chat = (cash_total / total) if total else 0.0
+    tasa_respuesta_auto_val = (respondio_auto_n / total * 100.0) if total else None
+
+    cash_por_lead = (cash_total / cerrados) if cerrados else 0.0
+
+    return BioMetricsResponse(
+        total_leads=total,
+        agendaron=agendaron,
+        cerrados=cerrados,
+        tasa_agenda=round(tasa_agenda, 2),
+        cash_total=round(cash_total, 2),
+        cash_por_chat=round(cash_por_chat, 2),
+        respondio_auto=respondio_auto_n,
+        tasa_respuesta_auto=round(tasa_respuesta_auto_val, 2) if tasa_respuesta_auto_val is not None else None,
+        cash_por_lead=round(cash_por_lead, 2),
+        tasa_conversion=round(tasa_agenda, 2),
+    )
+
+
+@router.get("/via-options", response_model=BioViaOptionsResponse)
+def bio_via_options(
+    _user_id: Annotated[str, Depends(require_user_id)],
+) -> BioViaOptionsResponse:
+    return BioViaOptionsResponse(options=list(VIA_OPTIONS_FIXED))
+
+
+@router.patch("/leads/{lead_id}/status", response_model=BioLeadResponse)
+def patch_lead_status(
+    lead_id: str,
     body: BioLeadStatusPatchRequest,
     user_id: Annotated[str, Depends(require_user_id)],
 ) -> BioLeadResponse:
     try:
-        return service.patch_status(user_id, record_id, body.status)
-    except HTTPException as e:
-        raise e
-    except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al actualizar status de BIO.")
+        lid = int(lead_id)
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="lead_id o user_id inválido") from e
 
+    status_new = (body.status or "").strip()
+    if not status_new:
+        raise HTTPException(status_code=400, detail="status no puede estar vacío.")
 
-@router.get("/metrics", response_model=BioMetricsResponse)
-def get_bio_metrics(
-    user_id: Annotated[str, Depends(require_user_id)],
-    month: str | None = Query(default=None, description="Formato YYYY-MM"),
-) -> BioMetricsResponse:
-    try:
-        effective_month = month or datetime.utcnow().strftime("%Y-%m")
-        return service.metrics(user_id, effective_month)
-    except HTTPException as e:
-        raise e
-    except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al obtener métricas de BIO.")
-
-
-@router.get("/manychat-status", response_model=BioManychatStatusResponse)
-def get_manychat_status(
-    user_id: Annotated[str, Depends(require_user_id)],
-) -> BioManychatStatusResponse:
-    try:
-        return service.manychat_status(user_id)
-    except HTTPException as e:
-        raise e
-    except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al obtener estado de ManyChat.")
-
-
-@router.get("/via-options", response_model=BioViaOptionsResponse)
-def get_bio_via_options(
-    user_id: Annotated[str, Depends(require_user_id)],
-) -> BioViaOptionsResponse:
-    try:
-        return service.via_options(user_id)
-    except HTTPException as e:
-        raise e
-    except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al obtener opciones de Vía.")
+    with db_session:
+        try:
+            row = LeadEntity[lid]
+        except ObjectNotFound as e:
+            raise HTTPException(status_code=404, detail="Lead no encontrado.") from e
+        if int(row.user_id) != uid:
+            raise HTTPException(status_code=404, detail="Lead no encontrado.")
+        row.status = status_new
+        row.estado = status_new
+        return _lead_to_response(row)

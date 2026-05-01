@@ -11,6 +11,8 @@ const nextConfig: NextConfig = {
   // Activa el MCP server en /_next/mcp (Next.js 16+)
   experimental: {
     mcpServer: true,
+    // Ayuda a que Next transforme imports de paquetes grandes en imports por módulo.
+    optimizePackageImports: ['recharts', 'react-chartjs-2', 'chart.js'],
   },
   async rewrites() {
     return [

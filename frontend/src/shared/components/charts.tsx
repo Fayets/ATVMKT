@@ -2,7 +2,7 @@
 
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Tooltip, Legend, Filler } from 'chart.js'
 import type { Plugin } from 'chart.js'
-import { Line, Doughnut, Bar } from 'react-chartjs-2'
+import { Line, Doughnut, Bar, Pie } from 'react-chartjs-2'
 
 // Plugin: per-segment colored glow for Doughnut/Pie charts
 // Uses reduced blur to stay within canvas bounds
@@ -61,5 +61,5 @@ ChartJS.defaults.elements.line.borderJoinStyle = 'round'
 // Add padding so glow doesn't clip at canvas edge
 ChartJS.defaults.layout.padding = 16
 
-export { Line, Doughnut, Bar }
+export { Line, Doughnut, Bar, Pie }
 export { ChartJS }

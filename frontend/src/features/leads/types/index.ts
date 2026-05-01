@@ -1,5 +1,7 @@
 export type Lead = {
   id: string
+  /** user_id del dueño en BD (Pony Lead.user_id) */
+  lead_user_id?: string | null
   client_name: string
   ig_handle: string | null
   phone: string | null
@@ -8,11 +10,16 @@ export type Lead = {
   origin: string | null
   entry_channel: string | null
   entry_funnel: string | null
+  /** keyword en BD (mismo valor que suele mostrarse en ingreso embudo) */
+  keyword?: string | null
   agenda_point: string | null
   ctas_responded: number
   first_contact_at: string | null
+  fecha_bot?: string | null
   scheduled_at: string | null
+  agendo?: boolean | null
   call_at: string | null
+  call?: boolean | null
   call_link: string | null
   closer_report: string | null
   program_offered: string | null
@@ -39,8 +46,11 @@ export type Lead = {
   disposicion_invertir: string | null
   calendly_event_uri: string | null
   calendly_invitee_uri: string | null
-  /** Origen del registro (p. ej. airtable cuando viene de la API). */
+  /** Origen del registro (manual, import, etc.). */
   source_type?: string | null
+  content_url?: string | null
+  manychat_contact_id?: string | null
+  respondio_auto?: boolean | null
 }
 
 export type ColumnDef = {
@@ -118,7 +128,7 @@ function normStatusKey(s: string): string {
 }
 
 /**
- * Unifica variantes de Airtable / texto libre al valor canónico de STATUS_OPTIONS
+ * Unifica variantes de texto libre al valor canónico de STATUS_OPTIONS
  * para filtros, colores y selects.
  */
 export function canonicalLeadStatus(raw: string | null | undefined): string {
@@ -210,5 +220,15 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'notes', label: 'Notas', width: 200, type: 'text', editable: true, defaultVisible: false },
     { key: 'calendly_event_uri', label: 'Calendly (evento)', width: 160, type: 'link', editable: true, defaultVisible: false },
     { key: 'calendly_invitee_uri', label: 'Calendly (invitado)', width: 160, type: 'link', editable: true, defaultVisible: false },
+    // Paridad con modelo Pony Lead (Neon)
+    { key: 'lead_user_id', label: 'User cuenta', width: 96, type: 'text', editable: false, defaultVisible: false },
+    { key: 'keyword', label: 'Keyword (BD)', width: 120, type: 'text', editable: false, defaultVisible: false },
+    { key: 'fecha_bot', label: 'Fecha bot', width: 130, type: 'date', editable: false, defaultVisible: false },
+    { key: 'agendo', label: 'Agendó', width: 88, type: 'text', editable: false, defaultVisible: false },
+    { key: 'call', label: 'Call', width: 72, type: 'text', editable: false, defaultVisible: false },
+    { key: 'content_url', label: 'Content URL', width: 160, type: 'link', editable: false, defaultVisible: false },
+    { key: 'manychat_contact_id', label: 'ManyChat ID', width: 130, type: 'text', editable: false, defaultVisible: false },
+    { key: 'respondio_auto', label: 'Resp. auto', width: 96, type: 'text', editable: false, defaultVisible: false },
+    { key: 'source_type', label: 'Origen reg.', width: 110, type: 'text', editable: false, defaultVisible: false },
   ]
 }

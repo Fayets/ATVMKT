@@ -1,26 +1,18 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireNumericUserId } from '@/lib/request-user'
 import { NextResponse } from 'next/server'
 
 // POST /api/analyze-image — Analyze a screenshot of Instagram stories with Claude Vision
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+  const authUser = requireNumericUserId(request)
+  if (authUser instanceof NextResponse) return authUser
 
   const body = await request.json()
   const { imageBase64, mediaType = 'image/jpeg' } = body
 
   if (!imageBase64) return NextResponse.json({ error: 'No image provided' }, { status: 400 })
 
-  // Get master lists for context
-  const { data: lists } = await supabase.from('master_lists').select('category, items').eq('user_id', user.id)
-  const masterLists: Record<string, string[]> = {}
-  ;(lists || []).forEach((r: { category: string; items: unknown }) => {
-    masterLists[r.category] = Array.isArray(r.items) ? r.items as string[] : []
-  })
-
-  const dolores = masterLists.dolores || []
-  const angulos = masterLists.angulos || []
+  const dolores: string[] = []
+  const angulos: string[] = []
 
   const listSection = [
     dolores.length ? 'DOLORES disponibles: ' + dolores.join(' | ') : '',
@@ -112,22 +104,7 @@ Solo JSON. Nada mas.`
     if (!result.allSlides && result.slides) result.allSlides = result.slides
     result.slideCount = result.allSlides?.length || 0
 
-    // Auto-create new dolores/angulos in master lists
-    if (result.dolor && !dolores.includes(result.dolor)) {
-      await supabase.from('master_lists').upsert(
-        { user_id: user.id, category: 'dolores', items: [...dolores, result.dolor], updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,category' }
-      )
-    }
-    const newAngulos = (result.angulos || []).filter(a => a && !angulos.includes(a))
-    if (newAngulos.length > 0) {
-      await supabase.from('master_lists').upsert(
-        { user_id: user.id, category: 'angulos', items: [...angulos, ...newAngulos], updated_at: new Date().toISOString() },
-        { onConflict: 'user_id,category' }
-      )
-    }
-
-    return NextResponse.json({ success: true, ...result })
+    return NextResponse.json({ success: true, userId: authUser, ...result })
   } catch (e) {
     return NextResponse.json({ error: `Analysis failed: ${(e as Error).message}` }, { status: 500 })
   }

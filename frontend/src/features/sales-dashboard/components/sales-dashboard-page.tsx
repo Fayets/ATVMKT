@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
 import { Bar, Line } from '@/shared/components/charts'
 import { getLeadsAnalytics } from '@/features/leads/services/leads-analytics'
 import type { VDData } from '@/features/sales-dashboard/sales-dashboard-vd'
@@ -15,7 +15,7 @@ function pct(o: number, n: number) { if (o === 0) return n > 0 ? 100 : 0; return
 
 export function SalesDashboardPage() {
   const { month, options, setMonth } = useMonthContext()
-  const { supabase, ready } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [tab, setTab] = useState<'mensual' | 'semanal' | 'diario'>('mensual')
   const [semana, setSemana] = useState(0)
   const [curr, setCurr] = useState<VDData | null>(null)
@@ -23,7 +23,7 @@ export function SalesDashboardPage() {
   const [loading, setLoading] = useState(true)
 
   const buildVD = useCallback(async (m: string): Promise<VDData> => {
-    const { analytics } = await getLeadsAnalytics(supabase, m)
+    const { analytics } = await getLeadsAnalytics(m)
     return {
       ...analytics,
       agendasByWeek: analytics.byWeek.agendas,
@@ -33,17 +33,17 @@ export function SalesDashboardPage() {
       ingresosByWeek: analytics.byWeek.ingresos,
       noShowsByWeek: analytics.byWeek.noShows,
     }
-  }, [supabase])
+  }, [])
 
   const fetchData = useCallback(async () => {
-    if (!ready) return
+    if (!ready || !userId) return
     setLoading(true)
     const [y, m] = month.split('-').map(Number)
     const prevMonth = `${new Date(y, m - 2, 1).getFullYear()}-${String(new Date(y, m - 2, 1).getMonth() + 1).padStart(2, '0')}`
     const [c, p] = await Promise.all([buildVD(month), buildVD(prevMonth)])
     setCurr(c); setPrev(p)
     setLoading(false)
-  }, [month, ready, buildVD])
+  }, [month, ready, userId, buildVD])
 
   useEffect(() => { fetchData() }, [fetchData])
 

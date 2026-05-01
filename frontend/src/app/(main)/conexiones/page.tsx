@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { backendAuthHeaders } from '@/lib/api'
 
 type Connection = {
   id?: string
@@ -79,25 +80,6 @@ const PLATFORMS: PlatformDef[] = [
     },
   },
   {
-    key: 'apify', label: 'Apify', icon: '🕷️', subtitle: 'Scrapea reels de Instagram con transcripcion de audio para clasificar',
-    fields: [
-      { key: 'api_token', label: 'API Token', placeholder: 'apify_api_...', type: 'password' },
-      { key: 'ig_handle', label: 'Usuario de Instagram (sin @)', placeholder: 'juanxcarrizo' },
-      { key: 'limit', label: 'Limite de reels por sync', placeholder: '10' },
-    ],
-    guide: {
-      title: 'Como configurar Apify',
-      steps: [
-        'Crea una cuenta en apify.com (tiene $5 USD gratis para empezar)',
-        'Anda a console.apify.com → Settings → Integrations',
-        'Copia tu "Personal API Token" y pegalo en el campo API Token',
-        'En "Usuario de Instagram" pone tu handle sin @ (ej: juanxcarrizo)',
-        'El limite define cuantos reels scrapea por sync (~$0.08 por reel con transcript)',
-        'Listo! Anda a Reels y apreta "Sincronizar Instagram"',
-      ],
-    },
-  },
-  {
     key: 'instagram', label: 'Instagram', icon: '📸', subtitle: 'Sincroniza insights de stories directo con Instagram Graph API',
     fields: [
       { key: 'access_token', label: 'Access Token', placeholder: 'EAAG...', type: 'password' },
@@ -134,54 +116,11 @@ const PLATFORMS: PlatformDef[] = [
       ],
     },
   },
-  {
-    key: 'airtable', label: 'Airtable', icon: '📋', subtitle: 'Sincroniza leads y ventas con tu CRM de Airtable',
-    fields: [
-      {
-        key: 'personal_access_token',
-        label: 'Personal Access Token (PAT)',
-        placeholder: 'pat... (airtable.com/create/tokens)',
-        type: 'password',
-        span: 2,
-      },
-      {
-        key: 'base_id',
-        label: 'Base ID',
-        placeholder: 'app… (ej: appcdWzVfsRY75jj3)',
-        span: 2,
-      },
-      {
-        key: 'table_id',
-        label: 'Table ID (recomendado)',
-        placeholder: 'tbl… de la URL — ej: tblZT83Ja3qxcKW2p',
-      },
-      { key: 'table_name', label: 'Nombre de la tabla', placeholder: 'Leads Marzo' },
-      {
-        key: 'view_id',
-        label: 'View ID (opcional)',
-        placeholder: 'viw… de la URL — misma vista que en Airtable',
-        span: 2,
-      },
-    ],
-    guide: {
-      title: 'Como configurar Airtable',
-      steps: [
-        'En airtable.com/create/tokens crea un token con acceso a tu base (scopes: data.records:read como minimo; schema.bases:read para verificar tablas).',
-        'Copia el PAT y pegalo arriba (empieza con pat...). No lo compartas ni lo subas a git.',
-        'Base ID: en la URL es el tramo que empieza con app — en tu ejemplo: appcdWzVfsRY75jj3 (solo eso, sin https ni barras). También podés pegar la URL completa y lo tomamos automático.',
-        'Table ID (recomendado): en la misma URL viene tbl… — en tu ejemplo: tblZT83Ja3qxcKW2p. Así la API no depende del nombre exacto de la pestaña.',
-        'Nombre de la tabla: ej. Leads Marzo (se usa si no cargás Table ID; debe coincidir con el nombre de la pestaña).',
-        'View ID (opcional): si en Airtable usás una vista filtrada (Leads, etc.), copiá el viw… de la URL para que el listado coincida con lo que ves en el tablero.',
-        'Guardá y usá "Probar conexión". Si falla, en el token PAT tenés que dar acceso explícito a la base ATV.',
-        'La sync bidireccional con leads se puede disparar desde el dashboard cuando este cableada.',
-      ],
-    },
-  },
 ]
 
 export default function ConexionesPage() {
   const { toast } = useToast()
-  const { ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [connections, setConnections] = useState<Record<string, Connection>>({})
   const [loading, setLoading] = useState(true)
 
@@ -199,7 +138,7 @@ export default function ConexionesPage() {
     setLoading(true)
     try {
       const res = await fetch(`${apiBase}/conexiones`, {
-        headers: { 'X-User-Id': userId },
+        headers: backendAuthHeaders(),
       })
       const raw = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -237,17 +176,14 @@ export default function ConexionesPage() {
   useEffect(() => { fetchConnections() }, [fetchConnections])
 
   const saveConnection = async (platform: string, credentials: Record<string, string>) => {
-    if (!userId) { toast('Error: no hay sesion activa'); return }
+    if (!userId) { toast('Iniciá sesión en la app para obtener tu ID de usuario (API).'); return }
     const webhookPlatforms = ['manychat', 'calendly', 'fathom']
     if (webhookPlatforms.includes(platform) && !credentials.webhook_token) {
       credentials.webhook_token = crypto.randomUUID().replace(/-/g, '')
     }
     const res = await fetch(`${apiBase}/conexiones/${encodeURIComponent(platform)}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-User-Id': userId,
-      },
+      headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ credentials }),
     })
     const raw = await res.json().catch(() => ({}))
@@ -310,8 +246,6 @@ function ConnectionCard({
   const [form, setForm] = useState<Record<string, string>>({})
   const [expanded, setExpanded] = useState(false)
   const [showGuide, setShowGuide] = useState(false)
-  const [airtableVerifyLoading, setAirtableVerifyLoading] = useState(false)
-  const [airtableVerifyMsg, setAirtableVerifyMsg] = useState<string | null>(null)
 
   useEffect(() => {
     if (connection?.credentials) setForm(connection.credentials)
@@ -405,45 +339,9 @@ function ConnectionCard({
                 Guardar
               </button>
             )}
-            {platform.key === 'airtable' && userId && (
-              <button
-                type="button"
-                disabled={airtableVerifyLoading}
-                onClick={async () => {
-                  setAirtableVerifyMsg(null)
-                  setAirtableVerifyLoading(true)
-                  try {
-                    const res = await fetch(`${apiBase}/airtable/verify`, {
-                      headers: { 'X-User-Id': userId },
-                    })
-                    const raw = await res.text()
-                    const data = (() => {
-                      try { return raw ? JSON.parse(raw) : {} } catch { return { detail: raw } }
-                    })() as { ok?: boolean; message?: string; detail?: string }
-                    if (!res.ok) {
-                      setAirtableVerifyMsg(`Error: ${data.detail || data.message || res.statusText}`)
-                    } else {
-                      setAirtableVerifyMsg(data.message || (data.ok ? 'OK' : 'Revisá la respuesta'))
-                    }
-                  } catch (e) {
-                    setAirtableVerifyMsg(`Error: ${(e as Error).message}`)
-                  } finally {
-                    setAirtableVerifyLoading(false)
-                  }
-                }}
-                className="rounded-lg border border-[var(--border2)] px-4 py-2 text-[11px] font-semibold uppercase text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-40"
-              >
-                {airtableVerifyLoading ? 'Probando...' : 'Probar conexión'}
-              </button>
-            )}
             {connection?.last_sync_at && (
               <span className="text-[11px] text-[var(--text3)]">
                 Ultima sync: {new Date(connection.last_sync_at).toLocaleString('es-AR')}
-              </span>
-            )}
-            {platform.key === 'airtable' && airtableVerifyMsg && (
-              <span className={`text-[11px] ${airtableVerifyMsg.startsWith('Error') ? 'text-[var(--red)]' : 'text-[var(--green)]'}`}>
-                {airtableVerifyMsg}
               </span>
             )}
           </div>

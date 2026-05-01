@@ -3,11 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash, getMonthRange } from '@/shared/lib/format-utils'
 import { Bar, Line } from '@/shared/components/charts'
 import { calcFunnel, distribute, type LeadRow, type WeekMetrics } from '@/features/leads/services/leads-analytics'
-import { getMonthRange } from '@/shared/lib/supabase/queries'
 // DailyReportSection movido a team-page.tsx
 function fP(v: number) { return v.toFixed(1) + '%' }
 function fN(v: number) { return Math.round(v).toLocaleString('es-AR') }
@@ -20,7 +19,7 @@ const CLOSER_COLORS = ['#22C55E', '#A855F7', '#3B82F6', '#F59E0B']
 
 export function RoleMetricsPage({ role, title }: RoleMetricsPageProps) {
   const { month, options, setMonth } = useMonthContext()
-  const { supabase, ready } = useSupabase()
+  const { ready } = useAuthUser()
   const [tab, setTab] = useState<'mensual' | 'semanal' | 'diario'>('mensual')
   const [semana, setSemana] = useState(0)
   const [members, setMembers] = useState<{ name: string }[]>([])
@@ -41,110 +40,26 @@ export function RoleMetricsPage({ role, title }: RoleMetricsPageProps) {
   const fetchData = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const [y, m] = month.split('-').map(Number)
-    const prevMonth = `${new Date(y, m - 2, 1).getFullYear()}-${String(new Date(y, m - 2, 1).getMonth() + 1).padStart(2, '0')}`
-    const { start, end } = getMonthRange(month)
-    const prevRange = getMonthRange(prevMonth)
-
-    // Fetch both roles' daily_reports for complete metrics
-    const [membersRes, leadsRes, prevRes, goalsRes, setterDailyRes, closerDailyRes, prevSetterDailyRes, prevCloserDailyRes] = await Promise.all([
-      supabase.from('team_members').select('name').eq('role', role),
-      supabase.from('leads').select('*').eq('month', month),
-      supabase.from('leads').select('*').eq('month', prevMonth),
-      supabase.from('team_goals').select('metric, target').eq('role', role).or('month.is.null,month.eq.' + month),
-      supabase.from('daily_reports').select('*').eq('role', 'setter').eq('month', month),
-      supabase.from('daily_reports').select('*').eq('role', 'closer').eq('month', month),
-      supabase.from('daily_reports').select('*').eq('role', 'setter').eq('month', prevMonth),
-      supabase.from('daily_reports').select('*').eq('role', 'closer').eq('month', prevMonth),
-    ])
-
-    setMembers(membersRes.data || [])
-    setLeads(leadsRes.data || [])
-    setPrevLeads(prevRes.data || [])
-
-    // Parsear metas de BD
-    const g: Record<string, number> = {}
-    ;(goalsRes.data || []).forEach((row: Record<string, unknown>) => { g[row.metric as string] = Number(row.target) })
-    setGoals(g)
-
-    // Sumar daily_reports combinando setter + closer
-    const sumField = (reports: Record<string, unknown>[], field: string) =>
-      reports.reduce((s, r) => s + (Number(r[field]) || 0), 0)
-
-    const buildSums = (setterReps: Record<string, unknown>[], closerReps: Record<string, unknown>[]): DailySums | null => {
-      if (!setterReps.length && !closerReps.length) return null
-      const conv = sumField(setterReps, 'conversaciones')
-      const ag = sumField(setterReps, 'agendas')
-      const sh = sumField(closerReps, 'shows')
-      const ci = sumField(closerReps, 'cierres')
-      const ing = sumField(closerReps, 'ingreso')
-      return { conversaciones: conv, agendas: ag, shows: sh, cierres: ci, ingreso: ing, noShows: Math.max(0, ag - sh) }
-    }
-
-    const dr = buildSums(setterDailyRes.data || [], closerDailyRes.data || [])
-    const pdr = buildSums(prevSetterDailyRes.data || [], prevCloserDailyRes.data || [])
-    setDailyData(dr)
-    setPrevDailyData(pdr)
-    setConversaciones(dr?.conversaciones || 0)
-    setPrevConversaciones(pdr?.conversaciones || 0)
-
-    // Agrupar daily_reports por member_name para rendimiento individual
-    const byMember: Record<string, { conversaciones: number; agendas: number; shows: number; cierres: number; ingreso: number }> = {}
-    const roleReports = role === 'setter' ? (setterDailyRes.data || []) : (closerDailyRes.data || [])
-    roleReports.forEach((r: Record<string, unknown>) => {
-      const name = r.member_name as string
-      if (!byMember[name]) byMember[name] = { conversaciones: 0, agendas: 0, shows: 0, cierres: 0, ingreso: 0 }
-      byMember[name].conversaciones += Number(r.conversaciones) || 0
-      byMember[name].agendas += Number(r.agendas) || 0
-      byMember[name].shows += Number(r.shows) || 0
-      byMember[name].cierres += Number(r.cierres) || 0
-      byMember[name].ingreso += Number(r.ingreso) || 0
-    })
-    setDailyByMember(byMember)
-
-    // Build weekly + daily distributions from daily_reports
-    const allReports = [...(setterDailyRes.data || []), ...(closerDailyRes.data || [])]
-    if (allReports.length > 0) {
-      const bw: WeekMetrics = { agendas: [0,0,0,0], conversaciones: [0,0,0,0], shows: [0,0,0,0], cierres: [0,0,0,0], ingresos: [0,0,0,0], noShows: [0,0,0,0] }
-      const z7 = () => [0,0,0,0,0,0,0]
-      const bwd: { [K in keyof WeekMetrics]: number[][] } = {
-        conversaciones: [z7(),z7(),z7(),z7()], agendas: [z7(),z7(),z7(),z7()],
-        shows: [z7(),z7(),z7(),z7()], cierres: [z7(),z7(),z7(),z7()],
-        ingresos: [z7(),z7(),z7(),z7()], noShows: [z7(),z7(),z7(),z7()],
-      }
-      allReports.forEach((r: Record<string, unknown>) => {
-        const date = new Date((r.date as string) + 'T12:00:00')
-        const dayOfMonth = date.getDate()
-        const w = Math.min(3, Math.floor((dayOfMonth - 1) / 7))
-        const dow = (date.getDay() + 6) % 7
-        const cv = Number(r.conversaciones) || 0, ag = Number(r.agendas) || 0
-        const sh = Number(r.shows) || 0, ci = Number(r.cierres) || 0, ing = Number(r.ingreso) || 0
-        bw.conversaciones[w] += cv; bwd.conversaciones[w][dow] += cv
-        bw.agendas[w] += ag;        bwd.agendas[w][dow] += ag
-        bw.shows[w] += sh;          bwd.shows[w][dow] += sh
-        bw.cierres[w] += ci;        bwd.cierres[w][dow] += ci
-        bw.ingresos[w] += ing;      bwd.ingresos[w][dow] += ing
-      })
-      for (let ww = 0; ww < 4; ww++) {
-        bw.noShows[ww] = Math.max(0, bw.agendas[ww] - bw.shows[ww])
-        for (let dd = 0; dd < 7; dd++) bwd.noShows[ww][dd] = Math.max(0, bwd.agendas[ww][dd] - bwd.shows[ww][dd])
-      }
-      setDailyByWeek(bw)
-      setDailyByWeekDay(bwd)
-    } else {
-      setDailyByWeek(null)
-      setDailyByWeekDay(null)
-    }
-
+    void getMonthRange(month)
+    setMembers([])
+    setLeads([])
+    setPrevLeads([])
+    setGoals({})
+    setDailyData(null)
+    setPrevDailyData(null)
+    setConversaciones(0)
+    setPrevConversaciones(0)
+    setDailyByMember({})
+    setDailyByWeek(null)
+    setDailyByWeekDay(null)
     setLoading(false)
-  }, [month, role, ready, supabase])
+  }, [month, role, ready])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   if (loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
-  if (members.length === 0) return (
-    <div className="py-12 text-center text-[13px] text-[var(--text3)]">No hay {role}s configurados. Agregalos en Equipo.</div>
-  )
+  const displayMembers = members.length > 0 ? members : [{ name: '—' }]
+  const memberCount = Math.max(members.length, 1)
 
   const field = role === 'setter' ? 'setter' : 'closer'
   const calc = (ls: LeadRow[], conv?: number) => {
@@ -258,14 +173,14 @@ export function RoleMetricsPage({ role, title }: RoleMetricsPageProps) {
           {/* Rendimiento individual */}
           <div className="text-[11px] font-medium uppercase tracking-widest text-[var(--text3)]">Rendimiento Individual</div>
           <div className="grid grid-cols-2 gap-4">
-            {members.map((m, i) => {
+            {displayMembers.map((m, i) => {
               const md = dailyByMember[m.name] || { conversaciones: 0, agendas: 0, shows: 0, cierres: 0, ingreso: 0 }
               const mShows = md.shows, mCierres = md.cierres, mConv = md.conversaciones, mAg = md.agendas, mCash = md.ingreso
               const mCloseRate = mShows > 0 ? (mCierres / mShows) * 100 : 0
               const mTasaAg = mConv > 0 ? (mAg / mConv) * 100 : 0
-              const agendaMeta = Math.ceil((goals.agendas || 50) / members.length)
+              const agendaMeta = Math.ceil((goals.agendas || 50) / memberCount)
               const tasaMeta = goals.tasa_agendamiento || 6
-              const cierresMeta = Math.ceil((goals.cierres || 10) / members.length)
+              const cierresMeta = Math.ceil((goals.cierres || 10) / memberCount)
               const closeMeta = goals.close_rate || 45
               const metas = role === 'setter' ? [
                 { label: 'Conversaciones', value: fN(mConv) },

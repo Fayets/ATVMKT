@@ -5,8 +5,8 @@ import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { Modal } from '@/shared/components/modal'
 import { useToast } from '@/shared/components/toast'
-import { useSupabase } from '@/shared/hooks/use-supabase'
-import { formatCash } from '@/shared/lib/supabase/queries'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { formatCash } from '@/shared/lib/format-utils'
 import { DailyReportSection } from '@/features/team/components/daily-report-form'
 
 type TeamMember = {
@@ -18,7 +18,7 @@ type TeamMember = {
 export function TeamPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
-  const { supabase, ready, userId } = useSupabase()
+  const { ready, userId } = useAuthUser()
   const [members, setMembers] = useState<TeamMember[]>([])
   const [leads, setLeads] = useState<Record<string, unknown>[]>([])
   const [dailyByMember, setDailyByMember] = useState<Record<string, { conversaciones: number; agendas: number; shows: number; cierres: number; ingreso: number }>>({})
@@ -30,42 +30,23 @@ export function TeamPage() {
   const fetchData = useCallback(async () => {
     if (!ready) return
     setLoading(true)
-    const [membersRes, leadsRes, dailyRes] = await Promise.all([
-      supabase.from('team_members').select('*').order('name'),
-      supabase.from('leads').select('*').eq('month', month),
-      supabase.from('daily_reports').select('*').eq('month', month),
-    ])
-    setMembers((membersRes.data as TeamMember[]) || [])
-    setLeads(leadsRes.data || [])
-
-    // Agrupar daily_reports por member_name
-    const byMember: Record<string, { conversaciones: number; agendas: number; shows: number; cierres: number; ingreso: number }> = {}
-    ;(dailyRes.data || []).forEach((r: Record<string, unknown>) => {
-      const name = r.member_name as string
-      if (!byMember[name]) byMember[name] = { conversaciones: 0, agendas: 0, shows: 0, cierres: 0, ingreso: 0 }
-      byMember[name].conversaciones += Number(r.conversaciones) || 0
-      byMember[name].agendas += Number(r.agendas) || 0
-      byMember[name].shows += Number(r.shows) || 0
-      byMember[name].cierres += Number(r.cierres) || 0
-      byMember[name].ingreso += Number(r.ingreso) || 0
-    })
-    setDailyByMember(byMember)
+    setMembers([])
+    setLeads([])
+    setDailyByMember({})
     setLoading(false)
-  }, [month, ready, supabase])
+  }, [month, ready])
 
   useEffect(() => { fetchData() }, [fetchData])
 
   const handleAdd = async (name: string, role: string) => {
     if (!userId || !name.trim()) return
-    await supabase.from('team_members').insert({ user_id: userId, name: name.trim(), role, comision_pct: 5 })
-    toast(`${role} agregado ✓`)
+    toast('Equipo: persistencia en backend pendiente.')
     setShowAdd(false)
     fetchData()
   }
 
-  const handleRemove = async (id: string) => {
-    await supabase.from('team_members').delete().eq('id', id)
-    toast('Eliminado ✓')
+  const handleRemove = async (_id: string) => {
+    toast('Equipo: persistencia en backend pendiente.')
     fetchData()
   }
 
