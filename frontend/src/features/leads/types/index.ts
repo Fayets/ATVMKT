@@ -98,13 +98,6 @@ export const AVATAR_COLORS: Record<string, string> = {
   'Otro': '#6B7280',
 }
 
-export const CHANNEL_COLORS: Record<string, string> = {
-  'IG Chat': '#E1306C',
-  'WSP Chat': '#25D366',
-  'Referido': '#F59E0B',
-  'YouTube': '#FF0000',
-}
-
 export const PROGRAM_COLORS: Record<string, string> = {
   Boost: '#F59E0B',
   Advantage: '#3B82F6',
@@ -114,7 +107,6 @@ export const PROGRAM_COLORS: Record<string, string> = {
 export const STATUS_OPTIONS = ['Pendiente', 'Seguimiento', 'Seña', 'Cerrado', 'No show', 'Re-agenda', 'Descalificado']
 export const AVATAR_OPTIONS = ['', 'Experto en info', 'Dueño de agencia', 'Dueño de negocio', 'Habilidades de alto valor', 'Creador de contenido', 'Creador con infoproducto', 'Otro']
 export const PROGRAM_OPTIONS = ['', 'Boost', 'Advantage', 'Mentoria']
-export const CHANNEL_OPTIONS = ['', 'IG Chat', 'WSP Chat', 'Referido', 'YouTube']
 export const ORIGIN_OPTIONS = ['Referido', 'Setter', 'Youtube', 'Lead viejo (seguimiento)'] as const
 
 export const AGENDO_EN_OPTIONS = ['Chat', 'Youtube'] as const
@@ -200,7 +192,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     // Estado y equipo
     { key: 'status', label: 'Status', width: 130, type: 'select', editable: true, options: STATUS_OPTIONS, colors: STATUS_COLORS, defaultVisible: true },
     { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
-    { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: CHANNEL_OPTIONS, colors: CHANNEL_COLORS, defaultVisible: true },
+    { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
     // Funnel de entrada
     { key: 'entry_funnel', label: 'Ingreso embudo', width: 150, type: 'text', editable: true, defaultVisible: true },
     { key: 'agenda_point', label: 'Pto agenda', width: 130, type: 'text', editable: true, defaultVisible: true },

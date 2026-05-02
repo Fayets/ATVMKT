@@ -13,23 +13,22 @@ import {
   STATUS_TABS, buildColumns, canonicalLeadStatus,
   ORIGIN_OPTIONS,
   AGENDO_EN_OPTIONS,
-  CHANNEL_OPTIONS,
 } from '../types'
 
-function mergeEntryChannelOptions(leads: Lead[], custom: string[]): string[] {
-  const base = [...CHANNEL_OPTIONS]
-  const baseSet = new Set(base)
-  const extras = new Set<string>()
-  for (const c of custom) {
-    const t = String(c || '').trim()
-    if (t && !baseSet.has(t)) extras.add(t)
-  }
-  for (const l of leads) {
-    const t = String(l.entry_channel || '').trim()
-    if (t && !baseSet.has(t)) extras.add(t)
-  }
-  const sortedExtras = [...extras].sort((a, b) => a.localeCompare(b, 'es'))
-  return [...base, ...sortedExtras]
+/** Solo '' + valores agregados con + en el header (sin lista fija). */
+function mergeEntryChannelOptions(custom: string[]): string[] {
+  const nonEmpty = [
+    ...new Set(custom.map((c) => String(c || '').trim()).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b, 'es'))
+  return ['', ...nonEmpty]
+}
+
+/** Incluye el valor guardado del lead si no está en la lista (datos legacy / API). */
+function entryChannelSelectOptions(lead: Lead, parentOpts: string[]): string[] {
+  const v = String(lead.entry_channel || '').trim()
+  if (!v || parentOpts.includes(v)) return parentOpts
+  const rest = parentOpts.filter((x) => x !== '')
+  return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
 }
 
 function agendoEnDisplayValue(lead: Lead): string {
@@ -102,7 +101,7 @@ export function LeadsPage() {
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[] | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
 
-  /** Opciones extra para columna Vía (entry_channel); se fusionan con CHANNEL_OPTIONS y valores de los leads. */
+  /** Opciones de Vía agregadas manualmente (+ en header); persisten solo en memoria de la sesión. */
   const [customViaOptions, setCustomViaOptions] = useState<string[]>([])
   const [viaAddOpen, setViaAddOpen] = useState(false)
   const [viaDraft, setViaDraft] = useState('')
@@ -357,11 +356,11 @@ export function LeadsPage() {
   )
 
   const tableColumns = useMemo(() => {
-    const opts = mergeEntryChannelOptions(leads, customViaOptions)
+    const opts = mergeEntryChannelOptions(customViaOptions)
     return activeColumns.map((c) =>
       c.key === 'entry_channel' ? { ...c, options: opts } : c,
     )
-  }, [activeColumns, leads, customViaOptions])
+  }, [activeColumns, customViaOptions])
 
   const confirmNewViaOption = useCallback(() => {
     const t = viaDraft.trim()
@@ -370,10 +369,7 @@ export function LeadsPage() {
       setViaDraft('')
       return
     }
-    const inBase = CHANNEL_OPTIONS.some((o) => o === t)
-    if (!inBase) {
-      setCustomViaOptions((prev) => (prev.includes(t) ? prev : [...prev, t]))
-    }
+    setCustomViaOptions((prev) => (prev.includes(t) ? prev : [...prev, t]))
     setViaAddOpen(false)
     setViaDraft('')
   }, [viaDraft])
@@ -989,7 +985,9 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
           ? originSelectOptions(lead)
           : col.key === 'agendo_en'
             ? agendoEnSelectOptions(lead)
-            : col.options!
+            : col.key === 'entry_channel'
+              ? entryChannelSelectOptions(lead, col.options!)
+              : col.options!
       return (
         <select
           autoFocus
