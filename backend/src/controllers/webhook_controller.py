@@ -19,6 +19,10 @@ def _norm_kw(s: str) -> str:
     return (s or "").strip().casefold()
 
 
+def _norm_ig(s: str) -> str:
+    return (s or "").strip().lstrip("@").casefold()
+
+
 def _resolve_user_id_by_keyword(keyword: str) -> int | None:
     """Dueño del keyword: reel con ese keyword; si no hay reel, primer ApiConnection manychat (keyword de bio genérico)."""
     kw = _norm_kw(keyword)
@@ -85,6 +89,28 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
             status_code=404,
             detail="No se encontró un usuario para esta keyword (revisa reels o conexión ManyChat).",
         )
+
+    if event == "respondio_auto":
+        ig_raw = str(payload.get("contact_ig_username") or "").strip()
+        ig_key = _norm_ig(ig_raw)
+        if not ig_key:
+            return {"status": "ok"}
+        uid = int(user_id)
+        with db_session:
+            matches = [
+                r
+                for r in list(Lead.select())
+                if int(r.user_id) == uid and _norm_ig(r.ig or "") == ig_key
+            ]
+            if not matches:
+                return {"status": "ok"}
+            matches.sort(
+                key=lambda r: (r.created_at.timestamp() if r.created_at else 0.0),
+                reverse=True,
+            )
+            row = matches[0]
+            row.respondio_auto = True
+        return {"status": "ok"}
 
     contact_name = str(payload.get("contact_name") or "").strip()
     contact_lastname = str(payload.get("contact_lastname") or "").strip()
