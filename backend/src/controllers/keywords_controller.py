@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pony.orm import db_session
 
+from src.lead_display_utils import lead_display_nombre
 from src.models import Lead as LeadEntity
 from src.models import ReelContent
 from src.schemas import KeywordClientRow, KeywordsListResponse
@@ -94,7 +95,7 @@ def list_keywords(user_id: Annotated[str, Depends(require_user_id)]) -> Keywords
                     tok.lower(),
                     KeywordClientRow(
                         lead_id=str(lead.id),
-                        nombre=(lead.nombre or "").strip(),
+                        nombre=lead_display_nombre(lead.nombre, lead.ig),
                         instagram=(lead.ig or "").strip(),
                         reel_permalink=permalink,
                         reel_published_at=pub_iso,

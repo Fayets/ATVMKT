@@ -1,6 +1,7 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
+import { ThemeToggle } from '@/shared/components/theme-toggle'
 
 const titles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -19,7 +20,6 @@ const titles: Record<string, string> = {
   '/objetivos': 'Objetivos',
   '/listas': 'Listas Maestras',
   '/conexiones': 'Conexiones API',
-  '/ajustes': 'Ajustes',
 }
 
 const subtitles: Record<string, string> = {
@@ -33,14 +33,9 @@ const subtitles: Record<string, string> = {
   '/diferidos': 'Atribucion cruzada',
   '/listas': 'Configuracion',
   '/conexiones': 'Configuracion',
-  '/ajustes': 'De la cuenta',
 }
 
-type TopbarProps = {
-  userName: string
-}
-
-export function Topbar({ userName: _userName }: TopbarProps) {
+export function Topbar() {
   const pathname = usePathname()
   const hideTitleForPath = [
     '/reels',
@@ -50,14 +45,13 @@ export function Topbar({ userName: _userName }: TopbarProps) {
     '/bio',
     '/listas',
     '/conexiones',
-    '/ajustes',
   ].includes(pathname)
   const title = titles[pathname] || 'Dashboard'
   const subtitle = subtitles[pathname]
 
   return (
-    <header className="sticky top-0 z-10 flex items-center border-b border-[var(--border)] bg-[rgba(9,9,11,0.8)] px-8 py-4 backdrop-blur-xl">
-      <div className="flex items-center gap-3">
+    <header className="sticky top-0 z-10 flex min-h-[56px] items-center justify-between gap-4 border-b border-[var(--border)] bg-[var(--topbar-bg)] px-8 py-4 backdrop-blur-xl">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         {!hideTitleForPath && (
           <h1 className="text-[15px] font-semibold tracking-tight">
             {title}
@@ -67,7 +61,9 @@ export function Topbar({ userName: _userName }: TopbarProps) {
           </h1>
         )}
       </div>
-
+      <div className="flex flex-shrink-0 items-center">
+        <ThemeToggle />
+      </div>
     </header>
   )
 }

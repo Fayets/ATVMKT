@@ -152,6 +152,8 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
     nombre = " ".join(x for x in (contact_name, contact_lastname) if x).strip()
     # Mismo criterio: si en ManyChat el body tiene "{{ig_username}}" entre comillas, llega literal.
     ig = _sanitize_webhook_display_name(str(payload.get("contact_ig_username") or "")).lstrip("@")
+    if not nombre and ig:
+        nombre = ig
     content_url = str(payload.get("content_url") or "").strip()
     manychat_contact_id = _sanitize_webhook_display_name(str(payload.get("manychat_contact_id") or ""))
 
@@ -160,7 +162,7 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
         existing = _find_lead_same_contact(user_id, ig)
         if existing is not None:
             existing.keyword = _merge_keyword_csv(existing.keyword, keyword)
-            if nombre and not (existing.nombre or "").strip():
+            if not (existing.nombre or "").strip() and nombre:
                 existing.nombre = nombre
             if ig:
                 existing.ig = ig

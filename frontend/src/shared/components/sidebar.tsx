@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { logout } from '@/features/auth/services/auth-service'
 import { useState } from 'react'
+import { useAuthUser } from '@/shared/hooks/use-auth-user'
 
 type NavItem = { label: string; href: string }
 type NavGroup = {
@@ -60,15 +61,27 @@ const dataGroups: NavGroup[] = [
   },
 ]
 
-const settingsItems: NavItem[] = [
-  { label: 'Listas maestras', href: '/listas' },
-  { label: 'Conexiones API', href: '/conexiones' },
-  { label: 'Ajustes de la cuenta', href: '/ajustes' },
-]
+const settingsGroup: NavGroup = {
+  title: 'Ajustes',
+  icon: '⚙',
+  defaultOpen: true,
+  items: [
+    { label: 'Listas maestras', href: '/listas' },
+    { label: 'Conexiones API', href: '/conexiones' },
+  ],
+}
+
+function capitalizeFirstLetter(label: string): string {
+  if (!label) return label
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
 
 export function Sidebar() {
   const router = useRouter()
   const pathname = usePathname()
+  const { username, ready } = useAuthUser()
+  const trimmed = username?.trim() || ''
+  const displayName = !ready ? '…' : trimmed ? capitalizeFirstLetter(trimmed) : 'Usuario'
 
   const onLogout = async () => {
     await logout()
@@ -107,36 +120,21 @@ export function Sidebar() {
           ))}
         </div>
 
-        {/* Settings */}
-        <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-widest text-[var(--text3)]">
-          Ajustes
+        <div className="flex flex-col gap-1 border-t border-[var(--border)] pt-2 mt-1">
+          <CollapsibleGroup group={settingsGroup} pathname={pathname} showBadge />
         </div>
-        {settingsItems.map((item) => {
-          const isActive = pathname === item.href
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`mx-1 mb-1 block min-h-7 truncate rounded-md border-l-2 py-1 pl-[calc(2.5rem-2px)] pr-2 text-[13px] transition-all ${
-                isActive
-                  ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--text)] font-medium'
-                  : 'border-transparent text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text)]'
-              }`}
-            >
-              {item.label}
-            </Link>
-          )
-        })}
       </nav>
 
       {/* Footer */}
       <div className="mt-1 border-t border-[var(--border)] px-4 pb-2 pt-2 text-[9px] text-[var(--text3)]">
-        <div className="mb-2 flex items-center justify-between text-[11px]">
-          <span className="text-[var(--text3)]">Invitado</span>
+        <div className="mb-2 flex items-center justify-between gap-2 text-[11px]">
+          <span className="min-w-0 truncate font-medium text-[var(--text2)]" title={displayName}>
+            {displayName}
+          </span>
           <button
             type="button"
             onClick={onLogout}
-            className="rounded-md border border-[var(--border2)] bg-transparent px-2 py-1 text-[10px] font-medium text-[var(--text3)] transition-all hover:border-[var(--accent)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)]"
+            className="shrink-0 rounded-md border border-[var(--border2)] bg-transparent px-2 py-1 text-[10px] font-medium text-[var(--text3)] transition-all hover:border-[var(--accent)] hover:bg-[var(--accent-faint)] hover:text-[var(--accent)]"
           >
             Salir
           </button>
@@ -148,7 +146,6 @@ export function Sidebar() {
 }
 
 function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pathname: string; showBadge?: boolean }) {
-  const hasActive = group.items.some(i => pathname === i.href)
   const directActive = group.href ? pathname === group.href : false
   const [open, setOpen] = useState(group.defaultOpen ?? false)
 
@@ -158,7 +155,7 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
         <Link
           href={group.href}
           className={`mx-1 flex w-[calc(100%-8px)] items-center rounded-md px-3 py-1.5 text-[13px] font-medium transition-all text-left ${
-            directActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)]'
+            directActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[var(--nav-hover)]'
           }`}
         >
           <span className="flex-1">{group.title}</span>
@@ -174,9 +171,7 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-label={open ? `Contraer menú: ${group.title}` : `Expandir menú: ${group.title}`}
-        className={`mx-1 flex min-h-8 w-[calc(100%-8px)] items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-left transition-all ${
-          hasActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)]'
-        }`}
+        className="mx-1 flex min-h-8 w-[calc(100%-8px)] items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-left text-[var(--text2)] transition-all hover:bg-[var(--nav-hover)]"
       >
         <span className="min-w-0 flex-1 truncate">{group.title}</span>
         {showBadge && group.items.length > 0 && (
@@ -196,7 +191,7 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
                 className={`block min-h-7 truncate rounded-md border-l-2 py-1 pl-[calc(2.5rem-2px)] pr-2 text-[12px] transition-all ${
                   isActive
                     ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--text)] font-medium'
-                    : 'border-transparent text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text)]'
+                    : 'border-transparent text-[var(--text2)] hover:bg-[var(--nav-hover)] hover:text-[var(--text)]'
                 }`}
               >
                 {item.label}

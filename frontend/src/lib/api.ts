@@ -53,6 +53,17 @@ export function resolveBackendUserId(): string | null {
   return readUserIdFromSession(readSessionToken())
 }
 
+/** Username del JWT (`sub`, coincide con login en FastAPI). */
+export function resolveSessionUsername(): string | null {
+  if (typeof window === 'undefined') return null
+  const token = readSessionToken()
+  if (!token) return null
+  const payload = decodeJwtPayload(token)
+  const sub = payload?.sub
+  if (typeof sub === 'string' && sub.trim()) return sub.trim()
+  return null
+}
+
 /**
  * Headers para fetch directo al backend (p. ej. `/api-backend/conexiones`).
  * Incluye `Authorization: Bearer` y `X-User-Id` cuando hay sesión de login.

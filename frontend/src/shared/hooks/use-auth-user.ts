@@ -1,15 +1,19 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { resolveBackendUserId } from '@/lib/api'
+import { resolveBackendUserId, resolveSessionUsername } from '@/lib/api'
 
 /** `user_id` entero del login FastAPI (string en el cliente), o null si no hay sesión. */
 export function useAuthUser() {
   const [userId, setUserId] = useState<string | null>(null)
+  const [username, setUsername] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const sync = () => setUserId(resolveBackendUserId())
+    const sync = () => {
+      setUserId(resolveBackendUserId())
+      setUsername(resolveSessionUsername())
+    }
     sync()
     setReady(true)
     window.addEventListener('auth-session-changed', sync)
@@ -20,5 +24,5 @@ export function useAuthUser() {
     }
   }, [])
 
-  return { userId, ready }
+  return { userId, username, ready }
 }

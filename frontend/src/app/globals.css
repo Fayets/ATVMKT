@@ -36,9 +36,31 @@
   --text2: #A1A1AA;
   --text3: #52525B;
 
+  /* Layout helpers */
+  --topbar-bg: rgba(9, 9, 11, 0.8);
+  --nav-hover: rgba(255, 255, 255, 0.03);
+
   /* Semantic */
   --green: #22C55E;
   --amber: #F59E0B;
+}
+
+[data-theme='light'] {
+  --accent-faint: rgba(230, 57, 70, 0.1);
+  --bg: #f4f4f5;
+  --bg2: #ffffff;
+  --bg3: #fafafa;
+  --bg4: #e4e4e7;
+  --border: rgba(0, 0, 0, 0.08);
+  --border2: rgba(0, 0, 0, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(230, 57, 70, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(230, 57, 70, 0.08);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(230, 57, 70, 0.08);
+  --text: #18181b;
+  --text2: #52525b;
+  --text3: #71717a;
+  --topbar-bg: rgba(255, 255, 255, 0.88);
+  --nav-hover: rgba(0, 0, 0, 0.05);
 }
 
 @layer base {
@@ -53,6 +75,11 @@
     color: #fff;
   }
 
+  [data-theme='light'] ::selection {
+    background: rgba(230, 57, 70, 0.22);
+    color: #18181b;
+  }
+
   ::-webkit-scrollbar {
     width: 5px;
   }
@@ -65,6 +92,13 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.12);
+  }
+
+  [data-theme='light'] ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+  }
+  [data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.18);
   }
 }
 
@@ -133,6 +167,29 @@
       0 0 25px -5px rgba(230, 57, 70, 0.2);
   }
 
+  [data-theme='light'] .glass-card {
+    background: linear-gradient(
+      145deg,
+      rgba(230, 57, 70, 0.07) 0%,
+      rgba(255, 255, 255, 0.92) 35%,
+      rgba(250, 250, 250, 0.95) 65%,
+      rgba(230, 57, 70, 0.05) 100%
+    );
+    border: 1px solid rgba(230, 57, 70, 0.22);
+    box-shadow:
+      0 0 0 0.5px rgba(230, 57, 70, 0.1) inset,
+      0 1px 0 0 rgba(255, 255, 255, 0.8) inset,
+      0 4px 24px rgba(0, 0, 0, 0.06),
+      0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+  [data-theme='light'] .glass-card:hover {
+    border-color: rgba(230, 57, 70, 0.35);
+    box-shadow:
+      0 0 0 0.5px rgba(230, 57, 70, 0.15) inset,
+      0 8px 32px rgba(0, 0, 0, 0.08),
+      0 0 20px -6px rgba(230, 57, 70, 0.18);
+  }
+
   /* Glass surface — lighter variant */
   .glass-surface {
     background: rgba(230, 57, 70, 0.03);
@@ -140,6 +197,26 @@
     border-radius: 12px;
     backdrop-filter: blur(24px) saturate(1.5);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  }
+
+  [data-theme='light'] .glass-surface {
+    background: rgba(230, 57, 70, 0.06);
+    border: 1px solid rgba(230, 57, 70, 0.14);
+  }
+
+  .app-dots-bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle, rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse at center, black 20%, transparent 70%);
+  }
+
+  [data-theme='light'] .app-dots-bg {
+    background-image: radial-gradient(circle, rgba(0, 0, 0, 0.07) 1px, transparent 1px);
   }
 
   /* Accent line on top of cards */
@@ -158,5 +235,61 @@
   .font-mono-num {
     font-family: 'JetBrains Mono', 'SF Mono', monospace;
     letter-spacing: -0.04em;
+  }
+
+  /*
+   * Leads grid: `border-collapse: collapse` rompe fondos en celdas sticky (se ve el scroll detrás).
+   * Checkbox + # + Nombre van juntos sticky; si solo Nombre fuera sticky con left: 88px, al hacer scroll
+   * quedaría un hueco a la izquierda donde se ve el contenido pasando.
+   */
+  .leads-table {
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .leads-table__sticky-frozen {
+    position: sticky;
+    background-color: var(--bg2);
+    background-clip: padding-box;
+  }
+  .leads-table__sticky-check {
+    left: 0;
+    z-index: 23;
+    border-right: 1px solid var(--border2);
+  }
+  .leads-table__sticky-num {
+    left: var(--leads-check-w, 48px);
+    z-index: 24;
+    border-right: 1px solid var(--border2);
+  }
+  .leads-table__sticky-name {
+    left: calc(var(--leads-check-w, 48px) + var(--leads-num-w, 40px));
+    z-index: 25;
+    border-right: 1px solid var(--border2);
+    box-shadow: 4px 0 12px -4px rgba(0, 0, 0, 0.42);
+  }
+  .leads-table thead .leads-table__sticky-frozen {
+    background-color: var(--bg3);
+  }
+  .leads-table thead .leads-table__sticky-check {
+    z-index: 33;
+  }
+  .leads-table thead .leads-table__sticky-num {
+    z-index: 34;
+  }
+  .leads-table thead .leads-table__sticky-name {
+    z-index: 35;
+    box-shadow: 4px 0 14px -6px rgba(0, 0, 0, 0.5);
+  }
+  .leads-table tr.leads-table__row--selected .leads-table__sticky-frozen {
+    background-color: color-mix(in srgb, var(--accent) 11%, var(--bg2));
+  }
+  .leads-table tr:not(.leads-table__row--selected):hover .leads-table__sticky-frozen {
+    background-color: color-mix(in srgb, white 4%, var(--bg2));
+  }
+  [data-theme='light'] .leads-table tr:not(.leads-table__row--selected):hover .leads-table__sticky-frozen {
+    background-color: color-mix(in srgb, black 5%, var(--bg2));
+  }
+  .leads-table tr.leads-table__row--selected:hover .leads-table__sticky-frozen {
+    background-color: color-mix(in srgb, var(--accent) 15%, var(--bg2));
   }
 }

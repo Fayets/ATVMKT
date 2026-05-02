@@ -533,6 +533,12 @@ export function LeadsPage() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LEADS TABLE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/** Anchos checkbox y # (variables CSS `--leads-check-w` / `--leads-num-w` deben coincidir). */
+const LEADS_TABLE_CHECK_W = 48
+const LEADS_TABLE_NUM_W = 40
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly }: {
   leads: Lead[]
   columns: ColumnDef[]
@@ -552,22 +558,47 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
   onPreviewText: (title: string, text: string) => void
   readOnly?: boolean
 }) {
+  const stickyName = columns.some((c) => c.key === 'client_name' && c.sticky)
+
   return (
-    <table className="w-full border-collapse" style={{ minWidth: columns.reduce((s, c) => s + c.width, 100) }}>
+    <table
+      className="leads-table w-full"
+      style={{
+        minWidth: columns.reduce((s, c) => s + c.width, 100),
+        ['--leads-check-w' as string]: `${LEADS_TABLE_CHECK_W}px`,
+        ['--leads-num-w' as string]: `${LEADS_TABLE_NUM_W}px`,
+      }}
+    >
       <thead className="sticky top-0 z-20">
-        <tr className="bg-[var(--bg3)] border-b border-[var(--border2)]">
+        <tr className="bg-[var(--bg3)]">
           {/* Checkbox */}
-          <th className="w-10 px-2 py-2 text-center">
+          <th
+            className={`border-b border-[var(--border2)] px-2 py-2 text-center ${
+              stickyName ? 'leads-table__sticky-frozen leads-table__sticky-check' : ''
+            }`}
+            style={{ width: LEADS_TABLE_CHECK_W, minWidth: LEADS_TABLE_CHECK_W, maxWidth: LEADS_TABLE_CHECK_W }}
+          >
             <input type="checkbox" checked={allSelected} onChange={onToggleAll} disabled={readOnly}
               className="w-3.5 h-3.5 rounded border-[var(--border2)] bg-transparent accent-[var(--accent)] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" />
           </th>
           {/* Row number */}
-          <th className="w-10 px-1 py-2 text-center text-[10px] font-medium text-[var(--text3)]">#</th>
+          <th
+            className={`border-b border-[var(--border2)] px-1 py-2 text-center text-[10px] font-medium text-[var(--text3)] ${
+              stickyName ? 'leads-table__sticky-frozen leads-table__sticky-num' : ''
+            }`}
+            style={{ width: LEADS_TABLE_NUM_W, minWidth: LEADS_TABLE_NUM_W, maxWidth: LEADS_TABLE_NUM_W }}
+          >
+            #
+          </th>
           {/* Columns */}
           {columns.map(col => (
             <th key={col.key}
               onClick={() => onToggleSort(col.key)}
-              className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] hover:text-[var(--text2)] cursor-pointer select-none whitespace-nowrap transition-colors"
+              className={`border-b border-[var(--border2)] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] hover:text-[var(--text2)] cursor-pointer select-none whitespace-nowrap transition-colors ${
+                stickyName && col.key === 'client_name'
+                  ? 'leads-table__sticky-frozen leads-table__sticky-name'
+                  : ''
+              }`}
               style={{ width: col.width, minWidth: col.width }}>
               <div className="flex items-center gap-1">
                 {col.label}
@@ -578,25 +609,47 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
             </th>
           ))}
           {/* Actions */}
-          <th className="w-10" />
+          <th className="w-10 border-b border-[var(--border2)]" />
         </tr>
       </thead>
       <tbody>
-        {leads.map((lead, idx) => (
+        {leads.map((lead, idx) => {
+          const rowSel = selectedRows.has(lead.id)
+          return (
           <tr key={lead.id}
-            className={`border-b border-[var(--border)] transition-colors group ${
-              selectedRows.has(lead.id) ? 'bg-[rgba(230,57,70,0.06)]' : 'hover:bg-[rgba(255,255,255,0.02)]'
+            className={`group transition-colors ${
+              rowSel ? 'leads-table__row--selected bg-[rgba(230,57,70,0.06)]' : 'hover:bg-[rgba(255,255,255,0.02)]'
             }`}>
             {/* Checkbox */}
-            <td className="px-2 py-1.5 text-center">
+            <td
+              className={`border-b border-[var(--border)] px-2 py-1.5 text-center ${
+                stickyName ? 'leads-table__sticky-frozen leads-table__sticky-check' : ''
+              }`}
+              style={{ width: LEADS_TABLE_CHECK_W, minWidth: LEADS_TABLE_CHECK_W, maxWidth: LEADS_TABLE_CHECK_W }}
+            >
               <input type="checkbox" checked={selectedRows.has(lead.id)} onChange={() => onToggleRow(lead.id)} disabled={readOnly}
                 className="w-3.5 h-3.5 rounded border-[var(--border2)] bg-transparent accent-[var(--accent)] cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed" />
             </td>
             {/* Row number */}
-            <td className="px-1 py-1.5 text-center text-[11px] font-mono-num text-[var(--text3)]">{idx + 1}</td>
+            <td
+              className={`border-b border-[var(--border)] px-1 py-1.5 text-center text-[11px] font-mono-num text-[var(--text3)] ${
+                stickyName ? 'leads-table__sticky-frozen leads-table__sticky-num' : ''
+              }`}
+              style={{ width: LEADS_TABLE_NUM_W, minWidth: LEADS_TABLE_NUM_W, maxWidth: LEADS_TABLE_NUM_W }}
+            >
+              {idx + 1}
+            </td>
             {/* Cells */}
             {columns.map(col => (
-              <td key={col.key} className="px-3 py-1.5" style={{ width: col.width, minWidth: col.width }}>
+              <td
+                key={col.key}
+                className={`border-b border-[var(--border)] px-3 py-1.5 ${
+                  stickyName && col.key === 'client_name'
+                    ? 'leads-table__sticky-frozen leads-table__sticky-name'
+                    : ''
+                }`}
+                style={{ width: col.width, minWidth: col.width }}
+              >
                 <LeadsTableCell
                   lead={lead} col={col}
                   editing={editingCell?.id === lead.id && editingCell?.field === col.key}
@@ -609,7 +662,7 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
               </td>
             ))}
             {/* Delete */}
-            <td className="px-2 py-1.5 text-center">
+            <td className="border-b border-[var(--border)] px-2 py-1.5 text-center">
               {!readOnly && (
                 <button onClick={() => onDelete(lead.id)}
                   className="opacity-0 group-hover:opacity-100 text-[var(--text3)] hover:text-[#F87171] transition-all text-sm">
@@ -618,18 +671,19 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
               )}
             </td>
           </tr>
-        ))}
+          )
+        })}
         {/* Empty next-row number hint */}
-        <tr className="border-b border-[var(--border)]">
-          <td className="px-2 py-1.5" />
-          <td className="px-1 py-1.5 text-center text-[11px] font-mono-num text-[var(--text3)] opacity-40">{totalLeads + 1}</td>
-          <td colSpan={columns.length + 1} />
+        <tr>
+          <td className="border-b border-[var(--border)] px-2 py-1.5" />
+          <td className="border-b border-[var(--border)] px-1 py-1.5 text-center text-[11px] font-mono-num text-[var(--text3)] opacity-40">{totalLeads + 1}</td>
+          <td className="border-b border-[var(--border)]" colSpan={columns.length + 1} />
         </tr>
         {/* + Nuevo lead row */}
         {!readOnly && (
-          <tr className="bg-[var(--bg)] hover:bg-[rgba(255,255,255,0.02)] transition-colors cursor-pointer"
+          <tr className="cursor-pointer bg-[var(--bg)] transition-colors hover:bg-[rgba(255,255,255,0.02)]"
             onClick={onAddRow}>
-            <td colSpan={columns.length + 3} className="px-3 py-2">
+            <td colSpan={columns.length + 3} className="border-b border-[var(--border)] px-3 py-2">
               <span className="text-[12px] text-[var(--text3)] hover:text-[var(--text2)] transition-colors">
                 {addingRow ? 'Creando...' : '+ Nuevo lead'}
               </span>

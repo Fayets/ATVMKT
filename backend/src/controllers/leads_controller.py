@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
+from src.lead_display_utils import lead_display_nombre
 from src.models import Lead as LeadEntity
 from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse
 
@@ -57,7 +58,7 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
     return LeadOut(
         id=str(row.id),
         lead_user_id=str(row.user_id),
-        client_name=row.nombre or "",
+        client_name=lead_display_nombre(row.nombre, row.ig),
         ig_handle=row.ig,
         phone=row.telefono,
         avatar_type=row.avatar,
