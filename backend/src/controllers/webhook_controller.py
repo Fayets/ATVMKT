@@ -255,6 +255,60 @@ def _ig_from_calendly_qa(payload: dict) -> str:
     return ""
 
 
+def _calendly_inner_payload(body: dict) -> dict:
+    p = body.get("payload")
+    return p if isinstance(p, dict) else {}
+
+
+def _calendly_qna_list(inner: dict) -> list:
+    qna = inner.get("questions_and_answers") or []
+    return qna if isinstance(qna, list) else []
+
+
+def _qna_position_matches(item: dict, position: int) -> bool:
+    p = item.get("position")
+    if p is None:
+        return False
+    try:
+        return int(p) == position
+    except (TypeError, ValueError):
+        return False
+
+
+def _qna_answer_at_position(qna: list, position: int) -> str | None:
+    for item in qna:
+        if not isinstance(item, dict):
+            continue
+        if not _qna_position_matches(item, position):
+            continue
+        ans = item.get("answer")
+        if ans is None:
+            return None
+        t = str(ans).strip()
+        return t if t else None
+    return None
+
+
+def _ingresos_lead_from_qna_answer(raw: str | None) -> float | None:
+    if raw is None or not str(raw).strip():
+        return None
+    s = str(raw).strip().replace(",", ".").replace("$", "")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _merge_calendly_email_notas(existing: str | None, email: str) -> str:
+    line = f"Calendly email: {email}"
+    base = (existing or "").strip()
+    if not base:
+        return line
+    if line in base:
+        return base
+    return f"{base}\n{line}"
+
+
 def _find_lead_for_calendly(user_id: int, display_name: str, ig_hint: str) -> Lead | None:
     """Misma cuenta: prioriza coincidencia por IG, luego por nombre (normalizado)."""
     nkey = _norm_name_for_match(display_name)
@@ -294,24 +348,37 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
     if event != "invitee.created":
         return {"status": "ok"}
 
+    inner_payload = _calendly_inner_payload(body)
     flat = _flatten_calendly_invitee_payload(body)
-    display_name = _sanitize_webhook_display_name(str(flat.get("name") or ""))
-    email = str(flat.get("email") or "").strip()
+    qna = _calendly_qna_list(inner_payload)
+
+    telefono_q = _qna_answer_at_position(qna, 0)
+    ig_q = _qna_answer_at_position(qna, 1)
+    avatar_q = _qna_answer_at_position(qna, 2)
+    ingresos_raw = _qna_answer_at_position(qna, 3)
+    ingresos_lead_val = _ingresos_lead_from_qna_answer(ingresos_raw)
+
+    display_name = _sanitize_webhook_display_name(
+        str(inner_payload.get("name") or flat.get("name") or ""),
+    )
+    email = str(inner_payload.get("email") or flat.get("email") or "").strip()
+
     start_raw = flat.get("start_time")
     if not start_raw and isinstance(flat.get("scheduled_event"), dict):
         start_raw = flat["scheduled_event"].get("start_time")
     if isinstance(start_raw, dict):
         start_raw = start_raw.get("start_time")
     start_dt = _parse_calendly_start_time(str(start_raw) if start_raw else None)
-    phone = _phone_from_calendly_payload(flat)
 
-    ig_hint = _ig_from_calendly_qa(flat)
+    telefono = (telefono_q or "") or _phone_from_calendly_payload(flat)
+    ig_hint = (ig_q or "").lstrip("@") or _ig_from_calendly_qa(flat)
     if not ig_hint and "@" in display_name:
         for p in display_name.split():
             p = p.strip().lstrip("@")
             if p and "@" not in p and len(p) > 1:
                 ig_hint = p
                 break
+    avatar_val = (avatar_q or "").strip()
 
     if not display_name and email:
         display_name = email.split("@")[0]
@@ -341,10 +408,16 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
             row.call = True
             if display_name:
                 row.nombre = display_name
-            if phone:
-                row.telefono = phone
-            if ig_hint and not (row.ig or "").strip():
+            if email:
+                row.notas = _merge_calendly_email_notas(row.notas, email)
+            if telefono:
+                row.telefono = telefono
+            if ig_hint:
                 row.ig = ig_hint
+            if avatar_val:
+                row.avatar = avatar_val
+            if ingresos_lead_val is not None:
+                row.ingresos_lead = ingresos_lead_val
         else:
             notas_parts = []
             if email:
@@ -355,7 +428,9 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
                 user_id=user_id,
                 nombre=display_name or (email.split("@")[0] if email else "Invitado Calendly"),
                 ig=ig_hint or "",
-                telefono=phone or "",
+                telefono=telefono or "",
+                avatar=avatar_val or "",
+                ingresos_lead=ingresos_lead_val if ingresos_lead_val is not None else 0,
                 agendo=True,
                 agendo_en=agendo_en_val or "",
                 call=True,
