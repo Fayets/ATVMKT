@@ -88,10 +88,10 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
 
     contact_name = str(payload.get("contact_name") or "").strip()
     contact_lastname = str(payload.get("contact_lastname") or "").strip()
-    nombre = " ".join(x for x in (contact_name, contact_lastname) if x).strip() or None
-    ig = str(payload.get("contact_ig_username") or "").strip() or None
-    content_url = str(payload.get("content_url") or "").strip() or None
-    manychat_contact_id = str(payload.get("manychat_contact_id") or "").strip() or None
+    nombre = " ".join(x for x in (contact_name, contact_lastname) if x).strip()
+    ig = str(payload.get("contact_ig_username") or "").strip()
+    content_url = str(payload.get("content_url") or "").strip()
+    manychat_contact_id = str(payload.get("manychat_contact_id") or "").strip()
 
     now = datetime.utcnow()
     with db_session:
@@ -99,7 +99,7 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
             user_id=user_id,
             nombre=nombre,
             ig=ig,
-            keyword=keyword or None,
+            keyword=keyword,
             content_url=content_url,
             manychat_contact_id=manychat_contact_id,
             fecha_bot=now,
