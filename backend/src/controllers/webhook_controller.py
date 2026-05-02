@@ -7,7 +7,7 @@ from pony.orm import db_session
 
 from src.models import ApiConnection, Lead, ReelContent
 
-router = APIRouter(prefix="/api/webhooks", tags=["webhooks"], redirect_slashes=False)
+router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
 
 MANYCHAT_WEBHOOK_SECRET = config(
     "MANYCHAT_WEBHOOK_TOKEN",

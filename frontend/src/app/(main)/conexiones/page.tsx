@@ -352,11 +352,22 @@ function ConnectionCard({
               <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">URL del Webhook (pegar en {platform.label})</div>
               <div className="flex items-center gap-2">
                 <code className="flex-1 rounded bg-[var(--bg4)] px-3 py-2 text-[12px] text-[var(--accent)] break-all select-all">
-                  {typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/{platform.key}
+                  {(() => {
+                    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+                    const backendBase = apiBase.startsWith('http') ? apiBase.replace(/\/$/, '') : `${origin}${apiBase.replace(/\/$/, '')}`
+                    return platform.key === 'manychat'
+                      ? `${backendBase}/webhooks/manychat`
+                      : `${origin}/api/webhooks/${platform.key}`
+                  })()}
                 </code>
                 <button
                   onClick={() => {
-                    navigator.clipboard.writeText(`${window.location.origin}/api/webhooks/${platform.key}`)
+                    const origin = typeof window !== 'undefined' ? window.location.origin : ''
+                    const backendBase = apiBase.startsWith('http') ? apiBase.replace(/\/$/, '') : `${origin}${apiBase.replace(/\/$/, '')}`
+                    const url = platform.key === 'manychat'
+                      ? `${backendBase}/webhooks/manychat`
+                      : `${origin}/api/webhooks/${platform.key}`
+                    navigator.clipboard.writeText(url)
                   }}
                   className="rounded-lg border border-[var(--border2)] px-3 py-2 text-[11px] text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
                 >
