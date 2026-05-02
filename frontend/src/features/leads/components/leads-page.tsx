@@ -10,8 +10,6 @@ import { formatCash } from '@/shared/lib/format-utils'
 import { apiFetch } from '@/lib/api'
 import {
   Lead, ColumnDef, SortConfig, FilterConfig,
-  STATUS_COLORS, AVATAR_COLORS, CHANNEL_COLORS, PROGRAM_COLORS,
-  STATUS_OPTIONS, AVATAR_OPTIONS, PROGRAM_OPTIONS, CHANNEL_OPTIONS,
   STATUS_TABS, buildColumns, canonicalLeadStatus,
 } from '../types'
 
@@ -44,10 +42,6 @@ export function LeadsPage() {
   const [groupBy, setGroupBy] = useState<string | null>(null)
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set())
 
-  // Modal (only for editing existing leads)
-  const [showModal, setShowModal] = useState(false)
-  const [editLead, setEditLead] = useState<Lead | null>(null)
-
   // New row
   const [addingRow, setAddingRow] = useState(false)
 
@@ -60,6 +54,8 @@ export function LeadsPage() {
   const [showColumnPanel, setShowColumnPanel] = useState(false)
   const [showSortPanel, setShowSortPanel] = useState(false)
   const [showGroupPanel, setShowGroupPanel] = useState(false)
+  const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[] | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
 
   // ── Data fetching ──
   const fetchTeamMembers = useCallback(async () => {
@@ -104,99 +100,87 @@ export function LeadsPage() {
   useEffect(() => { setSelectedRows(new Set()) }, [month, statusTab])
 
   // ── CRUD ──
-  const handleSave = async (form: Record<string, string>) => {
-    if (!userId) return
-    const row = {
-      user_id: userId,
-      client_name: form.client_name || '',
-      source_type: form.source_type || 'manual',
-      amount: Number(form.amount) || 0,
-      ig_handle: form.ig_handle || null,
-      phone: form.phone || null,
-      avatar_type: form.avatar_type || null,
-      status: form.status || 'Pendiente',
-      origin: form.origin || null,
-      entry_channel: form.entry_channel || null,
-      entry_funnel: form.entry_funnel || null,
-      agenda_point: form.agenda_point || null,
-      ctas_responded: Number(form.ctas_responded) || 0,
-      first_contact_at: form.first_contact_at || null,
-      scheduled_at: form.scheduled_at || null,
-      call_at: form.call_at || null,
-      call_link: form.call_link || null,
-      closer_report: form.closer_report || null,
-      program_offered: form.program_offered || null,
-      program_purchased: form.program_purchased || null,
-      revenue: Number(form.revenue) || 0,
-      payment: Number(form.payment) || 0,
-      owed: Number(form.owed) || 0,
-      closer: form.closer || null,
-      setter: form.setter || null,
-      notes: form.notes || null,
-      date: form.date || new Date().toISOString().split('T')[0],
-      month,
-    }
-    if (editLead) {
-      toast('Edición de leads no disponible por ahora.')
-    } else {
-      toast('Alta de leads no disponible por ahora.')
-    }
-    setShowModal(false)
-    setEditLead(null)
-    fetchLeads()
-  }
+  const executeDelete = useCallback(
+    async (ids: string[]) => {
+      if (!ready) return
+      if (!userId) {
+        toast('No hay sesión: iniciá sesión de nuevo para eliminar leads.')
+        return
+      }
+      if (ids.length === 0) return
+      setDeleteBusy(true)
+      let ok = 0
+      let fail = 0
+      let lastDetail = ''
+      try {
+        for (const id of ids) {
+          const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, { method: 'DELETE' })
+          if (res.ok) {
+            ok++
+          } else {
+            fail++
+            const raw = await res.json().catch(() => ({}))
+            const detail =
+              typeof raw === 'object' && raw && 'detail' in raw
+                ? String((raw as { detail: unknown }).detail)
+                : res.statusText
+            lastDetail = detail || lastDetail
+          }
+        }
+      } catch (e) {
+        toast(`Error de red al eliminar: ${e instanceof Error ? e.message : 'desconocido'}`)
+        return
+      } finally {
+        setDeleteBusy(false)
+      }
+      if (fail === 0) {
+        toast(ids.length === 1 ? 'Cliente eliminado.' : `${ok} clientes eliminados.`)
+      } else if (ok > 0) {
+        toast(`Eliminados: ${ok}. Fallaron: ${fail}.${lastDetail ? ` (${lastDetail})` : ''}`)
+      } else {
+        toast(
+          lastDetail
+            ? `No se pudo eliminar: ${lastDetail}`
+            : 'No se pudo eliminar. Revisá permisos o que el lead exista.',
+        )
+      }
+      setSelectedRows(new Set())
+      await fetchLeads()
+    },
+    [ready, userId, toast, fetchLeads],
+  )
 
-  const handleDelete = useCallback(async (ids: string[]) => {
-    if (!ready) return
-    if (!userId) {
-      toast('No hay sesión: iniciá sesión de nuevo para eliminar leads.')
-      return
-    }
-    if (ids.length === 0) return
-    if (ids.length > 1 && !window.confirm(`¿Eliminar ${ids.length} clientes?`)) {
-      return
-    }
-    let ok = 0
-    let fail = 0
-    let lastDetail = ''
-    try {
-      for (const id of ids) {
-        const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, { method: 'DELETE' })
-        if (res.ok) {
-          ok++
-        } else {
-          fail++
-          const raw = await res.json().catch(() => ({}))
+  const handleInlineUpdate = useCallback(
+    async (id: string, field: string, value: string | number | null) => {
+      if (!ready || !userId) return
+      const payload: Record<string, unknown> = { [field]: value }
+      try {
+        const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        const raw = await res.json().catch(() => ({}))
+        if (!res.ok) {
           const detail =
             typeof raw === 'object' && raw && 'detail' in raw
               ? String((raw as { detail: unknown }).detail)
               : res.statusText
-          lastDetail = detail || lastDetail
+          toast(`No se guardó: ${detail}`)
+          await fetchLeads()
+          return
         }
+        const updated = raw as Lead
+        setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updated } : l)))
+      } catch (e) {
+        toast(`Error al guardar: ${e instanceof Error ? e.message : 'desconocido'}`)
+        await fetchLeads()
+      } finally {
+        setEditingCell(null)
       }
-    } catch (e) {
-      toast(`Error de red al eliminar: ${e instanceof Error ? e.message : 'desconocido'}`)
-      return
-    }
-    if (fail === 0) {
-      toast(ids.length === 1 ? 'Cliente eliminado.' : `${ok} clientes eliminados.`)
-    } else if (ok > 0) {
-      toast(`Eliminados: ${ok}. Fallaron: ${fail}.${lastDetail ? ` (${lastDetail})` : ''}`)
-    } else {
-      toast(
-        lastDetail
-          ? `No se pudo eliminar: ${lastDetail}`
-          : 'No se pudo eliminar. Revisá permisos o que el lead exista.',
-      )
-    }
-    setSelectedRows(new Set())
-    await fetchLeads()
-  }, [ready, userId, toast, fetchLeads])
-
-  const handleInlineUpdate = async (_id: string, _field: string, _value: string | number | null) => {
-    toast('Edición en tabla no disponible por ahora.')
-    setEditingCell(null)
-  }
+    },
+    [ready, userId, toast, fetchLeads],
+  )
 
   const handleAddRow = async () => {
     toast('Agregar filas no disponible por ahora.')
@@ -316,11 +300,6 @@ export function LeadsPage() {
 
   const readOnlyGrid = false
 
-  const openLeadEditor = (lead: Lead) => {
-    setEditLead(lead)
-    setShowModal(true)
-  }
-
   return (
     <div className="flex flex-col h-full">
       {/* ━━ TOOLBAR ━━ */}
@@ -398,8 +377,11 @@ export function LeadsPage() {
           {selectedRows.size > 0 && !readOnlyGrid && (
             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-[var(--border2)]">
               <span className="text-[11px] text-[var(--text3)]">{selectedRows.size} sel.</span>
-              <button onClick={() => handleDelete(Array.from(selectedRows))}
-                className="px-2 py-1 text-[11px] text-[#F87171] hover:bg-[rgba(248,113,113,0.1)] rounded transition-colors">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmIds(Array.from(selectedRows))}
+                className="px-2 py-1 text-[11px] text-[#F87171] hover:bg-[rgba(248,113,113,0.1)] rounded transition-colors"
+              >
                 Eliminar
               </button>
             </div>
@@ -440,8 +422,7 @@ export function LeadsPage() {
                 onInlineUpdate={handleInlineUpdate} onToggleSort={toggleSort}
                 selectedRows={selectedRows} onToggleRow={toggleSelectRow}
                 onToggleAll={toggleSelectAll} allSelected={selectedRows.size === filtered.length}
-                onOpenEdit={openLeadEditor}
-                onDelete={(id) => handleDelete([id])}
+                onDelete={(id) => setDeleteConfirmIds([id])}
                 onAddRow={handleAddRow}
                 addingRow={addingRow}
                 totalLeads={filtered.length}
@@ -459,8 +440,7 @@ export function LeadsPage() {
             onInlineUpdate={handleInlineUpdate} onToggleSort={toggleSort}
             selectedRows={selectedRows} onToggleRow={toggleSelectRow}
             onToggleAll={toggleSelectAll} allSelected={selectedRows.size === filtered.length && filtered.length > 0}
-            onOpenEdit={openLeadEditor}
-            onDelete={(id) => handleDelete([id])}
+            onDelete={(id) => setDeleteConfirmIds([id])}
             onAddRow={handleAddRow}
             addingRow={addingRow}
             totalLeads={filtered.length}
@@ -470,10 +450,56 @@ export function LeadsPage() {
         </div>
       )}
 
-      {/* ━━ MODAL (edit only) ━━ */}
-      {editLead && (
-        <Modal open={showModal} onClose={() => { setShowModal(false); setEditLead(null) }} title="Editar Lead" maxWidth="720px">
-          <LeadForm lead={editLead} onSave={handleSave} onCancel={() => { setShowModal(false); setEditLead(null) }} setterNames={setterNames} closerNames={closerNames} />
+      {/* ━━ MODAL confirmar eliminación ━━ */}
+      {deleteConfirmIds && deleteConfirmIds.length > 0 && (
+        <Modal
+          open
+          onClose={() => !deleteBusy && setDeleteConfirmIds(null)}
+          title="Eliminar"
+          maxWidth="420px"
+        >
+          <p className="text-[13px] leading-relaxed text-[var(--text2)]">
+            {deleteConfirmIds.length === 1 ? (
+              <>
+                ¿Eliminar a{' '}
+                <span className="font-medium text-[var(--text)]">
+                  {(() => {
+                    const row = leads.find((l) => l.id === deleteConfirmIds[0])
+                    const label = [row?.client_name, row?.ig_handle].filter(Boolean).join(' · ')
+                    return label || 'este cliente'
+                  })()}
+                </span>
+                ? No se puede deshacer.
+              </>
+            ) : (
+              <>
+                ¿Eliminar <span className="font-mono-num font-medium text-[var(--text)]">{deleteConfirmIds.length}</span>{' '}
+                clientes seleccionados? No se puede deshacer.
+              </>
+            )}
+          </p>
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              type="button"
+              disabled={deleteBusy}
+              onClick={() => setDeleteConfirmIds(null)}
+              className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-2 text-[11px] font-semibold uppercase text-[var(--text2)] transition-colors hover:border-[var(--text3)] disabled:opacity-40"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={deleteBusy}
+              onClick={async () => {
+                const ids = [...deleteConfirmIds]
+                await executeDelete(ids)
+                setDeleteConfirmIds(null)
+              }}
+              className="rounded-lg bg-[#F87171] px-4 py-2 text-[11px] font-semibold uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+            >
+              {deleteBusy ? 'Eliminando…' : 'Eliminar'}
+            </button>
+          </div>
         </Modal>
       )}
 
@@ -507,7 +533,7 @@ export function LeadsPage() {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LEADS TABLE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onOpenEdit, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly }: {
+function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly }: {
   leads: Lead[]
   columns: ColumnDef[]
   sort: SortConfig
@@ -519,7 +545,6 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
   onToggleRow: (id: string) => void
   onToggleAll: () => void
   allSelected: boolean
-  onOpenEdit: (lead: Lead) => void
   onDelete: (id: string) => void
   onAddRow: () => void
   addingRow: boolean
@@ -578,7 +603,6 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                   onStartEdit={() => setEditingCell({ id: lead.id, field: col.key })}
                   onCancelEdit={() => setEditingCell(null)}
                   onSave={(value) => onInlineUpdate(lead.id, col.key, value)}
-                  onOpenFullEdit={() => onOpenEdit(lead)}
                   onPreviewText={onPreviewText}
                   readOnly={readOnly}
                 />
@@ -620,14 +644,13 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LEAD TABLE CELL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave, onOpenFullEdit, onPreviewText, readOnly }: {
+function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave, onPreviewText, readOnly }: {
   lead: Lead
   col: ColumnDef
   editing: boolean
   onStartEdit: () => void
   onCancelEdit: () => void
   onSave: (value: string | number | null) => void
-  onOpenFullEdit: () => void
   onPreviewText: (title: string, text: string) => void
   readOnly?: boolean
 }) {
@@ -636,8 +659,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   if (readOnly) {
     if (col.key === 'client_name') {
       return (
-        <span onClick={onOpenFullEdit}
-          className="text-[13px] font-medium cursor-pointer hover:text-[var(--accent)] transition-colors truncate block">
+        <span className="text-[13px] font-medium truncate block text-[var(--text)]">
           {String(value || '—')}
         </span>
       )
@@ -747,10 +769,12 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   if (editing && col.editable) {
     if (col.type === 'select' || (col.type === 'badge' && col.options)) {
       return (
-        <select autoFocus defaultValue={String(value || '')}
-          onBlur={(e) => onSave(e.target.value || null)}
+        <select
+          autoFocus
+          defaultValue={String(value || '')}
           onChange={(e) => onSave(e.target.value || null)}
-          className="w-full rounded border border-[var(--accent)] bg-[var(--bg3)] px-2 py-1 text-[12px] text-[var(--text)] outline-none">
+          className="w-full rounded border border-[var(--accent)] bg-[var(--bg3)] px-2 py-1 text-[12px] text-[var(--text)] outline-none"
+        >
           {col.options!.map(o => <option key={o} value={o}>{o || '—'}</option>)}
         </select>
       )
@@ -777,11 +801,13 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   // ── Display mode ──
   const cellClass = "text-[12px] cursor-pointer hover:opacity-80 truncate block max-w-full"
 
-  // Name column — special treatment
+  // Name column
   if (col.key === 'client_name') {
     return (
-      <span onClick={onOpenFullEdit}
-        className="text-[13px] font-medium cursor-pointer hover:text-[var(--accent)] transition-colors truncate block">
+      <span
+        onClick={onStartEdit}
+        className="text-[13px] font-medium cursor-pointer hover:text-[var(--accent)] transition-colors truncate block"
+      >
         {String(value || '—')}
       </span>
     )
@@ -1096,106 +1122,3 @@ function GroupPanel({ groupBy, setGroupBy, columns }: {
   )
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// LEAD FORM MODAL
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadForm({ lead, onSave, onCancel, setterNames, closerNames }: {
-  lead: Lead | null
-  onSave: (d: Record<string, string>) => void
-  onCancel: () => void
-  setterNames: string[]
-  closerNames: string[]
-}) {
-  const [form, setForm] = useState<Record<string, string>>({})
-
-  useEffect(() => {
-    if (lead) {
-      const f: Record<string, string> = {}
-      Object.entries(lead).forEach(([k, v]) => { f[k] = v != null ? String(v) : '' })
-      setForm(f)
-    } else {
-      setForm({ status: 'Pendiente', date: new Date().toISOString().split('T')[0] })
-    }
-  }, [lead])
-
-  const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }))
-
-  const selectField = (key: string, label: string, opts: string[]) => (
-    <div key={key}>
-      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{label}</label>
-      <select value={form[key] || ''} onChange={e => set(key, e.target.value)}
-        className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none cursor-pointer focus:border-[var(--text3)]">
-        {opts.map(o => <option key={o} value={o}>{o || '—'}</option>)}
-      </select>
-    </div>
-  )
-
-  const textField = (key: string, label: string, type = 'text') => (
-    <div key={key}>
-      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{label}</label>
-      <input type={type} value={form[key] || ''} onChange={e => set(key, e.target.value)}
-        className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]" />
-    </div>
-  )
-
-  const textAreaField = (key: string, label: string, rows = 6) => (
-    <div key={key}>
-      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{label}</label>
-      <textarea rows={rows} value={form[key] || ''} onChange={e => set(key, e.target.value)}
-        className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)] resize-y whitespace-pre-wrap" />
-    </div>
-  )
-
-  return (
-    <div>
-      <div className="grid grid-cols-2 gap-3">
-        {textField('client_name', 'Nombre')}
-        {textField('ig_handle', 'IG Handle')}
-        {textField('phone', 'Teléfono')}
-        {selectField('avatar_type', 'Avatar', AVATAR_OPTIONS)}
-        {selectField('status', 'Status', STATUS_OPTIONS)}
-        {selectField('setter', 'Setter', ['', ...setterNames])}
-        {selectField('entry_channel', 'Agendó en', CHANNEL_OPTIONS)}
-        {textField('entry_funnel', 'Ingreso embudo')}
-        {textField('agenda_point', 'Punto de agenda')}
-        {textField('ctas_responded', 'CTAs respondidas', 'number')}
-        {textField('first_contact_at', '1er contacto', 'date')}
-        {textField('scheduled_at', 'Agendó', 'date')}
-        {textField('call_at', 'Call', 'date')}
-        {textField('call_link', 'Link llamada')}
-        {selectField('program_offered', 'Prog. ofrecido', PROGRAM_OPTIONS)}
-        {selectField('program_purchased', 'Prog. comprado', PROGRAM_OPTIONS)}
-        {textField('revenue', 'Ingresos $', 'number')}
-        {textField('payment', 'Pago $', 'number')}
-        {textField('owed', 'Debe $', 'number')}
-        {selectField('closer', 'Closer', ['', ...closerNames])}
-        {textField('setter', 'Setter')}
-        {textField('date', 'Fecha', 'date')}
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        {textField('email', 'Email')}
-        {textField('ingresos_mensuales', 'Ingresos mensuales USD', 'number')}
-        {textField('pago_en_llamada', 'Pago en llamada $', 'number')}
-        {textField('compromiso', 'Compromiso')}
-        {textField('urgencia', 'Urgencia')}
-        {textField('disposicion_invertir', 'Disposición a invertir')}
-      </div>
-      <div className="mt-3">{textAreaField('dolores_setting', 'Dolores de setting', 3)}</div>
-      <div className="mt-3">{textAreaField('dolores_setting_detail', 'Detalle dolores setting', 3)}</div>
-      <div className="mt-3">{textAreaField('dolores_llamada', 'Dolores de la llamada', 4)}</div>
-      <div className="mt-3">{textAreaField('razon_compra', 'Razón de compra', 3)}</div>
-      <div className="mt-3">{textAreaField('closer_report', 'Reporte closer', 10)}</div>
-      <div className="mt-3">{textAreaField('notes', 'Notas', 3)}</div>
-      <div className="flex justify-end gap-3 pt-5">
-        <button onClick={onCancel}
-          className="rounded-lg border border-[var(--border2)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text2)] hover:border-[var(--text3)] transition-colors">
-          Cancelar
-        </button>
-        <button onClick={() => onSave(form)}
-          className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:brightness-110 transition-all">
-          Guardar
-        </button>
-      </div>
-    </div>
-  )
-}

@@ -1,6 +1,5 @@
+import re
 from datetime import datetime
-from typing import Any
-
 from decouple import config
 from fastapi import APIRouter, HTTPException, Request
 from pony.orm import db_session
@@ -21,6 +20,48 @@ def _norm_kw(s: str) -> str:
 
 def _norm_ig(s: str) -> str:
     return (s or "").strip().lstrip("@").casefold()
+
+
+def _sanitize_webhook_display_name(raw: str) -> str:
+    """Quita etiquetas ManyChat sin sustituir ({{first_name}}, etc.) que a veces llegan como texto."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    cleaned = re.sub(r"\{\{[^}]*\}\}", "", s)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+def _keyword_tokens_csv(raw: str | None) -> list[str]:
+    if not raw or not str(raw).strip():
+        return []
+    return [p.strip() for p in str(raw).split(",") if p.strip()]
+
+
+def _merge_keyword_csv(existing: str | None, new_token: str) -> str:
+    """Una sola fila por contacto: varias keywords en el mismo campo, coma-separadas (igual que en reels/leads)."""
+    t = (new_token or "").strip()
+    parts = _keyword_tokens_csv(existing)
+    seen = {p.casefold() for p in parts}
+    if t and t.casefold() not in seen:
+        parts.append(t)
+    return ", ".join(parts)
+
+
+def _find_lead_same_contact(user_id: int, ig_display: str) -> Lead | None:
+    """Mismo dueño + mismo IG → un solo lead; se agregan keywords."""
+    ig_key = _norm_ig(ig_display)
+    if not ig_key:
+        return None
+    matches = [
+        r
+        for r in list(Lead.select())
+        if int(r.user_id) == user_id and _norm_ig(r.ig or "") == ig_key
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda r: (r.created_at.timestamp() if r.created_at else 0.0), reverse=True)
+    return matches[0]
 
 
 def _resolve_user_id_by_keyword(keyword: str) -> int | None:
@@ -106,25 +147,39 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
             detail="No se encontró un usuario para esta keyword (revisa reels o conexión ManyChat).",
         )
 
-    contact_name = str(payload.get("contact_name") or "").strip()
-    contact_lastname = str(payload.get("contact_lastname") or "").strip()
+    contact_name = _sanitize_webhook_display_name(str(payload.get("contact_name") or ""))
+    contact_lastname = _sanitize_webhook_display_name(str(payload.get("contact_lastname") or ""))
     nombre = " ".join(x for x in (contact_name, contact_lastname) if x).strip()
-    ig = str(payload.get("contact_ig_username") or "").strip()
+    # Mismo criterio: si en ManyChat el body tiene "{{ig_username}}" entre comillas, llega literal.
+    ig = _sanitize_webhook_display_name(str(payload.get("contact_ig_username") or "")).lstrip("@")
     content_url = str(payload.get("content_url") or "").strip()
-    manychat_contact_id = str(payload.get("manychat_contact_id") or "").strip()
+    manychat_contact_id = _sanitize_webhook_display_name(str(payload.get("manychat_contact_id") or ""))
 
     now = datetime.utcnow()
     with db_session:
-        Lead(
-            user_id=user_id,
-            nombre=nombre,
-            ig=ig,
-            keyword=keyword,
-            content_url=content_url,
-            manychat_contact_id=manychat_contact_id,
-            fecha_bot=now,
-            respondio_auto=False,
-        )
+        existing = _find_lead_same_contact(user_id, ig)
+        if existing is not None:
+            existing.keyword = _merge_keyword_csv(existing.keyword, keyword)
+            if nombre and not (existing.nombre or "").strip():
+                existing.nombre = nombre
+            if ig:
+                existing.ig = ig
+            if content_url:
+                existing.content_url = content_url
+            if manychat_contact_id and not (existing.manychat_contact_id or "").strip():
+                existing.manychat_contact_id = manychat_contact_id
+            existing.fecha_bot = now
+        else:
+            Lead(
+                user_id=user_id,
+                nombre=nombre,
+                ig=ig,
+                keyword=keyword,
+                content_url=content_url,
+                manychat_contact_id=manychat_contact_id,
+                fecha_bot=now,
+                respondio_auto=False,
+            )
 
     return {"status": "ok"}
 

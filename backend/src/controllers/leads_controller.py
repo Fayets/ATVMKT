@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.models import Lead as LeadEntity
-from src.schemas import LeadOut, LeadsListResponse
+from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
 
@@ -27,6 +27,22 @@ def _dt_iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is not None:
         dt = dt.replace(tzinfo=None)
     return dt.isoformat()
+
+
+def _parse_dt_in(val: str | None) -> datetime | None:
+    if val is None or not str(val).strip():
+        return None
+    s = str(val).strip()
+    try:
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            return datetime.fromisoformat(s[:10] + "T00:00:00")
+        cleaned = s.replace("Z", "").split("+")[0]
+        dt = datetime.fromisoformat(cleaned)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+    except ValueError:
+        return None
 
 
 def _to_lead_out(row: LeadEntity) -> LeadOut:
@@ -130,6 +146,90 @@ def list_leads(
         out = [_to_lead_out(r) for r in rows]
 
     return LeadsListResponse(leads=out)
+
+
+@router.patch("/{lead_id}", response_model=LeadOut)
+def patch_lead(
+    lead_id: str,
+    body: LeadPatchRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> LeadOut:
+    try:
+        lid = int(lead_id)
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="lead_id o user_id inválido") from e
+
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
+
+    with db_session:
+        try:
+            row = LeadEntity[lid]
+        except ObjectNotFound as e:
+            raise HTTPException(status_code=404, detail="Lead no encontrado.") from e
+        if int(row.user_id) != uid:
+            raise HTTPException(status_code=404, detail="Lead no encontrado.")
+
+        if "client_name" in data:
+            row.nombre = (data["client_name"] or "") or ""
+        if "ig_handle" in data:
+            row.ig = data["ig_handle"] or ""
+        if "phone" in data:
+            row.telefono = data["phone"] or ""
+        if "avatar_type" in data:
+            row.avatar = data["avatar_type"] or ""
+        if "status" in data:
+            st = (data["status"] or "").strip() or "Pendiente"
+            row.status = st
+            row.estado = st
+        if "origin" in data:
+            row.origen = data["origin"] or ""
+        if "entry_channel" in data:
+            row.via = data["entry_channel"] or ""
+        if "entry_funnel" in data:
+            row.keyword = data["entry_funnel"] or ""
+        if "keyword" in data:
+            row.keyword = data["keyword"] or ""
+        if "agenda_point" in data:
+            row.punto_agenda = data["agenda_point"] or ""
+        if "ctas_responded" in data:
+            row.ctas_respondidos = max(0, int(data["ctas_responded"] or 0))
+        if "first_contact_at" in data:
+            row.primer_contacto = _parse_dt_in(data["first_contact_at"])
+        if "scheduled_at" in data:
+            row.agendo_en = _parse_dt_in(data["scheduled_at"])
+        if "call" in data:
+            v = data["call"]
+            row.call = bool(v) if v is not None else False
+        if "call_link" in data:
+            row.link_llamada = data["call_link"] or ""
+        if "program_offered" in data:
+            row.programa_ofrecido = data["program_offered"] or ""
+        if "ingresos_mensuales" in data:
+            row.ingresos_lead = float(data["ingresos_mensuales"] or 0)
+        elif "revenue" in data:
+            row.ingresos_lead = float(data["revenue"] or 0)
+        if "payment" in data:
+            row.pago = float(data["payment"] or 0)
+        if "owed" in data:
+            row.debe = float(data["owed"] or 0)
+        if "pago_en_llamada" in data:
+            row.pago_en_llamada = float(data["pago_en_llamada"] or 0)
+        if "dias_agendamiento" in data:
+            v = data["dias_agendamiento"]
+            row.dias_para_agendar = int(v) if v is not None else None
+        if "notes" in data:
+            row.notas = data["notes"] or ""
+        if "dolores_setting" in data:
+            row.dolores_setting = data["dolores_setting"] or ""
+        if "dolores_llamada" in data:
+            row.dolores_llamada = data["dolores_llamada"] or ""
+        if "razon_compra" in data:
+            row.razon_compra = data["razon_compra"] or ""
+
+        return _to_lead_out(row)
 
 
 @router.delete("/{lead_id}")

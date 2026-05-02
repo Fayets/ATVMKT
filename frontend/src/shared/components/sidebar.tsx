@@ -12,8 +12,6 @@ type NavGroup = {
   items: NavItem[]
   defaultOpen?: boolean
   href?: string
-  /** Si existe, el título del grupo enlaza aquí (p. ej. panel sin ítem “Panel” duplicado). */
-  titleHref?: string
 }
 
 const navigation: NavGroup[] = [
@@ -21,8 +19,10 @@ const navigation: NavGroup[] = [
     title: 'Dashboard marketing',
     icon: '◆',
     defaultOpen: true,
-    titleHref: '/dashboard',
-    items: [{ label: 'Métricas reels', href: '/metrica-reels' }],
+    items: [
+      { label: 'Dashboard', href: '/dashboard' },
+      { label: 'Métricas reels', href: '/metrica-reels' },
+    ],
   },
   {
     title: 'Dashboard ventas', icon: '◆', defaultOpen: true,
@@ -42,6 +42,7 @@ const dataGroups: NavGroup[] = [
       { label: 'Historias', href: '/historias' },
       { label: 'YouTube', href: '/youtube' },
       { label: 'BIO', href: '/bio' },
+      { label: 'Keyword', href: '/keywords' },
     ],
   },
   {
@@ -90,7 +91,7 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-1">
         {/* Dashboard groups */}
-        <div className="flex flex-col gap-0">
+        <div className="flex flex-col gap-1">
           {navigation.map((group) => (
             <CollapsibleGroup key={group.title} group={group} pathname={pathname} />
           ))}
@@ -100,7 +101,7 @@ export function Sidebar() {
         <div className="px-3 pt-2 pb-1 text-[10px] font-medium uppercase tracking-widest text-[var(--text3)]">
           Datos
         </div>
-        <div className="flex flex-col gap-0">
+        <div className="flex flex-col gap-1">
           {dataGroups.map((group) => (
             <CollapsibleGroup key={group.title} group={group} pathname={pathname} showBadge />
           ))}
@@ -116,7 +117,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`mx-1 mb-0 block min-h-7 truncate rounded-md border-l-2 py-1 pl-[calc(2.5rem-2px)] pr-2 text-[13px] transition-all ${
+              className={`mx-1 mb-1 block min-h-7 truncate rounded-md border-l-2 py-1 pl-[calc(2.5rem-2px)] pr-2 text-[13px] transition-all ${
                 isActive
                   ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--text)] font-medium'
                   : 'border-transparent text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text)]'
@@ -147,9 +148,7 @@ export function Sidebar() {
 }
 
 function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pathname: string; showBadge?: boolean }) {
-  const hasActive =
-    group.items.some(i => pathname === i.href) ||
-    (!!group.titleHref && pathname === group.titleHref)
+  const hasActive = group.items.some(i => pathname === i.href)
   const directActive = group.href ? pathname === group.href : false
   const [open, setOpen] = useState(group.defaultOpen ?? false)
 
@@ -158,11 +157,10 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
       <div className="mb-0">
         <Link
           href={group.href}
-          className={`mx-1 w-[calc(100%-8px)] flex items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-all text-left ${
+          className={`mx-1 flex w-[calc(100%-8px)] items-center rounded-md px-3 py-1.5 text-[13px] font-medium transition-all text-left ${
             directActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)]'
           }`}
         >
-          <span className="text-[10px]">▸</span>
           <span className="flex-1">{group.title}</span>
         </Link>
       </div>
@@ -171,47 +169,31 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
 
   return (
     <div className="mb-0">
-      <div
-        className={`mx-1 flex min-h-8 w-[calc(100%-8px)] items-center gap-1 rounded-md px-2 py-1 text-[13px] font-medium transition-all ${
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        aria-label={open ? `Contraer menú: ${group.title}` : `Expandir menú: ${group.title}`}
+        className={`mx-1 flex min-h-8 w-[calc(100%-8px)] items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-left transition-all ${
           hasActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)]'
         }`}
       >
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[10px] leading-none text-[var(--text2)] hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--text)]"
-          aria-expanded={open}
-          aria-label={open ? 'Contraer submenú' : 'Expandir submenú'}
-        >
-          <span className={`inline-block transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>▸</span>
-        </button>
-        {group.titleHref ? (
-          <Link
-            href={group.titleHref}
-            className={`min-w-0 flex-1 truncate py-0.5 text-left hover:text-[var(--text)] ${
-              pathname === group.titleHref ? 'text-[var(--text)] font-medium' : ''
-            }`}
-          >
-            {group.title}
-          </Link>
-        ) : (
-          <span className="min-w-0 flex-1 truncate py-0.5">{group.title}</span>
-        )}
+        <span className="min-w-0 flex-1 truncate">{group.title}</span>
         {showBadge && group.items.length > 0 && (
           <span className="shrink-0 rounded-full bg-[var(--bg4)] px-1.5 py-0.5 text-[10px] font-mono tabular-nums text-[var(--text3)]">
             {group.items.length}
           </span>
         )}
-      </div>
+      </button>
       {open && (
-        <div className="mx-1 flex flex-col gap-0 pr-1">
+        <div className="mx-1 mt-0.5 flex flex-col gap-0.5 pr-1">
           {group.items.map((item) => {
             const isActive = pathname === item.href
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className={`block min-h-7 truncate rounded-md border-l-2 py-0.5 pl-[calc(2.5rem-2px)] pr-2 text-[12px] transition-all ${
+                className={`block min-h-7 truncate rounded-md border-l-2 py-1 pl-[calc(2.5rem-2px)] pr-2 text-[12px] transition-all ${
                   isActive
                     ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--text)] font-medium'
                     : 'border-transparent text-[var(--text2)] hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text)]'

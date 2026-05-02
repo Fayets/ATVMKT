@@ -13,6 +13,9 @@ router = APIRouter(prefix="/api/bio", tags=["bio"], redirect_slashes=False)
 
 VIA_OPTIONS_FIXED = ["Perfil", "Automático - ManyChat", "Referido", "Otro"]
 
+# Keyword ManyChat del link en bio / perfil (no reels ni otros embudos).
+BIO_PROFILE_KEYWORD = "info"
+
 
 def require_user_id(
     x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
@@ -66,6 +69,16 @@ def _is_cerrado(row: LeadEntity) -> bool:
     return s == "cerrado"
 
 
+def _lead_keyword_tokens(raw: str | None) -> list[str]:
+    if not raw or not str(raw).strip():
+        return []
+    return [t.strip().lower() for t in str(raw).split(",") if t.strip()]
+
+
+def _is_bio_profile_lead(row: LeadEntity) -> bool:
+    return BIO_PROFILE_KEYWORD in _lead_keyword_tokens(row.keyword)
+
+
 def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
     st = (row.status or row.estado or "").strip() or None
     prog = row.programa_ofrecido
@@ -103,10 +116,10 @@ def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
 def _rows_for_user_month(uid: int, month_key: tuple[int, int] | None) -> list[LeadEntity]:
     with db_session:
         rows = [r for r in list(LeadEntity.select()) if int(r.user_id) == uid]
-    if month_key is None:
-        return rows
-    y, mn = month_key
-    return [r for r in rows if _in_month(r, y, mn)]
+    if month_key is not None:
+        y, mn = month_key
+        rows = [r for r in rows if _in_month(r, y, mn)]
+    return [r for r in rows if _is_bio_profile_lead(r)]
 
 
 @router.get("/leads", response_model=BioLeadsListResponse)

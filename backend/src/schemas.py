@@ -405,3 +405,53 @@ class LeadOut(BaseModel):
 
 class LeadsListResponse(BaseModel):
     leads: list[LeadOut] = Field(default_factory=list)
+
+
+class LeadPatchRequest(BaseModel):
+    """Campos opcionales alineados con `LeadOut` / tabla de leads (solo los que existen en BD)."""
+
+    client_name: str | None = None
+    ig_handle: str | None = None
+    phone: str | None = None
+    avatar_type: str | None = None
+    status: str | None = None
+    origin: str | None = None
+    entry_channel: str | None = None
+    entry_funnel: str | None = None
+    keyword: str | None = None
+    agenda_point: str | None = None
+    ctas_responded: int | None = None
+    first_contact_at: str | None = None
+    scheduled_at: str | None = None
+    call: bool | None = None
+    call_link: str | None = None
+    program_offered: str | None = None
+    revenue: float | None = None
+    ingresos_mensuales: float | None = None
+    payment: float | None = None
+    owed: float | None = None
+    pago_en_llamada: float | None = None
+    dias_agendamiento: int | None = None
+    notes: str | None = None
+    dolores_setting: str | None = None
+    dolores_llamada: str | None = None
+    razon_compra: str | None = None
+
+
+class KeywordClientRow(BaseModel):
+    """Lead con keyword y reel asociado (misma keyword que un reel del usuario, si existe)."""
+
+    lead_id: str
+    nombre: str = ""
+    instagram: str = ""
+    reel_permalink: str | None = None
+    reel_published_at: str | None = Field(
+        default=None,
+        description="Fecha de publicación del reel (YYYY-MM-DD), si existe.",
+    )
+    keyword: str
+
+
+class KeywordsListResponse(BaseModel):
+    rows: list[KeywordClientRow] = Field(default_factory=list)
+    total: int = 0

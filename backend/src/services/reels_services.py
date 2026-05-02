@@ -381,20 +381,21 @@ AND EXISTS (
                 reverse=True,
             )
             total = len(rows)
-            total_cash = 0.0
-            total_chats = 0
             page_size = max(1, min(page_size, 50))
             page = max(1, page)
             total_pages = (total + page_size - 1) // page_size if total else 0
             start = (page - 1) * page_size
             end = start + page_size
-            page_rows = rows[start:end]
-            reels_out = [self._to_response(r) for r in page_rows]
+            all_responses = [self._to_response(r) for r in rows]
 
-        for reel in reels_out:
+        total_cash = 0.0
+        total_chats = 0
+        for reel in all_responses:
             self._finalize_reel_response(user_id=user_id, reel=reel, refresh=False)
             total_cash += float(reel.cash or 0)
             total_chats += int(reel.chats or 0)
+
+        reels_out = all_responses[start:end]
 
         return ReelsListResponse(
             reels=reels_out,

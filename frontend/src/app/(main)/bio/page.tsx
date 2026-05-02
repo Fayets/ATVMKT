@@ -255,7 +255,9 @@ export default function BioPage() {
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">BIO</h2>
-          <p className="mt-1 text-[12px] text-[var(--text3)]">Leads que respondieron el bot de ManyChat</p>
+          <p className="mt-1 text-[12px] text-[var(--text3)]">
+            Leads que entraron por el perfil (keyword <span className="text-[var(--text2)]">info</span>) y respondieron el bot de ManyChat
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <input

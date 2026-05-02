@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 const titles: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/reels': 'Reels',
+  '/keywords': 'Keyword',
   '/historias': 'Historias',
   '/youtube': 'YouTube',
   '/leads': 'Leads',
@@ -43,6 +44,7 @@ export function Topbar({ userName: _userName }: TopbarProps) {
   const pathname = usePathname()
   const hideTitleForPath = [
     '/reels',
+    '/keywords',
     '/historias',
     '/youtube',
     '/bio',
