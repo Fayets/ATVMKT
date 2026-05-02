@@ -13,7 +13,8 @@ import certifi
 from fastapi import HTTPException
 from pony.orm import ObjectNotFound, db_session, rollback
 
-from src.models import ApiConnection, ReelContent
+from src.db import db
+from src.models import ApiConnection, Lead, ReelContent
 from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -210,13 +211,29 @@ class ReelsServices:
             cpc=(float(row.cash) / chats_total) if chats_total > 0 else 0,
         )
 
-    def _chats_leads_for_reel(self, _row: ReelContent) -> int:
-        """Chats atribuibles a leads (tabla leads pendiente)."""
-        return 0
+    @staticmethod
+    def _count_leads_matching_reel_keyword(user_id: int, reel_keyword: str | None) -> int:
+        """Cuenta leads del usuario cuyo campo keyword (coma-separado) incluye el keyword del reel (case-insensitive, por token)."""
+        kw = (reel_keyword or "").strip()
+        if not kw:
+            return 0
+        tbl = Lead._table_ or "lead"
+        sql = f"""COUNT(*) FROM {tbl} l
+WHERE l.user_id = $user_id
+AND EXISTS (
+    SELECT 1
+    FROM unnest(string_to_array(coalesce(l.keyword, ''), ',')) AS t(part)
+    WHERE lower(trim(both from t.part)) = lower($kw)
+)"""
+        with db_session:
+            rows = db.select(sql, globals(), {"user_id": user_id, "kw": kw})
+        return int(rows[0]) if rows else 0
 
-    def _chats_leads_for_response(self, _reel: ReelResponse) -> int:
-        """Misma fuente que _chats_leads_for_reel cuando no hay fila Pony a mano."""
-        return 0
+    def _chats_leads_for_reel(self, row: ReelContent) -> int:
+        return self._count_leads_matching_reel_keyword(int(row.user_id), row.keyword)
+
+    def _chats_leads_for_response(self, user_id: str, reel: ReelResponse) -> int:
+        return self._count_leads_matching_reel_keyword(int(user_id), reel.keyword)
 
     def _finalize_reel_response(
         self,
@@ -228,7 +245,7 @@ class ReelsServices:
         """Ajusta cash/chats/CPC desde la BD únicamente (sin integración externa)."""
         _ = (user_id, refresh)
         manual_chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
-        leads_chats = self._chats_leads_for_response(reel)
+        leads_chats = self._chats_leads_for_response(user_id, reel)
         base_chats = manual_chats + leads_chats
         db_cash = float(reel.manual_cash if reel.manual_cash is not None else reel.cash or 0)
         reel.cash = db_cash
