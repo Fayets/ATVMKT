@@ -370,6 +370,10 @@ class LeadOut(BaseModel):
     fecha_bot: str | None = None
     scheduled_at: str | None = None
     agendo: bool | None = None
+    agendo_en: str | None = Field(
+        default=None,
+        description="Canal donde agendó: Chat, Youtube (columna canal_agendo en BD)",
+    )
     call_at: str | None = None
     call: bool | None = Field(default=None, description="call en BD (hubo llamada)")
     call_link: str | None = None
@@ -433,6 +437,10 @@ class LeadPatchRequest(BaseModel):
     ctas_responded: int | None = None
     first_contact_at: str | None = None
     scheduled_at: str | None = None
+    agendo_en: str | None = Field(
+        default=None,
+        description="Chat | Youtube → canal_agendo en BD",
+    )
     call: bool | None = None
     call_link: str | None = None
     program_offered: str | None = None

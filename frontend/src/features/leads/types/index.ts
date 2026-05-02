@@ -17,6 +17,8 @@ export type Lead = {
   first_contact_at: string | null
   fecha_bot?: string | null
   scheduled_at: string | null
+  /** Canal donde agendó: Chat, Youtube (API; BD: canal_agendo). */
+  agendo_en?: string | null
   agendo?: boolean | null
   call_at: string | null
   call?: boolean | null
@@ -115,6 +117,13 @@ export const PROGRAM_OPTIONS = ['', 'Boost', 'Advantage', 'Mentoria']
 export const CHANNEL_OPTIONS = ['', 'IG Chat', 'WSP Chat', 'Referido', 'YouTube']
 export const ORIGIN_OPTIONS = ['Referido', 'Setter', 'Youtube', 'Lead viejo (seguimiento)'] as const
 
+export const AGENDO_EN_OPTIONS = ['Chat', 'Youtube'] as const
+
+export const AGENDO_EN_COLORS: Record<string, string> = {
+  Chat: '#E1306C',
+  Youtube: '#FF0000',
+}
+
 export const ORIGIN_COLORS: Record<string, string> = {
   Referido: '#F59E0B',
   Setter: '#3B82F6',
@@ -199,6 +208,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     // Fechas
     { key: 'first_contact_at', label: '1er contacto', width: 120, type: 'date', editable: true, defaultVisible: true },
     { key: 'scheduled_at', label: 'Agendó', width: 110, type: 'date', editable: true, defaultVisible: true },
+    { key: 'agendo_en', label: 'Agendó en', width: 120, type: 'select', editable: true, options: [...AGENDO_EN_OPTIONS], colors: AGENDO_EN_COLORS, defaultVisible: true },
     { key: 'call_at', label: 'Call', width: 110, type: 'date', editable: true, defaultVisible: true },
     // Setting (pre-llamada)
     { key: 'setter', label: 'Setter', width: 110, type: 'badge', editable: true, options: ['', ...setterNames], colors: Object.fromEntries(setterNames.map(n => [n, '#3B82F6'])), defaultVisible: true },

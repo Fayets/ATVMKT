@@ -12,7 +12,21 @@ import {
   Lead, ColumnDef, SortConfig, FilterConfig,
   STATUS_TABS, buildColumns, canonicalLeadStatus,
   ORIGIN_OPTIONS,
+  AGENDO_EN_OPTIONS,
 } from '../types'
+
+function agendoEnDisplayValue(lead: Lead): string {
+  const v = lead.agendo_en
+  if (v != null && String(v).trim() !== '') return String(v).trim()
+  return 'Chat'
+}
+
+function agendoEnSelectOptions(lead: Lead): string[] {
+  const v = agendoEnDisplayValue(lead)
+  const base = [...AGENDO_EN_OPTIONS]
+  if (!base.includes(v)) base.push(v)
+  return base
+}
 
 function originDisplayValue(lead: Lead): string {
   const o = lead.origin
@@ -170,7 +184,9 @@ export function LeadsPage() {
       const payload: Record<string, unknown> =
         field === 'origin'
           ? { origen: value === null || value === '' ? 'Setter' : String(value) }
-          : { [field]: value }
+          : field === 'agendo_en'
+            ? { agendo_en: value === null || value === '' ? 'Chat' : String(value) }
+            : { [field]: value }
       try {
         const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, {
           method: 'PATCH',
@@ -726,7 +742,12 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   readOnly?: boolean
 }) {
   const raw = (lead as Record<string, unknown>)[col.key]
-  const value = col.key === 'origin' ? originDisplayValue(lead) : raw
+  const value =
+    col.key === 'origin'
+      ? originDisplayValue(lead)
+      : col.key === 'agendo_en'
+        ? agendoEnDisplayValue(lead)
+        : raw
 
   if (readOnly) {
     if (col.key === 'client_name') {
@@ -840,11 +861,18 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   // ── Editing mode ──
   if (editing && col.editable) {
     if (col.type === 'select' || (col.type === 'badge' && col.options)) {
-      const opts = col.key === 'origin' ? originSelectOptions(lead) : col.options!
+      const opts =
+        col.key === 'origin'
+          ? originSelectOptions(lead)
+          : col.key === 'agendo_en'
+            ? agendoEnSelectOptions(lead)
+            : col.options!
       return (
         <select
           autoFocus
-          defaultValue={String(col.key === 'origin' ? value : (value ?? ''))}
+          defaultValue={String(
+            col.key === 'origin' || col.key === 'agendo_en' ? value : (value ?? ''),
+          )}
           onChange={(e) => onSave(e.target.value || null)}
           className="w-full rounded border border-[var(--accent)] bg-[var(--bg3)] px-2 py-1 text-[12px] text-[var(--text)] outline-none"
         >
@@ -903,10 +931,15 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
 
   // Select (status, origin, …)
   if (col.type === 'select') {
-    const opts = col.key === 'origin' ? originSelectOptions(lead) : col.options!
+    const opts =
+      col.key === 'origin'
+        ? originSelectOptions(lead)
+        : col.key === 'agendo_en'
+          ? agendoEnSelectOptions(lead)
+          : col.options!
     const color = col.colors?.[String(value)] || '#888'
     return (
-      <select value={String(col.key === 'origin' ? value : (value || ''))}
+      <select value={String(col.key === 'origin' || col.key === 'agendo_en' ? value : (value || ''))}
         onChange={(e) => onSave(e.target.value)}
         className="rounded-full border-0 px-2.5 py-0.5 text-[11px] font-semibold outline-none cursor-pointer appearance-none max-w-full min-w-0"
         style={{ backgroundColor: color + '20', color }}>

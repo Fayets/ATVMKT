@@ -79,9 +79,10 @@ class Lead(db.Entity):
     punto_agenda = Optional(str, default="")
     ctas_respondidos = Optional(int, default=0)
     primer_contacto = Optional(datetime)
-    # Agenda
+    # Agenda (agendo_en = fecha; canal_agendo = Chat/Youtube, expuesto en API como agendo_en string)
     agendo = Optional(bool, default=False)
     agendo_en = Optional(datetime)
+    canal_agendo = Optional(str, default="")
     dias_para_agendar = Optional(int)
     call = Optional(bool, default=False)
     link_llamada = Optional(str, default="")
