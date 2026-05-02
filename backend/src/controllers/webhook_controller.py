@@ -123,7 +123,7 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
             content_url=content_url,
             manychat_contact_id=manychat_contact_id,
             fecha_bot=now,
-            respondio_auto=True,
+            respondio_auto=False,
         )
 
     return {"status": "ok"}
