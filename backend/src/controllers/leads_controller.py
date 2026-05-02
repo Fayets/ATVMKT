@@ -1,14 +1,43 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import lead_display_nombre
 from src.models import Lead as LeadEntity
-from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse
+from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse, LeadsMetricsOut
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
+
+_AR = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _lead_effective_dt(row: LeadEntity) -> datetime | None:
+    """Fecha operativa del lead: conversación / bot, luego primer contacto, luego alta."""
+    return row.fecha_bot or row.primer_contacto or row.created_at
+
+
+def _lead_month_ar(row: LeadEntity) -> tuple[int, int] | None:
+    """(año, mes) en Argentina; mismo criterio de calendario que métricas de reels."""
+    dt = _lead_effective_dt(row)
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    d_utc = dt.replace(tzinfo=timezone.utc)
+    d_ar = d_utc.astimezone(_AR)
+    return (d_ar.year, d_ar.month)
+
+
+def _lead_sort_ts(row: LeadEntity) -> float:
+    dt = _lead_effective_dt(row)
+    if dt is None:
+        return 0.0
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return float(dt.replace(tzinfo=timezone.utc).timestamp())
 
 
 def require_user_id(
@@ -110,43 +139,91 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
 @router.get("", response_model=LeadsListResponse)
 def list_leads(
     user_id: Annotated[str, Depends(require_user_id)],
-    month: str | None = Query(default=None, description="Filtrar por YYYY-MM (created_at)"),
+    month: str | None = Query(
+        default=None,
+        description="YYYY-MM; filtra por fecha_bot o primer_contacto o created_at (mes AR)",
+    ),
 ) -> LeadsListResponse:
     try:
         uid = int(user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="user_id inválido") from e
 
-    year_m: int | None = None
-    month_m: int | None = None
+    month_key: tuple[int, int] | None = None
     if month and str(month).strip():
-        parts = str(month).strip().split("-", 1)
-        if len(parts) == 2:
-            try:
-                year_m, month_m = int(parts[0]), int(parts[1])
-            except ValueError:
-                year_m, month_m = None, None
-        if year_m is None or month_m is None or not (1 <= month_m <= 12):
+        month_key = _parse_month_query(month)
+        if month_key is None:
             raise HTTPException(status_code=400, detail="Parámetro month inválido (usar YYYY-MM).")
 
     with db_session:
         rows = [r for r in list(LeadEntity.select()) if int(r.user_id) == uid]
-        if year_m is not None and month_m is not None:
+        if month_key is not None:
+            year_m, month_m = month_key
             rows = [
                 r
                 for r in rows
-                if r.created_at is not None
-                and r.created_at.year == year_m
-                and r.created_at.month == month_m
+                if (mb := _lead_month_ar(r)) is not None and mb == (year_m, month_m)
             ]
-        def _sort_ts(r: LeadEntity) -> float:
-            c = r.created_at
-            return float(c.timestamp()) if c is not None else 0.0
 
-        rows.sort(key=_sort_ts, reverse=True)
+        rows.sort(key=_lead_sort_ts, reverse=True)
         out = [_to_lead_out(r) for r in rows]
 
     return LeadsListResponse(leads=out)
+
+
+def _parse_month_query(month: str | None) -> tuple[int, int] | None:
+    if not month or not str(month).strip():
+        return None
+    parts = str(month).strip().split("-", 1)
+    if len(parts) != 2:
+        return None
+    try:
+        y, m = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if not (1 <= m <= 12):
+        return None
+    return y, m
+
+
+@router.get("/metrics", response_model=LeadsMetricsOut)
+def leads_metrics(
+    user_id: Annotated[str, Depends(require_user_id)],
+    month: str | None = Query(
+        default=None,
+        description="YYYY-MM; mismo filtro que GET /leads (mes AR por fecha_bot / primer_contacto / created_at)",
+    ),
+) -> LeadsMetricsOut:
+    """Métricas agregadas de todos los leads del mes (no filtro BIO)."""
+    try:
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="user_id inválido") from e
+
+    month_key: tuple[int, int] | None = None
+    if month and str(month).strip():
+        month_key = _parse_month_query(month)
+        if month_key is None:
+            raise HTTPException(status_code=400, detail="Parámetro month inválido (usar YYYY-MM).")
+    with db_session:
+        rows = [r for r in list(LeadEntity.select()) if int(r.user_id) == uid]
+        if month_key is not None:
+            y, mn = month_key
+            rows = [
+                r
+                for r in rows
+                if (mb := _lead_month_ar(r)) is not None and mb == (y, mn)
+            ]
+        total = len(rows)
+        agendaron = sum(1 for r in rows if r.agendo is True)
+        cash_total = sum(float(r.pago or 0) for r in rows)
+    cash_por_chat = (cash_total / total) if total else 0.0
+    return LeadsMetricsOut(
+        total_leads=total,
+        agendaron=agendaron,
+        cash_total=cash_total,
+        cash_por_chat=cash_por_chat,
+    )
 
 
 @router.patch("/{lead_id}", response_model=LeadOut)
@@ -185,8 +262,10 @@ def patch_lead(
             st = (data["status"] or "").strip() or "Pendiente"
             row.status = st
             row.estado = st
-        if "origin" in data:
-            row.origen = data["origin"] or ""
+        if "origen" in data:
+            row.origen = (data["origen"] or "") or ""
+        elif "origin" in data:
+            row.origen = (data["origin"] or "") or ""
         if "entry_channel" in data:
             row.via = data["entry_channel"] or ""
         if "entry_funnel" in data:

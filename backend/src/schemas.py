@@ -407,6 +407,15 @@ class LeadsListResponse(BaseModel):
     leads: list[LeadOut] = Field(default_factory=list)
 
 
+class LeadsMetricsOut(BaseModel):
+    """Agregados del mes para el dashboard (todos los leads del usuario, no solo BIO)."""
+
+    total_leads: int = 0
+    agendaron: int = 0
+    cash_total: float = 0
+    cash_por_chat: float = 0
+
+
 class LeadPatchRequest(BaseModel):
     """Campos opcionales alineados con `LeadOut` / tabla de leads (solo los que existen en BD)."""
 
@@ -416,6 +425,7 @@ class LeadPatchRequest(BaseModel):
     avatar_type: str | None = None
     status: str | None = None
     origin: str | None = None
+    origen: str | None = Field(default=None, description="Alias de origin en PATCH (JSON en español)")
     entry_channel: str | None = None
     entry_funnel: str | None = None
     keyword: str | None = None

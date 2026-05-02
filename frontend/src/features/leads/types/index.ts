@@ -113,7 +113,14 @@ export const STATUS_OPTIONS = ['Pendiente', 'Seguimiento', 'Seña', 'Cerrado', '
 export const AVATAR_OPTIONS = ['', 'Experto en info', 'Dueño de agencia', 'Dueño de negocio', 'Habilidades de alto valor', 'Creador de contenido', 'Creador con infoproducto', 'Otro']
 export const PROGRAM_OPTIONS = ['', 'Boost', 'Advantage', 'Mentoria']
 export const CHANNEL_OPTIONS = ['', 'IG Chat', 'WSP Chat', 'Referido', 'YouTube']
-export const ORIGIN_OPTIONS = ['', 'Andrés', 'Referido']
+export const ORIGIN_OPTIONS = ['Referido', 'Setter', 'Youtube', 'Lead viejo (seguimiento)'] as const
+
+export const ORIGIN_COLORS: Record<string, string> = {
+  Referido: '#F59E0B',
+  Setter: '#3B82F6',
+  Youtube: '#FF0000',
+  'Lead viejo (seguimiento)': '#A855F7',
+}
 
 export const STATUS_TABS = ['Todos', 'Cerrados', 'Seguimiento', 'No show', 'Pendiente', 'Descalificado']
 
@@ -183,7 +190,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'avatar_type', label: 'Avatar', width: 170, type: 'badge', editable: true, options: AVATAR_OPTIONS, colors: AVATAR_COLORS, defaultVisible: true },
     // Estado y equipo
     { key: 'status', label: 'Status', width: 130, type: 'select', editable: true, options: STATUS_OPTIONS, colors: STATUS_COLORS, defaultVisible: true },
-    { key: 'origin', label: 'Origen', width: 100, type: 'badge', editable: true, options: ORIGIN_OPTIONS, colors: { 'Andrés': '#3B82F6', 'Referido': '#F59E0B' }, defaultVisible: true },
+    { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
     { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: CHANNEL_OPTIONS, colors: CHANNEL_COLORS, defaultVisible: true },
     // Funnel de entrada
     { key: 'entry_funnel', label: 'Ingreso embudo', width: 150, type: 'text', editable: true, defaultVisible: true },
