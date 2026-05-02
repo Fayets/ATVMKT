@@ -20,7 +20,7 @@ def _norm_kw(s: str) -> str:
 
 
 def _resolve_user_id_by_keyword(keyword: str) -> int | None:
-    """Dueño del keyword: reel con ese keyword o credenciales ManyChat que lo listan."""
+    """Dueño del keyword: reel con ese keyword; si no hay reel, primer ApiConnection manychat (keyword de bio genérico)."""
     kw = _norm_kw(keyword)
     if not kw:
         return None
@@ -41,22 +41,14 @@ def _resolve_user_id_by_keyword(keyword: str) -> int | None:
         if reel_uid is not None:
             return reel_uid
 
-        for conn in list(ApiConnection.select()):
-            if str(conn.platform).strip().lower() != "manychat":
-                continue
-            creds = conn.credentials if isinstance(conn.credentials, dict) else {}
-            single = _norm_kw(str(creds.get("keyword") or ""))
-            if single and single == kw:
-                return int(conn.user_id)
-            raw_list = creds.get("keywords") or creds.get("tracked_keywords")
-            if isinstance(raw_list, list):
-                for item in raw_list:
-                    if _norm_kw(str(item)) == kw:
-                        return int(conn.user_id)
-            if isinstance(raw_list, str) and raw_list.strip():
-                for part in raw_list.split(","):
-                    if _norm_kw(part) == kw:
-                        return int(conn.user_id)
+        manychat_conns = [
+            c
+            for c in list(ApiConnection.select())
+            if str(c.platform).strip().lower() == "manychat"
+        ]
+        manychat_conns.sort(key=lambda c: int(c.id))
+        if manychat_conns:
+            return int(manychat_conns[0].user_id)
 
     return None
 
