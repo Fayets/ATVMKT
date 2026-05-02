@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pony.orm import db_session
+from pony.orm import ObjectNotFound, db_session
 
 from src.models import Lead as LeadEntity
 from src.schemas import LeadOut, LeadsListResponse
@@ -130,3 +130,27 @@ def list_leads(
         out = [_to_lead_out(r) for r in rows]
 
     return LeadsListResponse(leads=out)
+
+
+@router.delete("/{lead_id}")
+def delete_lead(
+    lead_id: str,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> dict[str, str]:
+    """Elimina un lead (cliente) si pertenece al usuario autenticado."""
+    try:
+        lid = int(lead_id)
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="lead_id o user_id inválido") from e
+
+    with db_session:
+        try:
+            row = LeadEntity[lid]
+        except ObjectNotFound as e:
+            raise HTTPException(status_code=404, detail="Lead no encontrado.") from e
+        if int(row.user_id) != uid:
+            raise HTTPException(status_code=404, detail="Lead no encontrado.")
+        row.delete()
+
+    return {"status": "ok", "id": str(lid)}

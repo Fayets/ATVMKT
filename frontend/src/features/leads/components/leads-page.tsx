@@ -146,9 +146,25 @@ export function LeadsPage() {
     fetchLeads()
   }
 
-  const handleDelete = async (_ids: string[]) => {
-    toast('Eliminación no disponible por ahora.')
-  }
+  const handleDelete = useCallback(async (ids: string[]) => {
+    if (!ready || !userId || ids.length === 0) return
+    let ok = 0
+    let fail = 0
+    for (const id of ids) {
+      const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (res.ok) ok++
+      else fail++
+    }
+    if (fail === 0) {
+      toast(ids.length === 1 ? 'Cliente eliminado.' : `${ok} clientes eliminados.`)
+    } else if (ok > 0) {
+      toast(`Eliminados: ${ok}. Fallaron: ${fail}.`)
+    } else {
+      toast('No se pudo eliminar. Revisá permisos o que el lead exista.')
+    }
+    setSelectedRows(new Set())
+    await fetchLeads()
+  }, [ready, userId, toast, fetchLeads])
 
   const handleInlineUpdate = async (_id: string, _field: string, _value: string | number | null) => {
     toast('Edición en tabla no disponible por ahora.')
