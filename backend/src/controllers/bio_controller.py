@@ -83,7 +83,6 @@ def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
     st = (row.status or row.estado or "").strip() or None
     prog = row.programa_ofrecido
     subscribed = _anchor_dt(row)
-    agendo_dt = row.agendo_en
     return BioLeadResponse(
         id=str(row.id),
         handle=(row.ig or "").strip() or "",
@@ -98,7 +97,7 @@ def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
         setter=None,
         programa=prog,
         pago=float(row.pago) if row.pago is not None else None,
-        fecha_agendo=_dt_iso(agendo_dt),
+        fecha_agendo=None,
         llamada_url=row.link_llamada,
         dolores=row.dolores_setting or row.dolores_llamada,
         razon_compra=row.razon_compra,

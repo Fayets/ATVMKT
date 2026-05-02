@@ -372,7 +372,7 @@ class LeadOut(BaseModel):
     agendo: bool | None = None
     agendo_en: str | None = Field(
         default=None,
-        description="Canal donde agendó: Chat, Youtube (columna canal_agendo en BD)",
+        description='Canal donde agendó: "Chat", "Youtube" (columna agendo_en en BD, texto).',
     )
     call_at: str | None = None
     call: bool | None = Field(default=None, description="call en BD (hubo llamada)")
@@ -439,7 +439,7 @@ class LeadPatchRequest(BaseModel):
     scheduled_at: str | None = None
     agendo_en: str | None = Field(
         default=None,
-        description="Chat | Youtube → canal_agendo en BD",
+        description='Chat | Youtube → columna agendo_en (texto) en BD.',
     )
     call: bool | None = None
     call_link: str | None = None

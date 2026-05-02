@@ -100,9 +100,8 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
         ctas_responded=int(row.ctas_respondidos or 0),
         first_contact_at=_dt_iso(row.primer_contacto),
         fecha_bot=_dt_iso(row.fecha_bot),
-        scheduled_at=_dt_iso(row.agendo_en),
         agendo=row.agendo,
-        agendo_en=(row.canal_agendo or "").strip() or None,
+        agendo_en=(row.agendo_en or "").strip() or None,
         call_at=None,
         call=row.call,
         call_link=row.link_llamada,
@@ -279,11 +278,9 @@ def patch_lead(
             row.ctas_respondidos = max(0, int(data["ctas_responded"] or 0))
         if "first_contact_at" in data:
             row.primer_contacto = _parse_dt_in(data["first_contact_at"])
-        if "scheduled_at" in data:
-            row.agendo_en = _parse_dt_in(data["scheduled_at"])
         if "agendo_en" in data:
             v = data["agendo_en"]
-            row.canal_agendo = (str(v).strip() if v is not None else "") or ""
+            row.agendo_en = (str(v).strip() if v is not None else "") or "Chat"
         if "call" in data:
             v = data["call"]
             row.call = bool(v) if v is not None else False
