@@ -1,11 +1,6 @@
--- Defaults y columna para canal de agenda (Chat / Youtube).
--- En Postgres con Pony la tabla suele ser `lead` (minúsculas). Ajustá si tu esquema difiere.
+-- Defaults para leads (Neon / Postgres). Tabla habitual: `lead`.
 --
--- El campo de fecha de agenda sigue siendo la columna agendo_en (timestamptz).
--- El texto Chat/Youtube vive en canal_agendo; la API expone ese valor como JSON "agendo_en".
--- El arranque del backend también intenta ADD COLUMN (ver src/db.py).
-
-ALTER TABLE lead ADD COLUMN IF NOT EXISTS canal_agendo VARCHAR(64) DEFAULT '';
+-- agendo_en: texto del canal donde agendó (ej. Chat, Youtube); misma semántica que el JSON de la API.
 
 UPDATE lead SET origen = 'Setter' WHERE origen IS NULL OR origen = '';
-UPDATE lead SET canal_agendo = 'Chat' WHERE canal_agendo IS NULL OR canal_agendo = '';
+UPDATE lead SET agendo_en = 'Chat' WHERE agendo_en IS NULL OR trim(agendo_en) = '';

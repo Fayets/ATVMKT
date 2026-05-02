@@ -17,7 +17,7 @@ export type Lead = {
   first_contact_at: string | null
   fecha_bot?: string | null
   scheduled_at: string | null
-  /** Canal donde agendó: Chat, Youtube (API; BD: canal_agendo). */
+  /** Canal donde agendó: Chat, Youtube (columna agendo_en en BD). */
   agendo_en?: string | null
   agendo?: boolean | null
   call_at: string | null
