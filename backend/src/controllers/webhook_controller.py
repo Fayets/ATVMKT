@@ -74,12 +74,28 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
 
     event = str(payload.get("event") or "").strip().lower()
     webhook_token = str(payload.get("webhook_token") or "").strip()
-    keyword = str(payload.get("keyword") or "").strip()
-    if not keyword and event == "respondio_auto":
-        keyword = "respondio_auto"
 
     if str(webhook_token) != str(MANYCHAT_WEBHOOK_SECRET).strip():
         raise HTTPException(status_code=401, detail="Invalid webhook token")
+
+    if event == "respondio_auto":
+        ig_key = _norm_ig(str(payload.get("contact_ig_username") or "").strip())
+        if not ig_key:
+            return {"status": "ok"}
+        with db_session:
+            matches = [
+                r for r in list(Lead.select()) if _norm_ig(r.ig or "") == ig_key
+            ]
+            if not matches:
+                return {"status": "ok"}
+            matches.sort(
+                key=lambda r: (r.created_at.timestamp() if r.created_at else 0.0),
+                reverse=True,
+            )
+            matches[0].respondio_auto = True
+        return {"status": "ok"}
+
+    keyword = str(payload.get("keyword") or "").strip()
     if not keyword:
         raise HTTPException(status_code=400, detail="Missing keyword")
 
@@ -89,28 +105,6 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
             status_code=404,
             detail="No se encontró un usuario para esta keyword (revisa reels o conexión ManyChat).",
         )
-
-    if event == "respondio_auto":
-        ig_raw = str(payload.get("contact_ig_username") or "").strip()
-        ig_key = _norm_ig(ig_raw)
-        if not ig_key:
-            return {"status": "ok"}
-        uid = int(user_id)
-        with db_session:
-            matches = [
-                r
-                for r in list(Lead.select())
-                if int(r.user_id) == uid and _norm_ig(r.ig or "") == ig_key
-            ]
-            if not matches:
-                return {"status": "ok"}
-            matches.sort(
-                key=lambda r: (r.created_at.timestamp() if r.created_at else 0.0),
-                reverse=True,
-            )
-            row = matches[0]
-            row.respondio_auto = True
-        return {"status": "ok"}
 
     contact_name = str(payload.get("contact_name") or "").strip()
     contact_lastname = str(payload.get("contact_lastname") or "").strip()
