@@ -284,6 +284,9 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid request body") from exc
 
+    payload = body
+    print(f"[calendly webhook] payload: {payload}")
+
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid request body")
 
