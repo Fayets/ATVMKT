@@ -189,3 +189,179 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
 @router.get("/manychat")
 def manychat_webhook_verify() -> dict[str, str]:
     return {"status": "ok", "service": "manychat-webhook"}
+
+
+def _norm_name_for_match(raw: str) -> str:
+    s = re.sub(r"\s+", " ", (raw or "").strip()).casefold()
+    return s
+
+
+def _phone_from_calendly_payload(payload: dict) -> str:
+    for key in ("text_reminder_number", "phone_number", "new_phone"):
+        v = str(payload.get(key) or "").strip()
+        if v:
+            return v
+    for qa in payload.get("questions_and_answers") or []:
+        if not isinstance(qa, dict):
+            continue
+        q = str(qa.get("question") or "").casefold()
+        a = str(qa.get("answer") or "").strip()
+        if not a:
+            continue
+        if "phone" in q or "tel" in q or "celular" in q or "whatsapp" in q:
+            return a
+        if re.match(r"^\+?[\d\s\-().]{8,}$", a):
+            return a
+    return ""
+
+
+def _flatten_calendly_invitee_payload(body: dict) -> dict:
+    """Unifica formas habituales del body (payload plano vs anidado tipo API v2)."""
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        payload = body
+    inner = payload
+    invitee = inner.get("invitee")
+    if isinstance(invitee, dict):
+        merged = {**inner, **invitee}
+    else:
+        merged = dict(inner)
+    scheduled = merged.get("scheduled_event")
+    if isinstance(scheduled, dict) and "start_time" not in merged:
+        merged["start_time"] = scheduled.get("start_time")
+    ev = merged.get("event")
+    if isinstance(ev, dict) and not merged.get("start_time"):
+        merged["start_time"] = ev.get("start_time")
+    return merged
+
+
+def _parse_calendly_start_time(raw: str | None) -> datetime | None:
+    if not raw or not str(raw).strip():
+        return None
+    s = str(raw).strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def _ig_from_calendly_qa(payload: dict) -> str:
+    for qa in payload.get("questions_and_answers") or []:
+        if not isinstance(qa, dict):
+            continue
+        q = str(qa.get("question") or "").casefold()
+        if "instagram" in q or q in ("ig", "tu ig", "usuario ig"):
+            return str(qa.get("answer") or "").strip().lstrip("@")
+    return ""
+
+
+def _find_lead_for_calendly(user_id: int, display_name: str, ig_hint: str) -> Lead | None:
+    """Misma cuenta: prioriza coincidencia por IG, luego por nombre (normalizado)."""
+    nkey = _norm_name_for_match(display_name)
+    ig_key = _norm_ig(ig_hint)
+    rows = [r for r in list(Lead.select()) if int(r.user_id) == user_id]
+
+    def _ts(row: Lead) -> float:
+        return row.created_at.timestamp() if row.created_at else 0.0
+
+    if ig_key:
+        ig_matches = [r for r in rows if _norm_ig(r.ig or "") == ig_key]
+        if ig_matches:
+            ig_matches.sort(key=_ts, reverse=True)
+            return ig_matches[0]
+    if nkey:
+        name_matches = [r for r in rows if _norm_name_for_match(r.nombre or "") == nkey]
+        if name_matches:
+            name_matches.sort(key=_ts, reverse=True)
+            return name_matches[0]
+    return None
+
+
+@router.post("/calendly")
+async def calendly_webhook(request: Request) -> dict[str, str]:
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid request body") from exc
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid request body")
+
+    event = str(body.get("event") or "").strip()
+    if event != "invitee.created":
+        return {"status": "ok"}
+
+    flat = _flatten_calendly_invitee_payload(body)
+    display_name = _sanitize_webhook_display_name(str(flat.get("name") or ""))
+    email = str(flat.get("email") or "").strip()
+    start_raw = flat.get("start_time")
+    if not start_raw and isinstance(flat.get("scheduled_event"), dict):
+        start_raw = flat["scheduled_event"].get("start_time")
+    if isinstance(start_raw, dict):
+        start_raw = start_raw.get("start_time")
+    start_dt = _parse_calendly_start_time(str(start_raw) if start_raw else None)
+    phone = _phone_from_calendly_payload(flat)
+
+    ig_hint = _ig_from_calendly_qa(flat)
+    if not ig_hint and "@" in display_name:
+        for p in display_name.split():
+            p = p.strip().lstrip("@")
+            if p and "@" not in p and len(p) > 1:
+                ig_hint = p
+                break
+
+    if not display_name and email:
+        display_name = email.split("@")[0]
+
+    agendo_en_val = start_dt.isoformat() if start_dt else None
+    start_raw_label = str(start_raw) if start_raw is not None else ""
+
+    with db_session:
+        calendly_conns = [
+            c
+            for c in list(ApiConnection.select())
+            if str(c.platform or "").strip().casefold() == "calendly"
+        ]
+        calendly_conns.sort(key=lambda c: int(c.id))
+        if not calendly_conns:
+            raise HTTPException(
+                status_code=404,
+                detail="No hay conexión ApiConnection con platform=calendly.",
+            )
+        user_id = int(calendly_conns[0].user_id)
+
+        row = _find_lead_for_calendly(user_id, display_name, ig_hint)
+        if row is not None:
+            row.agendo = True
+            if agendo_en_val:
+                row.agendo_en = agendo_en_val
+            row.call = True
+            if display_name:
+                row.nombre = display_name
+            if phone:
+                row.telefono = phone
+            if ig_hint and not (row.ig or "").strip():
+                row.ig = ig_hint
+        else:
+            notas_parts = []
+            if email:
+                notas_parts.append(f"Calendly email: {email}")
+            if start_raw_label:
+                notas_parts.append(f"Cita: {start_raw_label}")
+            Lead(
+                user_id=user_id,
+                nombre=display_name or (email.split("@")[0] if email else "Invitado Calendly"),
+                ig=ig_hint or "",
+                telefono=phone or "",
+                agendo=True,
+                agendo_en=agendo_en_val or "",
+                call=True,
+                notas="\n".join(notas_parts),
+            )
+
+    return {"status": "ok"}
+
+
+@router.get("/calendly")
+def calendly_webhook_verify() -> dict[str, str]:
+    return {"status": "ok", "service": "calendly-webhook"}
