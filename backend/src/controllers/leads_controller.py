@@ -156,7 +156,11 @@ def list_leads(
             raise HTTPException(status_code=400, detail="Parámetro month inválido (usar YYYY-MM).")
 
     with db_session:
-        rows = [r for r in list(LeadEntity.select()) if int(r.user_id) == uid]
+        rows = [
+            r
+            for r in list(LeadEntity.select())
+            if int(r.user_id) == uid and r.agendo is True
+        ]
         if month_key is not None:
             year_m, month_m = month_key
             rows = [
