@@ -147,20 +147,47 @@ export function LeadsPage() {
   }
 
   const handleDelete = useCallback(async (ids: string[]) => {
-    if (!ready || !userId || ids.length === 0) return
+    if (!ready) return
+    if (!userId) {
+      toast('No hay sesión: iniciá sesión de nuevo para eliminar leads.')
+      return
+    }
+    if (ids.length === 0) return
+    if (ids.length > 1 && !window.confirm(`¿Eliminar ${ids.length} clientes?`)) {
+      return
+    }
     let ok = 0
     let fail = 0
-    for (const id of ids) {
-      const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, { method: 'DELETE' })
-      if (res.ok) ok++
-      else fail++
+    let lastDetail = ''
+    try {
+      for (const id of ids) {
+        const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, { method: 'DELETE' })
+        if (res.ok) {
+          ok++
+        } else {
+          fail++
+          const raw = await res.json().catch(() => ({}))
+          const detail =
+            typeof raw === 'object' && raw && 'detail' in raw
+              ? String((raw as { detail: unknown }).detail)
+              : res.statusText
+          lastDetail = detail || lastDetail
+        }
+      }
+    } catch (e) {
+      toast(`Error de red al eliminar: ${e instanceof Error ? e.message : 'desconocido'}`)
+      return
     }
     if (fail === 0) {
       toast(ids.length === 1 ? 'Cliente eliminado.' : `${ok} clientes eliminados.`)
     } else if (ok > 0) {
-      toast(`Eliminados: ${ok}. Fallaron: ${fail}.`)
+      toast(`Eliminados: ${ok}. Fallaron: ${fail}.${lastDetail ? ` (${lastDetail})` : ''}`)
     } else {
-      toast('No se pudo eliminar. Revisá permisos o que el lead exista.')
+      toast(
+        lastDetail
+          ? `No se pudo eliminar: ${lastDetail}`
+          : 'No se pudo eliminar. Revisá permisos o que el lead exista.',
+      )
     }
     setSelectedRows(new Set())
     await fetchLeads()
