@@ -13,7 +13,24 @@ import {
   STATUS_TABS, buildColumns, canonicalLeadStatus,
   ORIGIN_OPTIONS,
   AGENDO_EN_OPTIONS,
+  CHANNEL_OPTIONS,
 } from '../types'
+
+function mergeEntryChannelOptions(leads: Lead[], custom: string[]): string[] {
+  const base = [...CHANNEL_OPTIONS]
+  const baseSet = new Set(base)
+  const extras = new Set<string>()
+  for (const c of custom) {
+    const t = String(c || '').trim()
+    if (t && !baseSet.has(t)) extras.add(t)
+  }
+  for (const l of leads) {
+    const t = String(l.entry_channel || '').trim()
+    if (t && !baseSet.has(t)) extras.add(t)
+  }
+  const sortedExtras = [...extras].sort((a, b) => a.localeCompare(b, 'es'))
+  return [...base, ...sortedExtras]
+}
 
 function agendoEnDisplayValue(lead: Lead): string {
   const v = lead.agendo_en
@@ -84,6 +101,11 @@ export function LeadsPage() {
   const [showGroupPanel, setShowGroupPanel] = useState(false)
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[] | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
+
+  /** Opciones extra para columna Vía (entry_channel); se fusionan con CHANNEL_OPTIONS y valores de los leads. */
+  const [customViaOptions, setCustomViaOptions] = useState<string[]>([])
+  const [viaAddOpen, setViaAddOpen] = useState(false)
+  const [viaDraft, setViaDraft] = useState('')
 
   // ── Data fetching ──
   const fetchTeamMembers = useCallback(async () => {
@@ -186,7 +208,9 @@ export function LeadsPage() {
           ? { origen: value === null || value === '' ? 'Setter' : String(value) }
           : field === 'agendo_en'
             ? { agendo_en: value === null || value === '' ? 'Chat' : String(value) }
-            : { [field]: value }
+            : field === 'entry_channel'
+              ? { via: value === null || value === '' ? '' : String(value) }
+              : { [field]: value }
       try {
         const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, {
           method: 'PATCH',
@@ -327,7 +351,32 @@ export function LeadsPage() {
     })
   }
 
-  const activeColumns = COLUMNS.filter(c => visibleColumns.has(c.key))
+  const activeColumns = useMemo(
+    () => COLUMNS.filter((c) => visibleColumns.has(c.key)),
+    [COLUMNS, visibleColumns],
+  )
+
+  const tableColumns = useMemo(() => {
+    const opts = mergeEntryChannelOptions(leads, customViaOptions)
+    return activeColumns.map((c) =>
+      c.key === 'entry_channel' ? { ...c, options: opts } : c,
+    )
+  }, [activeColumns, leads, customViaOptions])
+
+  const confirmNewViaOption = useCallback(() => {
+    const t = viaDraft.trim()
+    if (!t) {
+      setViaAddOpen(false)
+      setViaDraft('')
+      return
+    }
+    const inBase = CHANNEL_OPTIONS.some((o) => o === t)
+    if (!inBase) {
+      setCustomViaOptions((prev) => (prev.includes(t) ? prev : [...prev, t]))
+    }
+    setViaAddOpen(false)
+    setViaDraft('')
+  }, [viaDraft])
 
   if (!ready) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -450,7 +499,7 @@ export function LeadsPage() {
                 <span className="text-[10px] text-[var(--text3)] font-mono-num">{groupLeads.length}</span>
               </div>
               <LeadsTable
-                leads={groupLeads} columns={activeColumns} sort={sort}
+                leads={groupLeads} columns={tableColumns} sort={sort}
                 editingCell={editingCell} setEditingCell={setEditingCell}
                 onInlineUpdate={handleInlineUpdate} onToggleSort={toggleSort}
                 selectedRows={selectedRows} onToggleRow={toggleSelectRow}
@@ -461,6 +510,11 @@ export function LeadsPage() {
                 totalLeads={filtered.length}
                 onPreviewText={(title, text) => setTextPreview({ title, text })}
                 readOnly={readOnlyGrid}
+                viaAddOpen={viaAddOpen}
+                setViaAddOpen={setViaAddOpen}
+                viaDraft={viaDraft}
+                setViaDraft={setViaDraft}
+                onConfirmNewViaOption={confirmNewViaOption}
               />
             </div>
           ))}
@@ -468,7 +522,7 @@ export function LeadsPage() {
       ) : (
         <div className="flex-1 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--bg2)]">
           <LeadsTable
-            leads={filtered} columns={activeColumns} sort={sort}
+            leads={filtered} columns={tableColumns} sort={sort}
             editingCell={editingCell} setEditingCell={setEditingCell}
             onInlineUpdate={handleInlineUpdate} onToggleSort={toggleSort}
             selectedRows={selectedRows} onToggleRow={toggleSelectRow}
@@ -479,6 +533,11 @@ export function LeadsPage() {
             totalLeads={filtered.length}
             onPreviewText={(title, text) => setTextPreview({ title, text })}
             readOnly={readOnlyGrid}
+            viaAddOpen={viaAddOpen}
+            setViaAddOpen={setViaAddOpen}
+            viaDraft={viaDraft}
+            setViaDraft={setViaDraft}
+            onConfirmNewViaOption={confirmNewViaOption}
           />
         </div>
       )}
@@ -572,7 +631,7 @@ const LEADS_TABLE_CHECK_W = 48
 const LEADS_TABLE_NUM_W = 40
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly }: {
+function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly, viaAddOpen, setViaAddOpen, viaDraft, setViaDraft, onConfirmNewViaOption }: {
   leads: Lead[]
   columns: ColumnDef[]
   sort: SortConfig
@@ -590,8 +649,17 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
   totalLeads: number
   onPreviewText: (title: string, text: string) => void
   readOnly?: boolean
+  viaAddOpen: boolean
+  setViaAddOpen: (v: boolean) => void
+  viaDraft: string
+  setViaDraft: (v: string) => void
+  onConfirmNewViaOption: () => void
 }) {
   const stickyName = columns.some((c) => c.key === 'client_name' && c.sticky)
+  const viaInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (viaAddOpen) viaInputRef.current?.focus()
+  }, [viaAddOpen])
 
   return (
     <table
@@ -626,17 +694,70 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
           {/* Columns */}
           {columns.map(col => (
             <th key={col.key}
-              onClick={() => onToggleSort(col.key)}
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest('[data-leads-via-addon]')) return
+                onToggleSort(col.key)
+              }}
               className={`border-b border-[var(--border2)] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] hover:text-[var(--text2)] cursor-pointer select-none whitespace-nowrap transition-colors ${
                 stickyName && col.key === 'client_name'
                   ? 'leads-table__sticky-frozen leads-table__sticky-name'
                   : ''
               }`}
               style={{ width: col.width, minWidth: col.width }}>
-              <div className="flex items-center gap-1">
-                {col.label}
+              <div className="flex items-center gap-1 min-w-0">
+                <span className="truncate">{col.label}</span>
                 {sort.field === col.key && (
-                  <span className="text-[var(--accent)] text-[9px]">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+                  <span className="text-[var(--accent)] text-[9px] shrink-0">{sort.dir === 'asc' ? '↑' : '↓'}</span>
+                )}
+                {col.key === 'entry_channel' && !readOnly && (
+                  <span data-leads-via-addon className="inline-flex items-center gap-0.5 shrink-0 ml-0.5">
+                    {!viaAddOpen ? (
+                      <button
+                        type="button"
+                        title="Nueva opción de vía"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setViaAddOpen(true)
+                        }}
+                        className="flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] font-semibold text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                      >
+                        +
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          ref={viaInputRef}
+                          type="text"
+                          value={viaDraft}
+                          onChange={(e) => setViaDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              onConfirmNewViaOption()
+                            }
+                            if (e.key === 'Escape') {
+                              setViaAddOpen(false)
+                              setViaDraft('')
+                            }
+                          }}
+                          placeholder="Nueva vía"
+                          className="h-5 w-[7.5rem] rounded border border-[var(--accent)] bg-[var(--bg3)] px-1.5 text-[10px] font-normal normal-case tracking-normal text-[var(--text)] placeholder:text-[var(--text3)] outline-none"
+                        />
+                        <button
+                          type="button"
+                          title="Confirmar"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onConfirmNewViaOption()
+                          }}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] text-[var(--green)] hover:border-[var(--green)] transition-colors"
+                        >
+                          ✓
+                        </button>
+                      </>
+                    )}
+                  </span>
                 )}
               </div>
             </th>
@@ -773,7 +894,9 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
     if (col.type === 'select') {
       const color = col.colors?.[String(value)] || '#888'
       return (
-        <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: color + '20', color }}>
+        <span
+          className="inline-flex h-6 max-w-full items-center justify-center rounded-full px-2.5 text-[11px] font-semibold leading-none"
+          style={{ backgroundColor: color + '20', color }}>
           {String(value || '—')}
         </span>
       )
@@ -939,12 +1062,17 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
           : col.options!
     const color = col.colors?.[String(value)] || '#888'
     return (
-      <select value={String(col.key === 'origin' || col.key === 'agendo_en' ? value : (value || ''))}
-        onChange={(e) => onSave(e.target.value)}
-        className="rounded-full border-0 px-2.5 py-0.5 text-[11px] font-semibold outline-none cursor-pointer appearance-none max-w-full min-w-0"
-        style={{ backgroundColor: color + '20', color }}>
-        {opts.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
+      <span
+        className="inline-flex h-6 max-w-full min-w-0 items-center overflow-hidden rounded-full px-2.5"
+        style={{ backgroundColor: color + '20' }}>
+        <select
+          value={String(col.key === 'origin' || col.key === 'agendo_en' ? value : (value || ''))}
+          onChange={(e) => onSave(e.target.value)}
+          className="box-border h-full min-h-0 w-full min-w-0 cursor-pointer appearance-none border-0 bg-transparent p-0 text-[11px] font-semibold leading-none outline-none"
+          style={{ color }}>
+          {opts.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </span>
     )
   }
 

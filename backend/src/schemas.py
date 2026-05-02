@@ -431,6 +431,7 @@ class LeadPatchRequest(BaseModel):
     origin: str | None = None
     origen: str | None = Field(default=None, description="Alias de origin en PATCH (JSON en español)")
     entry_channel: str | None = None
+    via: str | None = Field(default=None, description="Alias de entry_channel → columna via en BD")
     entry_funnel: str | None = None
     keyword: str | None = None
     agenda_point: str | None = None

@@ -266,7 +266,9 @@ def patch_lead(
             row.origen = (data["origen"] or "") or ""
         elif "origin" in data:
             row.origen = (data["origin"] or "") or ""
-        if "entry_channel" in data:
+        if "via" in data:
+            row.via = (data["via"] or "") or ""
+        elif "entry_channel" in data:
             row.via = data["entry_channel"] or ""
         if "entry_funnel" in data:
             row.keyword = data["entry_funnel"] or ""
