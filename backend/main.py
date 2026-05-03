@@ -26,6 +26,7 @@ from src.controllers.webhook_controller import router as webhook_router
 from src.db import db, init_db
 from src.models import ApiConnection
 from src.services.reels_services import ReelsServices
+from src.story_sync_scheduler_ref import bind_stories_scheduler
 from src.services.stories_service import STORIES_SYNC_INTERVAL_MINUTES, StoriesService
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -89,6 +90,7 @@ async def lifespan(_: FastAPI):
         id="auto_refresh_reels_metrics",
         replace_existing=True,
     )
+    bind_stories_scheduler(scheduler)
     scheduler.start()
     print(f"[scheduler] Auto-sync de historias iniciado (cada {STORIES_SYNC_INTERVAL_MINUTES} min)")
     print("[scheduler] Auto refresh-metrics de reels iniciado (diario 07:00 AR)")

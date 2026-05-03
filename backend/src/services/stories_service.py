@@ -16,6 +16,7 @@ from pony.orm import db_session, flush
 
 from src.models import ApiConnection, StorySequence, StorySlide
 from src.schemas import StorySequenceIn
+from src.story_sync_scheduler_ref import next_auto_sync_stories_run_time
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 # Debe coincidir con el job `auto_sync_stories` en main.py (IntervalTrigger).
@@ -382,7 +383,13 @@ class StoriesService:
     def get_sync_status(self, user_id: str) -> dict[str, str | None]:
         conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
         last = conn.last_sync_at if conn else None
-        next_sync = last + timedelta(minutes=STORIES_SYNC_INTERVAL_MINUTES) if last else None
+        # Contador: usar la próxima corrida real del job (evita mostrar 5 min si el proceso
+        # sigue con job de 30 min, o desvíos last+intervalo vs APScheduler).
+        sched_next = next_auto_sync_stories_run_time()
+        if sched_next is not None:
+            next_sync = sched_next
+        else:
+            next_sync = last + timedelta(minutes=STORIES_SYNC_INTERVAL_MINUTES) if last else None
 
         token_saved_at: datetime | None = None
         token_expires_at: datetime | None = None
