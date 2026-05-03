@@ -18,6 +18,8 @@ from src.models import ApiConnection, StorySequence, StorySlide
 from src.schemas import StorySequenceIn
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+# Debe coincidir con el job `auto_sync_stories` en main.py (IntervalTrigger).
+STORIES_SYNC_INTERVAL_MINUTES = 5
 _last_sync_times: dict[str, datetime] = {}
 _sync_lock = asyncio.Lock()
 
@@ -374,7 +376,7 @@ class StoriesService:
     @db_session
     def get_sync_status(self, user_id: str) -> dict[str, str | None]:
         last = _last_sync_times.get(user_id)
-        next_sync = last + timedelta(minutes=30) if last else None
+        next_sync = last + timedelta(minutes=STORIES_SYNC_INTERVAL_MINUTES) if last else None
 
         token_saved_at: datetime | None = None
         token_expires_at: datetime | None = None
