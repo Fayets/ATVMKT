@@ -40,7 +40,7 @@ class StorySequence(db.Entity):
 
 class StorySlide(db.Entity):
     id = PrimaryKey(int, auto=True)
-    sequence = Required(StorySequence)
+    sequence = Required(StorySequence, column="sequence_id")
     order_index = Required(int)
     instagram_media_id = Optional(str)
     image_url = Optional(str)
