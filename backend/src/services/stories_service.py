@@ -154,10 +154,10 @@ class StoriesService:
         sequence = StorySequence(
             user_id=uid,
             sequence_date=data.sequence_date,
-            title=(data.title or "").strip() or None,
-            dolor=(data.dolor or "").strip() or None,
-            angulo=(data.angulo or "").strip() or None,
-            cta=(data.cta_text or "").strip() or None,
+            title=(data.title or "").strip(),
+            dolor=(data.dolor or "").strip(),
+            angulo=(data.angulo or "").strip(),
+            cta=(data.cta_text or "").strip(),
             cash=float(max(0, int(data.cash_generado or 0))),
             has_cta=bool(data.has_cta),
             chats=max(0, int(data.chats or 0)),
@@ -180,13 +180,13 @@ class StoriesService:
         if "sequence_date" in data and data["sequence_date"] is not None:
             sequence.sequence_date = data["sequence_date"]
         if "title" in data:
-            sequence.title = str(data.get("title") or "").strip() or None
+            sequence.title = str(data.get("title") or "").strip()
         if "dolor" in data:
-            sequence.dolor = str(data.get("dolor") or "").strip() or None
+            sequence.dolor = str(data.get("dolor") or "").strip()
         if "angulo" in data:
-            sequence.angulo = str(data.get("angulo") or "").strip() or None
+            sequence.angulo = str(data.get("angulo") or "").strip()
         if "cta_text" in data:
-            sequence.cta = str(data.get("cta_text") or "").strip() or None
+            sequence.cta = str(data.get("cta_text") or "").strip()
         if "cash_generado" in data and data["cash_generado"] is not None:
             sequence.cash = float(max(0, int(data["cash_generado"])))
         if "has_cta" in data and data["has_cta"] is not None:
