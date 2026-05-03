@@ -38,15 +38,52 @@ function agendaPointSelectOptions(lead: Lead, parentOpts: string[]): string[] {
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
 }
 
-function agendoEnDisplayValue(lead: Lead): string {
+/** ISO `YYYY-MM-DD` o `…T00:00:00…` → solo fecha `dd/mm/aaaa`; si no parsea, null. */
+function formatIsoDateToDdMmYyyy(raw: string | null | undefined): string | null {
+  const s = raw != null ? String(raw).trim() : ''
+  if (!s) return null
+  const head = s.includes('T') ? s.split('T')[0] : s.split(' ')[0]
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(head)) return null
+  const [y, mo, d] = head.split('-').map(Number)
+  if (!y || !mo || !d) return null
+  return `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${y}`
+}
+
+/** Valor inicial para `<input type="date">` desde ISO completo. */
+function toHtmlDateInputValue(raw: string | null | undefined): string {
+  const s = raw != null ? String(raw).trim() : ''
+  if (!s) return ''
+  const head = s.includes('T') ? s.split('T')[0] : s.split(' ')[0]
+  if (/^\d{4}-\d{2}-\d{2}$/.test(head)) return head
+  return s.slice(0, 10)
+}
+
+function agendoEnLooksLikeIso(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}/.test(s.trim())
+}
+
+/** Valor guardado en API/BD (para PATCH y value del select). Solo canal Chat/Youtube. */
+function agendoEnStoredValue(lead: Lead): string {
   const v = lead.agendo_en
-  if (v != null && String(v).trim() !== '') return String(v).trim()
+  if (v != null && String(v).trim() !== '') {
+    const t = String(v).trim()
+    if (agendoEnLooksLikeIso(t)) return 'Chat'
+    return t
+  }
   return 'Chat'
 }
 
+/** Canal (Chat/Youtube). Fechas legadas en agendo_en se muestran como Chat; la fecha de la llamada elegida por el cliente va en Call (`scheduled_at`). */
+function formatAgendoEnForDisplay(raw: string | null | undefined): string {
+  const s = raw != null ? String(raw).trim() : ''
+  if (!s) return 'Chat'
+  if (agendoEnLooksLikeIso(s)) return 'Chat'
+  return s
+}
+
 function agendoEnSelectOptions(lead: Lead): string[] {
-  const v = agendoEnDisplayValue(lead)
-  const base = [...AGENDO_EN_OPTIONS]
+  const v = agendoEnStoredValue(lead)
+  const base: string[] = [...AGENDO_EN_OPTIONS]
   if (!base.includes(v)) base.push(v)
   return base
 }
@@ -59,7 +96,7 @@ function originDisplayValue(lead: Lead): string {
 
 function originSelectOptions(lead: Lead): string[] {
   const v = originDisplayValue(lead)
-  const base = [...ORIGIN_OPTIONS]
+  const base: string[] = [...ORIGIN_OPTIONS]
   if (!base.includes(v)) base.push(v)
   return base
 }
@@ -217,12 +254,12 @@ export function LeadsPage() {
         field === 'origin'
           ? { origen: value === null || value === '' ? 'Setter' : String(value) }
           : field === 'agendo_en'
-            ? { agendo_en: value === null || value === '' ? 'Chat' : String(value) }
-            : field === 'entry_channel'
-              ? { via: value === null || value === '' ? '' : String(value) }
-              : field === 'agenda_point'
-                ? { punto_agenda: value === null || value === '' ? '' : String(value) }
-                : { [field]: value }
+              ? { agendo_en: value === null || value === '' ? 'Chat' : String(value) }
+              : field === 'entry_channel'
+                ? { via: value === null || value === '' ? '' : String(value) }
+                : field === 'agenda_point'
+                  ? { punto_agenda: value === null || value === '' ? '' : String(value) }
+                  : { [field]: value }
       try {
         const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, {
           method: 'PATCH',
@@ -259,13 +296,8 @@ export function LeadsPage() {
   const filtered = useMemo(() => {
     let result = [...leads]
 
-    if (month) {
-      result = result.filter(l => {
-        const m = l.month
-        if (!m) return true
-        return m === month
-      })
-    }
+    // Mes: GET /leads ya manda ?month= y el backend filtra; no re-filtrar por l.month
+    // (evita ocultar filas si month del JSON y el criterio del API difieren).
 
     // Status tab (comparación canónica de texto / mayúsculas)
     if (statusTab === 'Cerrados') {
@@ -320,7 +352,7 @@ export function LeadsPage() {
     })
 
     return result
-  }, [leads, month, statusTab, search, filters, sort])
+  }, [leads, statusTab, search, filters, sort])
 
   // ── Grouping ──
   const grouped = useMemo(() => {
@@ -900,7 +932,10 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                 <LeadsTableCell
                   lead={lead} col={col}
                   editing={editingCell?.id === lead.id && editingCell?.field === col.key}
-                  onStartEdit={() => setEditingCell({ id: lead.id, field: col.key })}
+                  onStartEdit={() => {
+                    if (col.editable === false) return
+                    setEditingCell({ id: lead.id, field: col.key })
+                  }}
                   onCancelEdit={() => setEditingCell(null)}
                   onSave={(value) => onInlineUpdate(lead.id, col.key, value)}
                   onPreviewText={onPreviewText}
@@ -960,7 +995,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
     col.key === 'origin'
       ? originDisplayValue(lead)
       : col.key === 'agendo_en'
-        ? agendoEnDisplayValue(lead)
+        ? agendoEnStoredValue(lead)
         : raw
 
   if (readOnly) {
@@ -986,11 +1021,13 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
     }
     if (col.type === 'select') {
       const color = col.colors?.[String(value)] || '#888'
+      const selectLabel =
+        col.key === 'agendo_en' ? formatAgendoEnForDisplay(String(value || '')) : String(value || '—')
       return (
         <span
           className="inline-flex h-6 max-w-full items-center justify-center rounded-full px-2.5 text-[11px] font-semibold leading-none"
           style={{ backgroundColor: color + '20', color }}>
-          {String(value || '—')}
+          {selectLabel}
         </span>
       )
     }
@@ -1019,7 +1056,8 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
     }
     if (col.type === 'date') {
       if (!value) return <span className="text-[12px] text-[var(--text3)]">—</span>
-      return <span className="text-[12px] font-mono-num text-[var(--text2)]">{String(value)}</span>
+      const shown = formatIsoDateToDdMmYyyy(String(value)) ?? String(value)
+      return <span className="text-[12px] font-mono-num text-[var(--text2)]">{shown}</span>
     }
     if (col.type === 'number') {
       return (
@@ -1041,7 +1079,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
         </span>
       )
     }
-    const longTextKeys = ['dolores_setting', 'dolores_setting_detail', 'notes']
+    const longTextKeys = ['dolores_setting', 'notes']
     if (longTextKeys.includes(col.key) && value) {
       const text = String(value)
       const preview = text.length > 60 ? `${text.substring(0, 60)}...` : text
@@ -1050,22 +1088,6 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
           {preview}
         </span>
       )
-    }
-    if (col.key === 'entry_funnel' && value) {
-      const text = String(value)
-      const isHistoria = /^historia/i.test(text)
-      const isReel = /^reel/i.test(text)
-      const isPerfil = /^perfil$/i.test(text)
-      if (isHistoria || isReel || isPerfil) {
-        const color = isHistoria ? '#A855F7' : isReel ? '#3B82F6' : '#6B7280'
-        return (
-          <span
-            className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium truncate max-w-full"
-            style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}>
-            {text}
-          </span>
-        )
-      }
     }
     return (
       <span className={`text-[12px] truncate block max-w-full ${!value ? 'text-[var(--text3)]' : 'text-[var(--text2)]'}`}>
@@ -1096,7 +1118,11 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
           onChange={(e) => onSave(e.target.value || null)}
           className="w-full rounded border border-[var(--accent)] bg-[var(--bg3)] px-2 py-1 text-[12px] text-[var(--text)] outline-none"
         >
-          {opts.map(o => <option key={o} value={o}>{o || '—'}</option>)}
+          {opts.map((o) => (
+            <option key={o} value={o}>
+              {col.key === 'agendo_en' ? formatAgendoEnForDisplay(o) : o === '' ? '—' : o}
+            </option>
+          ))}
         </select>
       )
     }
@@ -1104,7 +1130,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
       <input
         autoFocus
         type={col.type === 'number' || col.type === 'currency' ? 'number' : col.type === 'date' ? 'date' : 'text'}
-        defaultValue={String(value ?? '')}
+        defaultValue={col.type === 'date' ? toHtmlDateInputValue(String(value ?? '')) : String(value ?? '')}
         onBlur={(e) => {
           const v = e.target.value
           if (col.type === 'number' || col.type === 'currency') onSave(Number(v) || 0)
@@ -1167,7 +1193,11 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
           onChange={(e) => onSave(e.target.value)}
           className="box-border h-full min-h-0 w-full min-w-0 cursor-pointer appearance-none border-0 bg-transparent p-0 text-[11px] font-semibold leading-none outline-none"
           style={{ color }}>
-          {opts.map(s => <option key={s} value={s}>{s}</option>)}
+          {opts.map((s) => (
+            <option key={s} value={s}>
+              {col.key === 'agendo_en' ? formatAgendoEnForDisplay(s) : s}
+            </option>
+          ))}
         </select>
       </span>
     )
@@ -1204,7 +1234,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   // Date
   if (col.type === 'date') {
     if (!value) return <span onClick={onStartEdit} className={`${cellClass} text-[var(--text3)]`}>—</span>
-    const dateStr = String(value)
+    const dateStr = formatIsoDateToDdMmYyyy(String(value)) ?? String(value)
     return (
       <span onClick={onStartEdit} className={`${cellClass} font-mono-num text-[var(--text2)]`}>
         {dateStr}
@@ -1241,7 +1271,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   }
 
   // Other long text fields — normal truncated display
-  const longTextKeys = ['dolores_setting', 'dolores_setting_detail', 'notes']
+  const longTextKeys = ['dolores_setting', 'notes']
   if (longTextKeys.includes(col.key) && value) {
     const text = String(value)
     const preview = text.length > 60 ? text.substring(0, 60) + '...' : text
@@ -1250,24 +1280,6 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
         {preview}
       </span>
     )
-  }
-
-  // Content reference badges (entry_funnel)
-  if (col.key === 'entry_funnel' && value) {
-    const text = String(value)
-    const isHistoria = /^historia/i.test(text)
-    const isReel = /^reel/i.test(text)
-    const isPerfil = /^perfil$/i.test(text)
-    if (isHistoria || isReel || isPerfil) {
-      const color = isHistoria ? '#A855F7' : isReel ? '#3B82F6' : '#6B7280'
-      return (
-        <span onClick={onStartEdit}
-          className="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium cursor-pointer truncate max-w-full"
-          style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}>
-          {text}
-        </span>
-      )
-    }
   }
 
   // Default text

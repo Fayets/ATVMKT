@@ -205,7 +205,7 @@ async function fetchLeadsForMonth(monthKey: string, userId: string): Promise<Lea
 
 /** Día YYYY-MM-DD para filtrar vistas diaria/semana (el API suele dejar `call_at` vacío). */
 function leadDayForFilter(l: LeadRow): string {
-  for (const key of ['call_at', 'scheduled_at', 'fecha_bot', 'first_contact_at', 'date'] as const) {
+  for (const key of ['call_at', 'scheduled_at', 'agendo', 'fecha_bot', 'first_contact_at', 'date'] as const) {
     const v = l[key]
     if (v == null || v === '') continue
     const s = String(v).trim().slice(0, 10)
@@ -374,13 +374,15 @@ export default function DashboardPage() {
     const dayNow = new Date().getDate()
     const prevCashAtDay = prevDailyCash[Math.min(dayNow - 1, prevDailyCash.length - 1)] || 0
 
-    // Calls report — ALL leads with call_at
+    // Calls report — fecha de llamada agendada (call_at legacy o scheduled_at / columna call en BD)
     const calls = currLeads
-      .filter(l => l.call_at)
+      .filter(l => l.call_at || l.scheduled_at)
       .map(l => ({
-        id: String(l.id || ''), date: String(l.call_at || ''), name: String(l.client_name || ''),
+        id: String(l.id || ''),
+        date: String(l.call_at || l.scheduled_at || ''),
+        name: String(l.client_name || ''),
         revenue: Number(l.revenue) || 0, payment: Number(l.payment) || 0,
-        program: String(l.program_purchased || l.program_offered || ''),
+        program: String(l.program_offered || ''),
         closer: String(l.closer || ''), setter: String(l.setter || ''),
         status: String(l.status || ''), callLink: String(l.call_link || ''),
         closerReport: String(l.closer_report || ''), igHandle: String(l.ig_handle || ''),
@@ -391,8 +393,8 @@ export default function DashboardPage() {
 
     // Program counts
     const progMap: Record<string, number> = {}
-    currLeads.filter(l => l.status === 'Cerrado' && l.program_purchased).forEach(l => {
-      const p = String(l.program_purchased)
+    currLeads.filter(l => l.status === 'Cerrado' && l.program_offered).forEach(l => {
+      const p = String(l.program_offered)
       progMap[p] = (progMap[p] || 0) + 1
     })
     const programCounts = Object.entries(progMap).map(([program, count]) => ({ program, count })).sort((a, b) => b.count - a.count)

@@ -48,7 +48,11 @@ export type MemberMetrics = LeadsFunnel & {
 
 export function calcFunnel(leads: LeadRow[], conversaciones?: number): LeadsFunnel {
   const cerrados = leads.filter(l => l.status === 'Cerrado')
-  const agendas = leads.filter(l => l.scheduled_at || l.call_at).length
+  const agendas = leads.filter(l => {
+    const ag = l.agendo
+    const hasAgendo = ag != null && String(ag).trim() !== ''
+    return !!(l.scheduled_at || l.call_at || hasAgendo)
+  }).length
   const noShows = leads.filter(l => l.status === 'No show').length
   const shows = Math.max(0, agendas - noShows)
   const cierres = cerrados.length
@@ -117,7 +121,7 @@ export async function getLeadsAnalytics(_month: string): Promise<{ leads: LeadRo
   // Programs breakdown (from leads table)
   const progMap: Record<string, { ventas: number; ingresos: number }> = {}
   leads.forEach(l => {
-    const p = l.program_purchased as string
+    const p = l.program_offered as string
     if (p) {
       progMap[p] = progMap[p] || { ventas: 0, ingresos: 0 }
       progMap[p].ventas++

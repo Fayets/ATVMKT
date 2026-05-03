@@ -9,23 +9,25 @@ export type Lead = {
   status: string
   origin: string | null
   entry_channel: string | null
+  /** keyword / embudo (API); no se muestra en la tabla de leads */
   entry_funnel: string | null
-  /** keyword en BD (mismo valor que suele mostrarse en ingreso embudo) */
   keyword?: string | null
   agenda_point: string | null
   ctas_responded: number
   first_contact_at: string | null
   fecha_bot?: string | null
+  /** Fecha/hora de la llamada agendada (elige el cliente); columna «Call» en la tabla. */
   scheduled_at: string | null
   /** Canal donde agendó: Chat, Youtube (columna agendo_en en BD). */
   agendo_en?: string | null
-  agendo?: boolean | null
+  /** ISO: momento en que completó el formulario Calendly (columna agendo). */
+  agendo?: string | null
   call_at: string | null
-  call?: boolean | null
+  /** ISO fecha/hora en BD (columna `call`, mismo valor que scheduled_at / Calendly). */
+  call?: string | null
   call_link: string | null
   closer_report: string | null
   program_offered: string | null
-  program_purchased: string | null
   revenue: number
   payment: number
   owed: number
@@ -37,10 +39,9 @@ export type Lead = {
   // Campos Calendly
   email: string | null
   dolores_setting: string | null
-  dolores_setting_detail: string | null
   dolores_llamada: string | null
   razon_compra: string | null
-  pago_en_llamada: number
+  /** Días desde 1er contacto hasta formulario Calendly (API calculado). */
   dias_agendamiento: number | null
   ingresos_mensuales: number
   compromiso: string | null
@@ -192,31 +193,28 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     // Estado y equipo
     { key: 'status', label: 'Status', width: 130, type: 'select', editable: true, options: STATUS_OPTIONS, colors: STATUS_COLORS, defaultVisible: true },
     { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
-    { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
-    // Funnel de entrada
-    { key: 'entry_funnel', label: 'Ingreso embudo', width: 150, type: 'text', editable: true, defaultVisible: true },
+    // entry_funnel (keyword) no se muestra en esta vista
     { key: 'agenda_point', label: 'Pto agenda', width: 130, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
+    { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
     { key: 'ctas_responded', label: 'CTAs resp.', width: 90, type: 'number', editable: true, defaultVisible: true },
     // Fechas
     { key: 'first_contact_at', label: '1er contacto', width: 120, type: 'date', editable: true, defaultVisible: true },
-    { key: 'scheduled_at', label: 'Agendó', width: 110, type: 'date', editable: true, defaultVisible: true },
+    { key: 'scheduled_at', label: 'Call', width: 110, type: 'date', editable: true, defaultVisible: true },
+    { key: 'dias_agendamiento', label: 'Días p/ agendar', width: 100, type: 'number', editable: false, defaultVisible: true },
     { key: 'agendo_en', label: 'Agendó en', width: 120, type: 'select', editable: true, options: [...AGENDO_EN_OPTIONS], colors: AGENDO_EN_COLORS, defaultVisible: true },
-    { key: 'call_at', label: 'Call', width: 110, type: 'date', editable: true, defaultVisible: true },
+    { key: 'call_at', label: 'Fecha call (alt.)', width: 110, type: 'date', editable: true, defaultVisible: false },
     // Setting (pre-llamada)
     { key: 'setter', label: 'Setter', width: 110, type: 'badge', editable: true, options: ['', ...setterNames], colors: Object.fromEntries(setterNames.map(n => [n, '#3B82F6'])), defaultVisible: true },
     { key: 'dolores_setting', label: 'Dolores setting', width: 200, type: 'text', editable: true, defaultVisible: true },
-    { key: 'dolores_setting_detail', label: 'Detalle dolores', width: 220, type: 'text', editable: true, defaultVisible: true },
-    { key: 'ingresos_mensuales', label: 'Ingresos lead', width: 130, type: 'currency', editable: true, defaultVisible: true },
     // Llamada (closer)
     { key: 'closer', label: 'Closer', width: 110, type: 'badge', editable: true, options: ['', ...closerNames], colors: Object.fromEntries(closerNames.map(n => [n, '#8B5CF6'])), defaultVisible: true },
-    { key: 'call_link', label: 'Llamada', width: 110, type: 'link', editable: true, defaultVisible: true },
+    { key: 'call_link', label: 'Link de llamada', width: 110, type: 'link', editable: true, defaultVisible: true },
     { key: 'closer_report', label: 'Reporte closer', width: 200, type: 'text', editable: true, defaultVisible: true },
     { key: 'dolores_llamada', label: 'Dolores llamada', width: 200, type: 'text', editable: true, defaultVisible: true },
     { key: 'razon_compra', label: 'Razón compra', width: 200, type: 'text', editable: true, defaultVisible: true },
+    { key: 'ingresos_mensuales', label: 'Ingresos lead', width: 130, type: 'currency', editable: true, defaultVisible: true },
     // Venta
     { key: 'program_offered', label: 'Prog. ofrecido', width: 130, type: 'badge', editable: true, options: PROGRAM_OPTIONS, colors: PROGRAM_COLORS, defaultVisible: true },
-    { key: 'program_purchased', label: 'Prog. comprado', width: 140, type: 'badge', editable: true, options: PROGRAM_OPTIONS, colors: PROGRAM_COLORS, defaultVisible: true },
-    { key: 'pago_en_llamada', label: 'Pago en llamada', width: 130, type: 'currency', editable: true, defaultVisible: true },
     { key: 'payment', label: 'Pagó', width: 100, type: 'currency', editable: true, defaultVisible: true },
     { key: 'owed', label: 'Debe', width: 100, type: 'currency', editable: true, defaultVisible: true },
     // Calificación Calendly
@@ -233,8 +231,8 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'lead_user_id', label: 'User cuenta', width: 96, type: 'text', editable: false, defaultVisible: false },
     { key: 'keyword', label: 'Keyword (BD)', width: 120, type: 'text', editable: false, defaultVisible: false },
     { key: 'fecha_bot', label: 'Fecha bot', width: 130, type: 'date', editable: false, defaultVisible: false },
-    { key: 'agendo', label: 'Agendó', width: 88, type: 'text', editable: false, defaultVisible: false },
-    { key: 'call', label: 'Call', width: 72, type: 'text', editable: false, defaultVisible: false },
+    { key: 'agendo', label: 'Form Calendly (ISO)', width: 180, type: 'text', editable: false, defaultVisible: false },
+    { key: 'call', label: 'Call (ISO BD)', width: 140, type: 'text', editable: false, defaultVisible: false },
     { key: 'content_url', label: 'Content URL', width: 160, type: 'link', editable: false, defaultVisible: false },
     { key: 'manychat_contact_id', label: 'ManyChat ID', width: 130, type: 'text', editable: false, defaultVisible: false },
     { key: 'respondio_auto', label: 'Resp. auto', width: 96, type: 'text', editable: false, defaultVisible: false },

@@ -97,7 +97,7 @@ def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
         setter=None,
         programa=prog,
         pago=float(row.pago) if row.pago is not None else None,
-        fecha_agendo=None,
+        fecha_agendo=_dt_iso(row.agendo),
         llamada_url=row.link_llamada,
         dolores=row.dolores_setting or row.dolores_llamada,
         razon_compra=row.razon_compra,
@@ -108,7 +108,7 @@ def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
         manychat_contact_id=row.manychat_contact_id,
         programa_ofrecido=prog,
         fecha_bot=_dt_iso(row.fecha_bot),
-        agendo=bool(row.agendo) if row.agendo is not None else False,
+        agendo=row.agendo is not None,
     )
 
 
@@ -160,7 +160,7 @@ def bio_metrics(
     rows = _rows_for_user_month(uid, month_key)
 
     total = len(rows)
-    agendaron = sum(1 for r in rows if r.agendo is True)
+    agendaron = sum(1 for r in rows if r.agendo is not None)
     cerrados = sum(1 for r in rows if _is_cerrado(r))
     respondio_auto_n = sum(1 for r in rows if r.respondio_auto is True)
 

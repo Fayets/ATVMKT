@@ -23,7 +23,7 @@ type Video = {
   id: string; title: string | null; metrics: VideoMetrics; classification: VideoClassification
   cash: number; chats: number; published_at: string | null; url: string | null; notes: string | null; external_id: string | null
 }
-type Lead = { client_name: string | null; status: string | null; payment: number | null; program_purchased: string | null; agenda_point: string | null }
+type Lead = { client_name: string | null; status: string | null; payment: number | null; program_offered: string | null; agenda_point: string | null }
 
 const UNDO_DURATION = 6000
 
@@ -321,7 +321,7 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads, 
                 <div key={i} className="flex items-center justify-between rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px]">
                   <span className="text-[var(--text2)]">{l.client_name || 'Anonimo'}</span>
                   <div className="flex items-center gap-2">
-                    {l.program_purchased && <span className="text-[var(--text3)]">{l.program_purchased}</span>}
+                    {l.program_offered && <span className="text-[var(--text3)]">{l.program_offered}</span>}
                     <span className={l.status === 'Cerrado' ? 'text-[var(--green)] font-semibold' : 'text-[var(--text3)]'}>{l.status}</span>
                     {Number(l.payment) > 0 && <span className="font-mono-num text-[var(--green)]">{formatCash(Number(l.payment))}</span>}
                   </div>

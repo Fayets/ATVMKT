@@ -79,11 +79,11 @@ class Lead(db.Entity):
     punto_agenda = Optional(str, default="")
     ctas_respondidos = Optional(int, default=0)
     primer_contacto = Optional(datetime)
-    # Agenda (agendo_en = canal Chat/Youtube, texto)
-    agendo = Optional(bool, default=False)
+    # Agenda (agendo = cuándo completó el formulario / webhook Calendly; call = slot elegido; agendo_en = canal)
+    agendo = Optional(datetime)
     agendo_en = Optional(str)
     dias_para_agendar = Optional(int)
-    call = Optional(bool, default=False)
+    call = Optional(datetime)
     link_llamada = Optional(str, default="")
     # Negocio
     dolores_setting = Optional(str, default="")
@@ -92,7 +92,6 @@ class Lead(db.Entity):
     razon_compra = Optional(str, default="")
     programa_ofrecido = Optional(str, default="")
     # Ventas
-    pago_en_llamada = Optional(float, default=0)
     pago = Optional(float, default=0)
     debe = Optional(float, default=0)
     estado = Optional(str, default="")

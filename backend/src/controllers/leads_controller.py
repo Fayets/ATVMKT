@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, timezone
 from typing import Annotated
 from zoneinfo import ZoneInfo
@@ -5,7 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
-from src.lead_display_utils import lead_display_nombre
+from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
 from src.models import Lead as LeadEntity
 from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse, LeadsMetricsOut
 
@@ -15,8 +16,11 @@ _AR = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
 def _lead_effective_dt(row: LeadEntity) -> datetime | None:
-    """Fecha operativa del lead: conversación / bot, luego primer contacto, luego alta."""
-    return row.fecha_bot or row.primer_contacto or row.created_at
+    """Fecha para mes AR y orden en listados: conversación bot o alta.
+
+    `primer_contacto` es solo un dato de control en la UI; no debe mover el lead
+    de mes al editarlo (GET /leads ?month=, campo `month` en la respuesta)."""
+    return row.fecha_bot or row.created_at
 
 
 def _lead_month_ar(row: LeadEntity) -> tuple[int, int] | None:
@@ -29,6 +33,15 @@ def _lead_month_ar(row: LeadEntity) -> tuple[int, int] | None:
     d_utc = dt.replace(tzinfo=timezone.utc)
     d_ar = d_utc.astimezone(_AR)
     return (d_ar.year, d_ar.month)
+
+
+def _lead_month_string_ar(row: LeadEntity) -> str | None:
+    """YYYY-MM del mes operativo (mismo criterio que GET /leads ?month=)."""
+    mb = _lead_month_ar(row)
+    if mb is None:
+        return None
+    y, m = mb
+    return f"{y}-{m:02d}"
 
 
 def _lead_sort_ts(row: LeadEntity) -> float:
@@ -59,6 +72,36 @@ def _dt_iso(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
+def _agendo_en_looks_like_iso_datetime(val: str | None) -> bool:
+    s = (val or "").strip()
+    return bool(s) and bool(re.match(r"^\d{4}-\d{2}-\d{2}", s))
+
+
+def _scheduled_at_from_row(row: LeadEntity) -> str | None:
+    if row.call is not None:
+        return _dt_iso(row.call)
+    s = (row.agendo_en or "").strip()
+    if _agendo_en_looks_like_iso_datetime(s):
+        d = _parse_dt_in(s)
+        return _dt_iso(d) if d else None
+    return None
+
+
+def _agendo_en_channel_for_api(row: LeadEntity) -> str | None:
+    s = (row.agendo_en or "").strip()
+    if _agendo_en_looks_like_iso_datetime(s):
+        return "Chat"
+    if s:
+        return s
+    if row.agendo is not None:
+        return "Chat"
+    return None
+
+
+def _sync_dias_para_agendar(row: LeadEntity) -> None:
+    row.dias_para_agendar = compute_dias_para_agendar(row.primer_contacto, row.agendo)
+
+
 def _parse_dt_in(val: str | None) -> datetime | None:
     if val is None or not str(val).strip():
         return None
@@ -81,7 +124,9 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
     if created is not None and created.tzinfo is not None:
         created = created.replace(tzinfo=None)
     date_s = created.date().isoformat() if created else date.today().isoformat()
-    month_s = f"{created.year}-{created.month:02d}" if created else None
+    month_s = _lead_month_string_ar(row)
+    if month_s is None and created is not None:
+        month_s = f"{created.year}-{created.month:02d}"
     ing = float(row.ingresos_lead or 0)
     kw = row.keyword
     return LeadOut(
@@ -100,14 +145,14 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
         ctas_responded=int(row.ctas_respondidos or 0),
         first_contact_at=_dt_iso(row.primer_contacto),
         fecha_bot=_dt_iso(row.fecha_bot),
-        agendo=row.agendo,
-        agendo_en=(row.agendo_en or "").strip() or None,
+        scheduled_at=_scheduled_at_from_row(row),
+        agendo=_dt_iso(row.agendo),
+        agendo_en=_agendo_en_channel_for_api(row),
         call_at=None,
-        call=row.call,
+        call=_dt_iso(row.call),
         call_link=row.link_llamada,
         closer_report=None,
         program_offered=row.programa_ofrecido,
-        program_purchased=None,
         revenue=ing,
         payment=float(row.pago or 0),
         owed=float(row.debe or 0),
@@ -118,11 +163,9 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
         month=month_s,
         email=None,
         dolores_setting=row.dolores_setting,
-        dolores_setting_detail=None,
         dolores_llamada=row.dolores_llamada,
         razon_compra=row.razon_compra,
-        pago_en_llamada=float(row.pago_en_llamada or 0),
-        dias_agendamiento=row.dias_para_agendar,
+        dias_agendamiento=compute_dias_para_agendar(row.primer_contacto, row.agendo),
         ingresos_mensuales=ing,
         compromiso=None,
         urgencia=None,
@@ -141,7 +184,7 @@ def list_leads(
     user_id: Annotated[str, Depends(require_user_id)],
     month: str | None = Query(
         default=None,
-        description="YYYY-MM; filtra por fecha_bot o primer_contacto o created_at (mes AR)",
+        description="YYYY-MM; filtra por fecha_bot o created_at (mes AR); primer contacto no afecta el mes",
     ),
 ) -> LeadsListResponse:
     try:
@@ -159,7 +202,7 @@ def list_leads(
         rows = [
             r
             for r in list(LeadEntity.select())
-            if int(r.user_id) == uid and r.agendo is True
+            if int(r.user_id) == uid and r.agendo is not None
         ]
         if month_key is not None:
             year_m, month_m = month_key
@@ -195,7 +238,7 @@ def leads_metrics(
     user_id: Annotated[str, Depends(require_user_id)],
     month: str | None = Query(
         default=None,
-        description="YYYY-MM; mismo filtro que GET /leads (mes AR por fecha_bot / primer_contacto / created_at)",
+        description="YYYY-MM; mismo filtro que GET /leads (mes AR por fecha_bot / created_at)",
     ),
 ) -> LeadsMetricsOut:
     """Métricas agregadas de todos los leads del mes (no filtro BIO)."""
@@ -219,7 +262,7 @@ def leads_metrics(
                 if (mb := _lead_month_ar(r)) is not None and mb == (y, mn)
             ]
         total = len(rows)
-        agendaron = sum(1 for r in rows if r.agendo is True)
+        agendaron = sum(1 for r in rows if r.agendo is not None)
         cash_total = sum(float(r.pago or 0) for r in rows)
     cash_por_chat = (cash_total / total) if total else 0.0
     return LeadsMetricsOut(
@@ -286,12 +329,23 @@ def patch_lead(
             row.ctas_respondidos = max(0, int(data["ctas_responded"] or 0))
         if "first_contact_at" in data:
             row.primer_contacto = _parse_dt_in(data["first_contact_at"])
+        if "scheduled_at" in data:
+            row.call = _parse_dt_in(data["scheduled_at"])
+        elif "call" in data:
+            v = data["call"]
+            row.call = _parse_dt_in(v) if v is not None and str(v).strip() else None
+        if "agendo" in data:
+            v = data["agendo"]
+            row.agendo = _parse_dt_in(v) if v is not None and str(v).strip() else None
         if "agendo_en" in data:
             v = data["agendo_en"]
-            row.agendo_en = (str(v).strip() if v is not None else "") or "Chat"
-        if "call" in data:
-            v = data["call"]
-            row.call = bool(v) if v is not None else False
+            raw = (str(v).strip() if v is not None else "") or "Chat"
+            if _agendo_en_looks_like_iso_datetime(raw):
+                if "scheduled_at" not in data and "call" not in data:
+                    row.call = _parse_dt_in(raw)
+                row.agendo_en = "Chat"
+            else:
+                row.agendo_en = raw or "Chat"
         if "call_link" in data:
             row.link_llamada = data["call_link"] or ""
         if "program_offered" in data:
@@ -304,11 +358,6 @@ def patch_lead(
             row.pago = float(data["payment"] or 0)
         if "owed" in data:
             row.debe = float(data["owed"] or 0)
-        if "pago_en_llamada" in data:
-            row.pago_en_llamada = float(data["pago_en_llamada"] or 0)
-        if "dias_agendamiento" in data:
-            v = data["dias_agendamiento"]
-            row.dias_para_agendar = int(v) if v is not None else None
         if "notes" in data:
             row.notas = data["notes"] or ""
         if "dolores_setting" in data:
@@ -317,6 +366,8 @@ def patch_lead(
             row.dolores_llamada = data["dolores_llamada"] or ""
         if "razon_compra" in data:
             row.razon_compra = data["razon_compra"] or ""
+
+        _sync_dias_para_agendar(row)
 
         return _to_lead_out(row)
 

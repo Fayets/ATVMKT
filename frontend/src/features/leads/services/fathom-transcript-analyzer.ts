@@ -7,7 +7,6 @@ export type AnalysisResult = {
   dolores_llamada: string
   razon_compra: string
   program_offered: string
-  program_purchased: string
   status: string
 }
 
@@ -29,12 +28,10 @@ Extraé la siguiente información en español y generá la FICHA DE ANÁLISIS DE
 
 4. **PROGRAMA OFRECIDO** (program_offered): Exactamente uno de: "Boost", "Advantage", "Mentoria", o "" si no se mencionó.
 
-5. **PROGRAMA COMPRADO** (program_purchased): Exactamente uno de: "Boost", "Advantage", "Mentoria", o "" si no compró.
-
-6. **STATUS** (status): Exactamente uno de: "Cerrado", "Seña", "Seguimiento", "Descalificado", "Pendiente".
+5. **STATUS** (status): Exactamente uno de: "Cerrado", "Seña", "Seguimiento", "Descalificado", "Pendiente".
 
 Respondé EXACTAMENTE en este formato JSON (sin markdown, sin backticks):
-{"closer_report": "...", "dolores_llamada": "...", "razon_compra": "...", "program_offered": "...", "program_purchased": "...", "status": "..."}
+{"closer_report": "...", "dolores_llamada": "...", "razon_compra": "...", "program_offered": "...", "status": "..."}
 
 IMPORTANTE: En closer_report usá \\n para separar cada sección de la ficha. En dolores_llamada usá "• " y \\n para cada dolor. Incluí citas textuales del lead cuando sea posible.
 
@@ -64,7 +61,6 @@ export async function analyzeTranscript(transcript: string): Promise<AnalysisRes
       dolores_llamada: parsed.dolores_llamada || '',
       razon_compra: parsed.razon_compra || '',
       program_offered: parsed.program_offered || '',
-      program_purchased: parsed.program_purchased || '',
       status: parsed.status || 'Pendiente',
     }
   } catch {
@@ -73,7 +69,6 @@ export async function analyzeTranscript(transcript: string): Promise<AnalysisRes
       dolores_llamada: '',
       razon_compra: '',
       program_offered: '',
-      program_purchased: '',
       status: 'Pendiente',
     }
   }

@@ -141,7 +141,6 @@ class ManychatChatResponse(BaseModel):
     lead_airtable_record_id: str | None = None  # ID externo legacy (opcional)
     lead_status: str | None = None
     lead_client_name: str | None = None
-    lead_program_purchased: str | None = None
     lead_program_offered: str | None = None
     lead_payment: float | None = None
     lead_revenue: float | None = None
@@ -368,18 +367,23 @@ class LeadOut(BaseModel):
     ctas_responded: int = 0
     first_contact_at: str | None = None
     fecha_bot: str | None = None
-    scheduled_at: str | None = None
-    agendo: bool | None = None
+    scheduled_at: str | None = Field(
+        default=None,
+        description="Fecha/hora de la llamada (columna call en BD; Calendly).",
+    )
+    agendo: str | None = Field(
+        default=None,
+        description="ISO: momento en que completó el formulario Calendly (webhook invitee.created).",
+    )
     agendo_en: str | None = Field(
         default=None,
         description='Canal donde agendó: "Chat", "Youtube" (columna agendo_en en BD, texto).',
     )
     call_at: str | None = None
-    call: bool | None = Field(default=None, description="call en BD (hubo llamada)")
+    call: str | None = Field(default=None, description="ISO fecha/hora de la cita (misma columna `call` en BD)")
     call_link: str | None = None
     closer_report: str | None = None
     program_offered: str | None = None
-    program_purchased: str | None = None
     revenue: float = 0
     payment: float = 0
     owed: float = 0
@@ -390,11 +394,12 @@ class LeadOut(BaseModel):
     month: str | None = None
     email: str | None = None
     dolores_setting: str | None = None
-    dolores_setting_detail: str | None = None
     dolores_llamada: str | None = None
     razon_compra: str | None = None
-    pago_en_llamada: float = 0
-    dias_agendamiento: int | None = None
+    dias_agendamiento: int | None = Field(
+        default=None,
+        description="Días desde 1er contacto hasta completar formulario Calendly (primer_contacto → agendo).",
+    )
     ingresos_mensuales: float = 0
     compromiso: str | None = None
     urgencia: str | None = None
@@ -446,15 +451,17 @@ class LeadPatchRequest(BaseModel):
         default=None,
         description='Chat | Youtube → columna agendo_en (texto) en BD.',
     )
-    call: bool | None = None
+    agendo: str | None = Field(
+        default=None,
+        description="ISO → cuándo completó el formulario (columna agendo en BD).",
+    )
+    call: str | None = Field(default=None, description="ISO fecha/hora → columna call (alias de scheduled_at)")
     call_link: str | None = None
     program_offered: str | None = None
     revenue: float | None = None
     ingresos_mensuales: float | None = None
     payment: float | None = None
     owed: float | None = None
-    pago_en_llamada: float | None = None
-    dias_agendamiento: int | None = None
     notes: str | None = None
     dolores_setting: str | None = None
     dolores_llamada: str | None = None

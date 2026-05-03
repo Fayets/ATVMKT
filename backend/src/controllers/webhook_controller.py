@@ -4,6 +4,7 @@ from decouple import config
 from fastapi import APIRouter, HTTPException, Request
 from pony.orm import db_session
 
+from src.lead_display_utils import compute_dias_para_agendar
 from src.models import ApiConnection, Lead, ReelContent
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
@@ -235,6 +236,23 @@ def _flatten_calendly_invitee_payload(body: dict) -> dict:
     return merged
 
 
+def _calendly_webhook_received_at(flat: dict, inner: dict) -> datetime:
+    """Instante en que Calendly registró al invitee (completó el form / webhook invitee.created)."""
+    raw = (
+        flat.get("created_at")
+        or inner.get("created_at")
+        or flat.get("updated_at")
+        or inner.get("updated_at")
+    )
+    if raw:
+        dt = _parse_calendly_start_time(str(raw))
+        if dt is not None:
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
+    return datetime.utcnow()
+
+
 def _parse_calendly_start_time(raw: str | None) -> datetime | None:
     if not raw or not str(raw).strip():
         return None
@@ -383,8 +401,8 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
     if not display_name and email:
         display_name = email.split("@")[0]
 
-    agendo_en_val = start_dt.isoformat() if start_dt else None
     start_raw_label = str(start_raw) if start_raw is not None else ""
+    form_completed_at = _calendly_webhook_received_at(flat, inner_payload)
 
     with db_session:
         calendly_conns = [
@@ -402,10 +420,10 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
 
         row = _find_lead_for_calendly(user_id, display_name, ig_hint)
         if row is not None:
-            row.agendo = True
-            if agendo_en_val:
-                row.agendo_en = agendo_en_val
-            row.call = True
+            row.agendo = form_completed_at
+            if start_dt is not None:
+                row.call = start_dt
+            row.agendo_en = "Chat"
             if display_name:
                 row.nombre = display_name
             if email:
@@ -418,6 +436,7 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
                 row.avatar = avatar_val
             if ingresos_lead_val is not None:
                 row.ingresos_lead = ingresos_lead_val
+            row.dias_para_agendar = compute_dias_para_agendar(row.primer_contacto, row.agendo)
         else:
             notas_parts = []
             if email:
@@ -431,9 +450,9 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
                 telefono=telefono or "",
                 avatar=avatar_val or "",
                 ingresos_lead=ingresos_lead_val if ingresos_lead_val is not None else 0,
-                agendo=True,
-                agendo_en=agendo_en_val or "",
-                call=True,
+                agendo=form_completed_at,
+                call=start_dt,
+                agendo_en="Chat",
                 notas="\n".join(notas_parts),
             )
 
