@@ -14,7 +14,7 @@ import httpx
 from fastapi import HTTPException
 from pony.orm import db_session, flush
 
-from src.models import ApiConnection, StorySequence, StorySlide, User
+from src.models import ApiConnection, StorySequence, StorySlide
 from src.schemas import StorySequenceIn
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -62,12 +62,12 @@ def _serialize_slide(slide: StorySlide) -> dict[str, Any]:
         "id": slide.id,
         "order_index": slide.order_index,
         "image_url": slide.image_url,
-        "dolor": slide.dolor,
-        "angulo": slide.angulo,
-        "cta_text": slide.cta_text,
+        "dolor": None,
+        "angulo": None,
+        "cta_text": None,
         "instagram_media_id": slide.instagram_media_id,
         "reach": slide.reach,
-        "like_count": slide.like_count,
+        "like_count": None,
         "replies": slide.replies,
         "navigation": slide.navigation,
         "profile_visits": slide.profile_visits,
@@ -83,8 +83,8 @@ def _serialize_sequence(sequence: StorySequence) -> dict[str, Any]:
         "title": sequence.title,
         "dolor": sequence.dolor,
         "angulo": sequence.angulo,
-        "cta_text": sequence.cta_text,
-        "cash_generado": int(sequence.cash_generado or 0),
+        "cta_text": sequence.cta,
+        "cash_generado": int(sequence.cash or 0),
         "has_cta": bool(sequence.has_cta),
         "chats": int(sequence.chats or 0),
         "slides": [_serialize_slide(s) for s in slides],
@@ -93,7 +93,7 @@ def _serialize_sequence(sequence: StorySequence) -> dict[str, Any]:
 
 
 def _has_cta(sequence: StorySequence) -> bool:
-    normalized = str(sequence.cta_text or "").strip().lower()
+    normalized = str(sequence.cta or "").strip().lower()
     if not normalized:
         return bool(sequence.has_cta)
     return normalized not in {"no", "sin cta", "ninguno", "none", "false", "0", "n/a"}
@@ -132,7 +132,7 @@ class StoriesService:
             rows = [
                 s
                 for s in list(StorySequence.select())
-                if s.user.id == int(user_id)
+                if s.user_id == int(user_id)
                 and s.sequence_date.year == year
                 and s.sequence_date.month == month_num
             ]
@@ -151,18 +151,14 @@ class StoriesService:
     @db_session
     def create_sequence(self, user_id: str, data: StorySequenceIn) -> dict[str, Any]:
         uid = int(user_id)
-        user = User.get(id=uid)
-        if user is None:
-            user = User(id=uid)
-
         sequence = StorySequence(
-            user=user,
+            user_id=uid,
             sequence_date=data.sequence_date,
-            title=(data.title or "").strip(),
-            dolor=(data.dolor or "").strip(),
-            angulo=(data.angulo or "").strip(),
-            cta_text=(data.cta_text or "").strip(),
-            cash_generado=max(0, int(data.cash_generado or 0)),
+            title=(data.title or "").strip() or None,
+            dolor=(data.dolor or "").strip() or None,
+            angulo=(data.angulo or "").strip() or None,
+            cta=(data.cta_text or "").strip() or None,
+            cash=float(max(0, int(data.cash_generado or 0))),
             has_cta=bool(data.has_cta),
             chats=max(0, int(data.chats or 0)),
         )
@@ -171,9 +167,6 @@ class StoriesService:
                 sequence=sequence,
                 order_index=int(slide.order_index),
                 image_url=slide.image_url,
-                dolor=(slide.dolor or "").strip(),
-                angulo=(slide.angulo or "").strip(),
-                cta_text=(slide.cta_text or "").strip(),
             )
         flush()
         return _serialize_sequence(sequence)
@@ -181,21 +174,21 @@ class StoriesService:
     @db_session
     def update_sequence(self, sequence_id: int, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
         sequence = StorySequence.get(id=sequence_id)
-        if sequence is None or sequence.user.id != int(user_id):
+        if sequence is None or sequence.user_id != int(user_id):
             raise HTTPException(status_code=404, detail="Secuencia no encontrada.")
 
         if "sequence_date" in data and data["sequence_date"] is not None:
             sequence.sequence_date = data["sequence_date"]
         if "title" in data:
-            sequence.title = str(data.get("title") or "").strip()
+            sequence.title = str(data.get("title") or "").strip() or None
         if "dolor" in data:
-            sequence.dolor = str(data.get("dolor") or "").strip()
+            sequence.dolor = str(data.get("dolor") or "").strip() or None
         if "angulo" in data:
-            sequence.angulo = str(data.get("angulo") or "").strip()
+            sequence.angulo = str(data.get("angulo") or "").strip() or None
         if "cta_text" in data:
-            sequence.cta_text = str(data.get("cta_text") or "").strip()
+            sequence.cta = str(data.get("cta_text") or "").strip() or None
         if "cash_generado" in data and data["cash_generado"] is not None:
-            sequence.cash_generado = max(0, int(data["cash_generado"]))
+            sequence.cash = float(max(0, int(data["cash_generado"])))
         if "has_cta" in data and data["has_cta"] is not None:
             sequence.has_cta = bool(data["has_cta"])
         if "chats" in data and data["chats"] is not None:
@@ -209,18 +202,16 @@ class StoriesService:
                     sequence=sequence,
                     order_index=int(raw.get("order_index", 0)),
                     image_url=raw.get("image_url"),
-                    dolor=str(raw.get("dolor") or "").strip(),
-                    angulo=str(raw.get("angulo") or "").strip(),
-                    cta_text=str(raw.get("cta_text") or "").strip(),
                 )
 
+        sequence.updated_at = datetime.utcnow()
         flush()
         return _serialize_sequence(sequence)
 
     @db_session
     def delete_sequence(self, sequence_id: int, user_id: str) -> bool:
         sequence = StorySequence.get(id=sequence_id)
-        if sequence is None or sequence.user.id != int(user_id):
+        if sequence is None or sequence.user_id != int(user_id):
             raise HTTPException(status_code=404, detail="Secuencia no encontrada.")
         slides = list(sequence.slides)
         for slide in slides:
@@ -260,7 +251,7 @@ class StoriesService:
             rows = [
                 s
                 for s in list(StorySequence.select())
-                if s.user.id == int(user_id)
+                if s.user_id == int(user_id)
                 and s.sequence_date.year == year
                 and s.sequence_date.month == month_num
             ]
@@ -307,7 +298,7 @@ class StoriesService:
             (
                 slide
                 for slide in list(StorySlide.select())
-                if slide.instagram_media_id == story_id and slide.sequence.user.id == int(user_id)
+                if slide.instagram_media_id == story_id and slide.sequence.user_id == int(user_id)
             ),
             None,
         )
@@ -317,7 +308,7 @@ class StoriesService:
         same_day = [
             slide
             for slide in list(StorySlide.select())
-            if slide.sequence.user.id == int(user_id) and slide.sequence.sequence_date == story_day
+            if slide.sequence.user_id == int(user_id) and slide.sequence.sequence_date == story_day
         ]
         same_day.sort(key=lambda s: (s.order_index, s.id))
         return same_day[0] if same_day else None
@@ -325,18 +316,15 @@ class StoriesService:
     @db_session
     def _get_or_create_sequence_id(self, user_id: str, story_day: date) -> tuple[int, bool]:
         uid = int(user_id)
-        user = User.get(id=uid)
-        if user is None:
-            user = User(id=uid)
         for s in StorySequence.select():
-            if s.user.id == uid and s.sequence_date == story_day:
+            if s.user_id == uid and s.sequence_date == story_day:
                 return s.id, False
         seq = StorySequence(
-            user=user,
+            user_id=uid,
             sequence_date=story_day,
             has_cta=False,
             chats=0,
-            cash_generado=0,
+            cash=0.0,
         )
         flush()
         return seq.id, True
@@ -347,7 +335,7 @@ class StoriesService:
         return [
             s.id
             for s in StorySlide.select()
-            if (s.instagram_media_id or "") == story_id and s.sequence.user.id == uid
+            if (s.instagram_media_id or "") == story_id and s.sequence.user_id == uid
         ]
 
     @db_session
@@ -363,13 +351,12 @@ class StoriesService:
         StorySlide(
             sequence=sequence,
             order_index=order_index,
-            image_url=image_url,
             instagram_media_id=story_id,
-            reach=metrics.get("reach", 0),
-            like_count=None,
-            replies=metrics.get("replies", 0),
-            navigation=metrics.get("navigation", 0),
-            profile_visits=metrics.get("profile_visits", 0),
+            image_url=image_url,
+            reach=metrics.get("reach") if metrics.get("reach") is not None else 0,
+            replies=metrics.get("replies") if metrics.get("replies") is not None else 0,
+            navigation=metrics.get("navigation") if metrics.get("navigation") is not None else 0,
+            profile_visits=metrics.get("profile_visits") if metrics.get("profile_visits") is not None else 0,
             synced_at=datetime.now(AR_TZ),
         )
 
@@ -378,11 +365,10 @@ class StoriesService:
         slide = StorySlide[slide_id]
         if not slide.image_url and image_url:
             slide.image_url = image_url
-        slide.reach = metrics.get("reach", 0)
-        slide.like_count = None
-        slide.replies = metrics.get("replies", 0)
-        slide.navigation = metrics.get("navigation", 0)
-        slide.profile_visits = metrics.get("profile_visits", 0)
+        slide.reach = metrics.get("reach") if metrics.get("reach") is not None else 0
+        slide.replies = metrics.get("replies") if metrics.get("replies") is not None else 0
+        slide.navigation = metrics.get("navigation") if metrics.get("navigation") is not None else 0
+        slide.profile_visits = metrics.get("profile_visits") if metrics.get("profile_visits") is not None else 0
         slide.synced_at = datetime.now(AR_TZ)
 
     @db_session

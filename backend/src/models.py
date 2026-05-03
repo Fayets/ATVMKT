@@ -22,41 +22,34 @@ class ApiConnection(db.Entity):
     composite_key(user_id, platform)
 
 
-class User(db.Entity):
-    """Identificador de dueño alineado con AuthUser / ApiConnection.user_id (historias)."""
-
-    id = PrimaryKey(int)
-    sequences = Set("StorySequence")
-
-
 class StorySequence(db.Entity):
-    user = Required(User)
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
     sequence_date = Required(date)
-    title = Optional(str, default="")
-    dolor = Optional(str, default="")
-    angulo = Optional(str, default="")
-    cta_text = Optional(str, default="")
-    cash_generado = Required(int, default=0)
-    has_cta = Required(bool, default=False)
+    title = Optional(str)
+    dolor = Optional(str)
+    angulo = Optional(str)
+    cta = Optional(str)
+    cash = Required(float, default=0)
     chats = Required(int, default=0)
+    has_cta = Required(bool, default=False)
     created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)
     slides = Set("StorySlide")
 
 
 class StorySlide(db.Entity):
+    id = PrimaryKey(int, auto=True)
     sequence = Required(StorySequence)
     order_index = Required(int)
-    image_url = Optional(str)
-    dolor = Optional(str, default="")
-    angulo = Optional(str, default="")
-    cta_text = Optional(str, default="")
     instagram_media_id = Optional(str)
+    image_url = Optional(str)
     reach = Optional(int)
-    like_count = Optional(int)
     replies = Optional(int)
     navigation = Optional(int)
     profile_visits = Optional(int)
     synced_at = Optional(datetime)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
 class ReelContent(db.Entity):
