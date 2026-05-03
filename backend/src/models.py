@@ -1,5 +1,5 @@
-from datetime import datetime
-from pony.orm import Json, Optional, PrimaryKey, Required, composite_key
+from datetime import date, datetime
+from pony.orm import Json, Optional, PrimaryKey, Required, Set, composite_key
 from src.db import db
 
 
@@ -20,6 +20,43 @@ class ApiConnection(db.Entity):
     updated_at = Optional(datetime)
 
     composite_key(user_id, platform)
+
+
+class User(db.Entity):
+    """Identificador de dueño alineado con AuthUser / ApiConnection.user_id (historias)."""
+
+    id = PrimaryKey(int)
+    sequences = Set("StorySequence")
+
+
+class StorySequence(db.Entity):
+    user = Required(User)
+    sequence_date = Required(date)
+    title = Optional(str, default="")
+    dolor = Optional(str, default="")
+    angulo = Optional(str, default="")
+    cta_text = Optional(str, default="")
+    cash_generado = Required(int, default=0)
+    has_cta = Required(bool, default=False)
+    chats = Required(int, default=0)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    slides = Set("StorySlide")
+
+
+class StorySlide(db.Entity):
+    sequence = Required(StorySequence)
+    order_index = Required(int)
+    image_url = Optional(str)
+    dolor = Optional(str, default="")
+    angulo = Optional(str, default="")
+    cta_text = Optional(str, default="")
+    instagram_media_id = Optional(str)
+    reach = Optional(int)
+    like_count = Optional(int)
+    replies = Optional(int)
+    navigation = Optional(int)
+    profile_visits = Optional(int)
+    synced_at = Optional(datetime)
 
 
 class ReelContent(db.Entity):

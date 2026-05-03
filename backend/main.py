@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-# from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from decouple import config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,34 +21,34 @@ from src.controllers.master_lists_controller import router as master_lists_route
 from src.controllers.keywords_controller import router as keywords_router
 from src.controllers.leads_controller import router as leads_router
 from src.controllers.reels_controller import router as reels_router
-# from src.controllers.stories_controller import router as stories_router
+from src.controllers.stories_controller import router as stories_router
 from src.controllers.webhook_controller import router as webhook_router
 from src.db import db, init_db
 from src.models import ApiConnection
 from src.services.reels_services import ReelsServices
-# from src.services.stories_service import StoriesService
+from src.services.stories_service import StoriesService
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 scheduler = AsyncIOScheduler()
 
 
-# async def auto_sync_stories() -> None:
-#     """Sincroniza Instagram para todos los usuarios que tengan ApiConnection de instagram"""
-#     try:
-#         with db_session:
-#             _ = db
-#             connections = list(ApiConnection.select().filter(lambda c: c.platform == "instagram"))
-#             user_ids = [c.user_id for c in connections]
-#
-#         service = StoriesService()
-#         for user_id in user_ids:
-#             try:
-#                 result = await service.sync_instagram(user_id)
-#                 print(f"[scheduler] Sync automático OK para {user_id}: {result}")
-#             except Exception as e:
-#                 print(f"[scheduler] Sync automático FAILED para {user_id}: {e}")
-#     except Exception as e:
-#         print(f"[scheduler] Error general en auto_sync_stories: {e}")
+async def auto_sync_stories() -> None:
+    """Sincroniza Instagram para todos los usuarios que tengan ApiConnection de instagram"""
+    try:
+        with db_session:
+            _ = db
+            connections = list(ApiConnection.select().filter(lambda c: c.platform == "instagram"))
+            user_ids = [c.user_id for c in connections]
+
+        service = StoriesService()
+        for user_id in user_ids:
+            try:
+                result = await service.sync_instagram(str(user_id))
+                print(f"[scheduler] Sync automático OK para {user_id}: {result}")
+            except Exception as e:
+                print(f"[scheduler] Sync automático FAILED para {user_id}: {e}")
+    except Exception as e:
+        print(f"[scheduler] Error general en auto_sync_stories: {e}")
 
 
 async def auto_refresh_reels_metrics() -> None:
@@ -76,13 +76,13 @@ async def lifespan(_: FastAPI):
     archivos = glob.glob(os.path.join(media_dir, "**/*.jpg"), recursive=True)
     print(f"[media] Archivos encontrados: {len(archivos)}")
     print(f"[media] Directorio: {media_dir}")
-    # scheduler.add_job(
-    #     auto_sync_stories,
-    #     trigger=IntervalTrigger(minutes=30),
-    #     id="auto_sync_stories",
-    #     replace_existing=True,
-    #     next_run_time=datetime.now(AR_TZ),
-    # )
+    scheduler.add_job(
+        auto_sync_stories,
+        trigger=IntervalTrigger(minutes=30),
+        id="auto_sync_stories",
+        replace_existing=True,
+        next_run_time=datetime.now(AR_TZ),
+    )
     scheduler.add_job(
         auto_refresh_reels_metrics,
         trigger=CronTrigger(hour=7, minute=0, timezone=AR_TZ),
@@ -90,7 +90,7 @@ async def lifespan(_: FastAPI):
         replace_existing=True,
     )
     scheduler.start()
-    # print("[scheduler] Auto-sync de historias iniciado (cada 30 min)")
+    print("[scheduler] Auto-sync de historias iniciado (cada 30 min)")
     print("[scheduler] Auto refresh-metrics de reels iniciado (diario 07:00 AR)")
     yield
     scheduler.shutdown()
@@ -121,5 +121,5 @@ app.include_router(leads_router)
 app.include_router(keywords_router)
 app.include_router(reels_router)
 app.include_router(bio_router)
-# app.include_router(stories_router)
+app.include_router(stories_router)
 app.include_router(webhook_router)
