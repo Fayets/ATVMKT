@@ -291,6 +291,49 @@ def _migrate_postgres_drop_canal_agendo() -> None:
         conn.close()
 
 
+def _migrate_postgres_storyslide_views_shares() -> None:
+    """Añade `views` y `shares` a storyslide (Pony no altera tablas existentes en Postgres)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'storyslide'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            for ddl in (
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS views INTEGER NULL",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS shares INTEGER NULL",
+            ):
+                try:
+                    cur.execute(ddl)
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
 def _migrate_agendo_en_iso_to_call() -> None:
     """ISO en agendo_en → call (fecha) y agendo_en=Chat (canal)."""
     iso_pat = re.compile(r"^\d{4}-\d{2}-\d{2}")
@@ -376,6 +419,7 @@ def init_db() -> None:
     _migrate_postgres_lead_agendo_to_timestamp()
     _migrate_postgres_drop_pago_en_llamada()
     _migrate_postgres_drop_canal_agendo()
+    _migrate_postgres_storyslide_views_shares()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()
     _migrate_agendo_en_default_chat_when_agendado()
