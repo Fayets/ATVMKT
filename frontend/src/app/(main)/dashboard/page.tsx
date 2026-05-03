@@ -119,9 +119,22 @@ type BioMetrics = {
   tasa_respuesta_auto: number | null
 }
 
+type LeadsMonthMetrics = Pick<BioMetrics, 'total_leads' | 'agendaron' | 'cash_total' | 'cash_por_chat'>
+
 function asFiniteNumber(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
+}
+
+/** CTA / texto típico de bio IG (botón Info, información, enlace en perfil). */
+function textLooksLikeBioTraffic(s: string): boolean {
+  const t = String(s || '').trim().toLowerCase()
+  if (!t) return false
+  if (t.includes('información') || t.includes('informacion')) return true
+  if (/\binfo\b/.test(t)) return true
+  if ((t.includes('link') || t.includes('enlace')) && (t.includes('bio') || t.includes('biografía') || t.includes('perfil'))) return true
+  if (t.includes('link en bio') || t.includes('link del perfil') || t.includes('desde perfil')) return true
+  return false
 }
 
 /** Suma `amount` al bucket del día de publicación si cae en `year`–`month` (según fecha ISO YYYY-MM-DD). */
@@ -143,16 +156,21 @@ function addToMonthDayBucket(
   buckets[pd - 1] += amount
 }
 
-async function fetchReelsAsContent(monthKey: string): Promise<DashContentRow[]> {
+function dashUserHeaders(userId: string): RequestInit {
+  return { headers: { 'X-User-Id': userId } }
+}
+
+async function fetchReelsAsContent(monthKey: string, userId: string): Promise<DashContentRow[]> {
   const out: DashContentRow[] = []
   let page = 1
   const pageSize = 50
   for (;;) {
     const res = await apiFetch(
       `/reels?page=${page}&page_size=${pageSize}&month=${encodeURIComponent(monthKey)}`,
+      dashUserHeaders(userId),
     )
     if (!res.ok) break
-    const body = (await res.json()) as {
+    const body = (await res.json().catch(() => ({}))) as {
       reels?: Array<{ cash?: number; chats?: number; published_at?: string | null }>
       total_pages?: number
     }
@@ -172,6 +190,28 @@ async function fetchReelsAsContent(monthKey: string): Promise<DashContentRow[]> 
     page += 1
   }
   return out
+}
+
+async function fetchLeadsForMonth(monthKey: string, userId: string): Promise<LeadRow[]> {
+  try {
+    const res = await apiFetch(`/leads?month=${encodeURIComponent(monthKey)}`, dashUserHeaders(userId))
+    if (!res.ok) return []
+    const body = (await res.json().catch(() => ({}))) as { leads?: unknown[] }
+    return Array.isArray(body.leads) ? (body.leads as LeadRow[]) : []
+  } catch {
+    return []
+  }
+}
+
+/** Día YYYY-MM-DD para filtrar vistas diaria/semana (el API suele dejar `call_at` vacío). */
+function leadDayForFilter(l: LeadRow): string {
+  for (const key of ['call_at', 'scheduled_at', 'fecha_bot', 'first_contact_at', 'date'] as const) {
+    const v = l[key]
+    if (v == null || v === '') continue
+    const s = String(v).trim().slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  }
+  return ''
 }
 
 function emptyDashForMonth(month: string): DashData {
@@ -222,7 +262,8 @@ export default function DashboardPage() {
   const { ready, userId } = useAuthUser()
   const [data, setData] = useState<DashData | null>(null)
   const [bioMetrics, setBioMetrics] = useState<BioMetrics | null>(null)
-  const [loadingBioMetrics, setLoadingBioMetrics] = useState(false)
+  const [leadsMonthMetrics, setLeadsMonthMetrics] = useState<LeadsMonthMetrics | null>(null)
+  const [loadingLeadsMonthMetrics, setLoadingLeadsMonthMetrics] = useState(false)
   const [view, setView] = useState<'mensual' | 'semanal' | 'diaria'>('mensual')
   const [selectedDay, setSelectedDay] = useState<number | null>(null)   // 1-based day of month
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null) // 0-based week index
@@ -243,22 +284,23 @@ export default function DashboardPage() {
 
     let items: Record<string, unknown>[] = []
     let pItems: Record<string, unknown>[] = []
-    try {
-      const [currRows, prevRows] = await Promise.all([
-        fetchReelsAsContent(month),
-        fetchReelsAsContent(prev),
-      ])
-      items = currRows as unknown as Record<string, unknown>[]
-      pItems = prevRows as unknown as Record<string, unknown>[]
-    } catch {
-      setData(emptyDashForMonth(month))
-      return
-    }
+    let currLeads: LeadRow[] = []
+    let prevLeadsData: LeadRow[] = []
+    const settled = await Promise.allSettled([
+      fetchReelsAsContent(month, userId),
+      fetchReelsAsContent(prev, userId),
+      fetchLeadsForMonth(month, userId),
+      fetchLeadsForMonth(prev, userId),
+    ])
+    const currRows = settled[0].status === 'fulfilled' ? settled[0].value : []
+    const prevRows = settled[1].status === 'fulfilled' ? settled[1].value : []
+    currLeads = settled[2].status === 'fulfilled' ? settled[2].value : []
+    prevLeadsData = settled[3].status === 'fulfilled' ? settled[3].value : []
+    items = currRows as unknown as Record<string, unknown>[]
+    pItems = prevRows as unknown as Record<string, unknown>[]
 
     const bio: Record<string, unknown>[] = []
     const def_: Record<string, unknown>[] = []
-    const leadsRes = { data: [] as Record<string, unknown>[] }
-    const pLeadsRes = { data: [] as Record<string, unknown>[] }
     const metricsRes = { data: [] as Record<string, unknown>[] }
     const sum = (arr: Record<string, unknown>[], key: string) => arr.reduce((s, i) => s + (Number(i[key]) || 0), 0)
     const byType = (type: string) => items.filter((i: Record<string, unknown>) => i.content_type === type || (type === 'historia' && i.content_type === 'story'))
@@ -266,11 +308,10 @@ export default function DashboardPage() {
     const reelsChats = sum(byType('reel'), 'chats')
     const historiasChats = sum(byType('historia'), 'chats')
     const bioChats = sum(bio, 'chats')
-    const chats = reelsChats + historiasChats + bioChats
+    const contentChatsTotal = reelsChats + historiasChats + bioChats
+    const chats = currLeads.length > 0 ? currLeads.length : contentChatsTotal
 
-    // Leads
-    const currLeads = (leadsRes.data || []) as LeadRow[]
-    const prevLeadsData = (pLeadsRes.data || []) as LeadRow[]
+    // Leads (currLeads / prevLeadsData cargados arriba)
     const currFunnel = calcFunnel(currLeads)
     const prevFunnel = calcFunnel(prevLeadsData)
 
@@ -295,7 +336,8 @@ export default function DashboardPage() {
     const prevLeadCash = prevFunnel.ingresos
     const prevContentCash = prevReelsCash + prevHistoriasCash + prevBioCash
     const prevCash = prevLeadCash > 0 ? prevLeadCash : prevContentCash
-    const prevChats = sum(pItems, 'chats')
+    const prevContentChats = sum(pItems, 'chats')
+    const prevChats = prevLeadsData.length > 0 ? prevLeadsData.length : prevContentChats
 
     // Daily cash from leads (by payment date or call_at)
     const [y, m] = month.split('-').map(Number)
@@ -399,7 +441,6 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!ready || !userId) return
     const loadBioMetrics = async () => {
-      setLoadingBioMetrics(true)
       try {
         const res = await fetch(`${apiBase}/api/bio/metrics?month=${encodeURIComponent(month)}`, {
           headers: { 'X-User-Id': userId },
@@ -424,12 +465,41 @@ export default function DashboardPage() {
         })
       } catch {
         setBioMetrics(null)
-      } finally {
-        setLoadingBioMetrics(false)
       }
     }
     loadBioMetrics()
   }, [apiBase, month, ready, userId])
+  useEffect(() => {
+    if (!ready || !userId) {
+      setLeadsMonthMetrics(null)
+      return
+    }
+    const load = async () => {
+      setLoadingLeadsMonthMetrics(true)
+      try {
+        const res = await apiFetch(`/leads/metrics?month=${encodeURIComponent(month)}`)
+        const txt = await res.text()
+        const payload = (() => {
+          try { return txt ? JSON.parse(txt) : {} } catch { return {} }
+        })() as Partial<LeadsMonthMetrics>
+        if (!res.ok) {
+          setLeadsMonthMetrics(null)
+          return
+        }
+        setLeadsMonthMetrics({
+          total_leads: asFiniteNumber(payload.total_leads),
+          agendaron: asFiniteNumber(payload.agendaron),
+          cash_total: asFiniteNumber(payload.cash_total),
+          cash_por_chat: asFiniteNumber(payload.cash_por_chat),
+        })
+      } catch {
+        setLeadsMonthMetrics(null)
+      } finally {
+        setLoadingLeadsMonthMetrics(false)
+      }
+    }
+    load()
+  }, [month, ready, userId])
   useEffect(() => { setTfMonth(month); setTfProgram(''); setSelectedDay(null); setSelectedWeek(null) }, [month])
   useEffect(() => { setSelectedDay(null); setSelectedWeek(null) }, [view])
   useEffect(() => {
@@ -448,7 +518,6 @@ export default function DashboardPage() {
 
   const dashData = data
   const bioDisplay = bioMetrics
-  const bioLoading = loadingBioMetrics
 
   const [y, m] = month.split('-').map(Number)
   const daysInMonth = new Date(y, m, 0).getDate()
@@ -511,32 +580,53 @@ export default function DashboardPage() {
   const viewRange = getViewRange()
   const viewLeads = viewRange
     ? dashData.rawLeads.filter(l => {
-        const d = String(l.call_at || l.date || '')
-        return d >= viewRange.start && d <= viewRange.end
+        const d = leadDayForFilter(l)
+        return d.length >= 10 && d >= viewRange.start && d <= viewRange.end
       })
     : dashData.rawLeads
 
   // Attribute lead cash by agenda_point content type (what actually drove the sale)
   const classifyLeadSource = (l: LeadRow): string => {
+    const url = String(l.content_url || '').toLowerCase()
+    if (url.includes('/reel/') || url.includes('instagram.com/reel')) return 'Reels'
+    const chEarly = String(l.entry_channel || '').toLowerCase()
+    if (chEarly.includes('reel') || chEarly.includes('reels')) return 'Reels'
+    if (chEarly.includes('historia') || chEarly.includes('story')) return 'Historias'
+    if (chEarly.includes('perfil') || chEarly.includes('bio')) return 'Perfil'
+    if (textLooksLikeBioTraffic(chEarly)) return 'Perfil'
     const ap = String(l.agenda_point || '').toLowerCase()
     const ef = String(l.entry_funnel || '').toLowerCase()
     const origin = String(l.origin || '').toLowerCase()
+    const kwField = String(l.keyword || '').toLowerCase()
     // Check agenda_point first (last touchpoint before booking)
     if (ap.startsWith('historia')) return 'Historias'
     if (ap.startsWith('reel')) return 'Reels'
+    if (textLooksLikeBioTraffic(ap)) return 'Perfil'
     if (ap === 'perfil') return 'Perfil'
     if (ap === 'referido' || ap.startsWith('referido')) return 'Referidos'
     // Fallback to entry_funnel
     if (ef.startsWith('historia')) return 'Historias'
     if (ef.startsWith('reel')) return 'Reels'
+    if (textLooksLikeBioTraffic(ef)) return 'Perfil'
     if (ef === 'perfil') return 'Perfil'
     if (ef === 'referido' || ef.startsWith('referido')) return 'Referidos'
+    if (textLooksLikeBioTraffic(kwField)) return 'Perfil'
     // Fallback to origin/channel
     if (origin === 'referido') return 'Referidos'
+    if (textLooksLikeBioTraffic(origin)) return 'Perfil'
     const ch = String(l.entry_channel || '').toLowerCase()
     if (ch === 'youtube') return 'YouTube'
     if (ch === 'referido') return 'Referidos'
     return 'Otros'
+  }
+
+  /** Una fila por lead en la tabla de 3 canales (Referidos/Otros → Reels). */
+  const dashboardChatBucket = (l: LeadRow): 'Historias' | 'Reels' | 'Perfil' => {
+    const s = classifyLeadSource(l)
+    if (s === 'Historias') return 'Historias'
+    if (s === 'Perfil') return 'Perfil'
+    if (s === 'Reels' || s === 'YouTube') return 'Reels'
+    return 'Reels'
   }
 
   const viewCashBySource = (source: string) =>
@@ -559,13 +649,25 @@ export default function DashboardPage() {
     : dashData.rawContent
   const viewBio = viewRange ? [] : dashData.rawBio // bio has no daily dates
 
-  const viewReelsChats = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.chats, 0)
-  const viewHistoriasChats = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').reduce((s, c) => s + c.chats, 0)
+  const leadChatsHistorias = viewLeads.filter(l => dashboardChatBucket(l) === 'Historias').length
+  const leadChatsReels = viewLeads.filter(l => dashboardChatBucket(l) === 'Reels').length
+  const leadChatsPerfil = viewLeads.filter(l => dashboardChatBucket(l) === 'Perfil').length
+
+  const viewReelsChatsContent = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.chats, 0)
+  const viewHistoriasChatsContent = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').reduce((s, c) => s + c.chats, 0)
   const viewBioChatsFromSupabase = viewBio.reduce((s, b) => s + b.chats, 0)
-  const viewBioChats = (!viewRange && viewBioChatsFromSupabase <= 0 && bioDisplay)
+  const viewBioChatsFallback = (!viewRange && viewBioChatsFromSupabase <= 0 && bioDisplay)
     ? bioDisplay.total_leads
     : viewBioChatsFromSupabase
-  const viewTotalChats = viewReelsChats + viewHistoriasChats + viewBioChats
+
+  // Con CRM en la vista: un lead = un solo canal (no mezclar con chats agregados de IG en piezas).
+  // Math.max(reels, contenido) inflaba Reels cuando IG sumaba más conversaciones que leads en bucket Reels.
+  const hasLeadsInView = viewLeads.length > 0
+  const viewReelsChats = hasLeadsInView ? leadChatsReels : viewReelsChatsContent
+  const viewHistoriasChats = hasLeadsInView ? leadChatsHistorias : viewHistoriasChatsContent
+  const viewBioChats = hasLeadsInView ? leadChatsPerfil : viewBioChatsFallback
+  const viewTotalChatsFromChannels = viewReelsChats + viewHistoriasChats + viewBioChats
+  const viewTotalChats = viewTotalChatsFromChannels
 
   const viewReelsCash = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.cash, 0)
   const viewHistoriasCash = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').reduce((s, c) => s + c.cash, 0)
@@ -617,10 +719,16 @@ export default function DashboardPage() {
     { label: 'BIO', value: viewBioChats, color: '#A855F7', prevLabel: 'BIO' },
   ]
 
-  // CPC per channel — BIO = Perfil (same source)
-  const viewBioCashReal = asFiniteNumber(viewPerfilCash) + asFiniteNumber(viewBioCash)
-  const reelCashForCpc = viewReelsCashFromLeads || viewReelsCash
-  const histCashForCpc = viewHistoriasCashFromLeads || viewHistoriasCash
+  const cashByChatBucket = (bucket: 'Historias' | 'Reels' | 'Perfil') =>
+    asFiniteNumber(
+      viewLeads.filter(l => dashboardChatBucket(l) === bucket).reduce((s, l) => s + (Number(l.payment) || 0), 0),
+    )
+
+  // CPC per channel — mismo bucket que CHATS; fallback a atribución fina / piezas
+  const viewBioCashReal =
+    asFiniteNumber(cashByChatBucket('Perfil') || viewPerfilCash) + asFiniteNumber(viewBioCash)
+  const reelCashForCpc = cashByChatBucket('Reels') || viewReelsCashFromLeads || viewReelsCash
+  const histCashForCpc = cashByChatBucket('Historias') || viewHistoriasCashFromLeads || viewHistoriasCash
   const cpcReel = viewReelsChats > 0 ? reelCashForCpc / viewReelsChats : 0
   const cpcHistoria = viewHistoriasChats > 0 ? histCashForCpc / viewHistoriasChats : 0
   const cpcBio = viewBioChats > 0 ? asFiniteNumber(viewBioCashReal / viewBioChats) : 0
@@ -643,36 +751,28 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
         <div className="glass-card p-4">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">BIO leads</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">{bioLoading ? '—' : (bioDisplay?.total_leads ?? 0)}</div>
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Leads</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold">
+            {loadingLeadsMonthMetrics ? '—' : (leadsMonthMetrics?.total_leads ?? 0)}
+          </div>
         </div>
         <div className="glass-card p-4">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Tasa de agenda BIO</div>
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Tasa de agenda</div>
           <div className="font-mono-num mt-1 text-2xl font-bold">
-            {bioLoading ? '—' : (() => {
-              const leads = bioDisplay?.total_leads ?? 0
-              const agendaron = bioDisplay?.agendaron ?? 0
+            {loadingLeadsMonthMetrics ? '—' : (() => {
+              const leads = leadsMonthMetrics?.total_leads ?? 0
+              const agendaron = leadsMonthMetrics?.agendaron ?? 0
               if (leads <= 0) return '—'
               return `${((agendaron / leads) * 100).toFixed(1)}%`
             })()}
           </div>
         </div>
         <div className="glass-card p-4">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Cash por chat BIO</div>
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Cash por chat</div>
           <div className="font-mono-num mt-1 text-2xl font-bold">
-            {bioLoading ? '—' : formatCash(Number(bioDisplay?.cash_por_chat || 0))}
-          </div>
-        </div>
-        <div className="glass-card p-4">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Tasa resp. auto BIO</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">
-            {bioLoading
-              ? '—'
-              : bioDisplay?.tasa_respuesta_auto === null || bioDisplay?.tasa_respuesta_auto === undefined
-                ? '—'
-                : `${bioDisplay.tasa_respuesta_auto.toFixed(1)}%`}
+            {loadingLeadsMonthMetrics ? '—' : formatCash(Number(leadsMonthMetrics?.cash_por_chat || 0))}
           </div>
         </div>
       </div>
@@ -861,7 +961,6 @@ export default function DashboardPage() {
             <div className="text-right">
               <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">CPC promedio</div>
               <div className="font-mono-num text-4xl font-bold text-[var(--green)]">{formatCash(cpcTotal)}</div>
-              <div className="text-[11px] text-[var(--text3)]">{formatCash(contentCashTotal)} / {viewTotalChats} chats</div>
             </div>
           </div>
         </div>
