@@ -20,7 +20,6 @@ from src.schemas import StorySequenceIn
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 # Debe coincidir con el job `auto_sync_stories` en main.py (IntervalTrigger).
 STORIES_SYNC_INTERVAL_MINUTES = 5
-_last_sync_times: dict[str, datetime] = {}
 _sync_lock = asyncio.Lock()
 
 
@@ -374,13 +373,19 @@ class StoriesService:
         slide.synced_at = datetime.now(AR_TZ)
 
     @db_session
+    def _touch_last_sync(self, user_id: str) -> None:
+        conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
+        if conn is not None:
+            conn.last_sync_at = datetime.now(AR_TZ)
+
+    @db_session
     def get_sync_status(self, user_id: str) -> dict[str, str | None]:
-        last = _last_sync_times.get(user_id)
+        conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
+        last = conn.last_sync_at if conn else None
         next_sync = last + timedelta(minutes=STORIES_SYNC_INTERVAL_MINUTES) if last else None
 
         token_saved_at: datetime | None = None
         token_expires_at: datetime | None = None
-        conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
         creds = conn.credentials if conn and isinstance(conn.credentials, dict) else {}
         token_saved_at = _parse_dt(creds.get("token_saved_at")) or (conn.updated_at if conn else None)
         token_expires_at = _parse_dt(creds.get("token_expires_at"))
@@ -513,7 +518,7 @@ class StoriesService:
                             errors += 1
                             continue
 
-                _last_sync_times[user_id] = datetime.now(AR_TZ)
+                self._touch_last_sync(user_id)
                 return {
                     "synced": synced,
                     "created": created,
