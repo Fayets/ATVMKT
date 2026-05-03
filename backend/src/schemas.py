@@ -435,6 +435,10 @@ class LeadPatchRequest(BaseModel):
     entry_funnel: str | None = None
     keyword: str | None = None
     agenda_point: str | None = None
+    punto_agenda: str | None = Field(
+        default=None,
+        description="Alias de agenda_point → columna punto_agenda en BD",
+    )
     ctas_responded: int | None = None
     first_contact_at: str | None = None
     scheduled_at: str | None = None

@@ -15,8 +15,8 @@ import {
   AGENDO_EN_OPTIONS,
 } from '../types'
 
-/** Solo '' + valores agregados con + en el header (sin lista fija). */
-function mergeEntryChannelOptions(custom: string[]): string[] {
+/** Solo '' + valores agregados con + en el header (sin lista fija). Vía / Pto agenda. */
+function mergeCustomLeadsDropdownOptions(custom: string[]): string[] {
   const nonEmpty = [
     ...new Set(custom.map((c) => String(c || '').trim()).filter(Boolean)),
   ].sort((a, b) => a.localeCompare(b, 'es'))
@@ -26,6 +26,13 @@ function mergeEntryChannelOptions(custom: string[]): string[] {
 /** Incluye el valor guardado del lead si no está en la lista (datos legacy / API). */
 function entryChannelSelectOptions(lead: Lead, parentOpts: string[]): string[] {
   const v = String(lead.entry_channel || '').trim()
+  if (!v || parentOpts.includes(v)) return parentOpts
+  const rest = parentOpts.filter((x) => x !== '')
+  return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
+}
+
+function agendaPointSelectOptions(lead: Lead, parentOpts: string[]): string[] {
+  const v = String(lead.agenda_point || '').trim()
   if (!v || parentOpts.includes(v)) return parentOpts
   const rest = parentOpts.filter((x) => x !== '')
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
@@ -105,6 +112,10 @@ export function LeadsPage() {
   const [customViaOptions, setCustomViaOptions] = useState<string[]>([])
   const [viaAddOpen, setViaAddOpen] = useState(false)
   const [viaDraft, setViaDraft] = useState('')
+
+  const [customAgendaPointOptions, setCustomAgendaPointOptions] = useState<string[]>([])
+  const [agendaAddOpen, setAgendaAddOpen] = useState(false)
+  const [agendaDraft, setAgendaDraft] = useState('')
 
   // ── Data fetching ──
   const fetchTeamMembers = useCallback(async () => {
@@ -209,7 +220,9 @@ export function LeadsPage() {
             ? { agendo_en: value === null || value === '' ? 'Chat' : String(value) }
             : field === 'entry_channel'
               ? { via: value === null || value === '' ? '' : String(value) }
-              : { [field]: value }
+              : field === 'agenda_point'
+                ? { punto_agenda: value === null || value === '' ? '' : String(value) }
+                : { [field]: value }
       try {
         const res = await apiFetch(`/leads/${encodeURIComponent(id)}`, {
           method: 'PATCH',
@@ -356,11 +369,14 @@ export function LeadsPage() {
   )
 
   const tableColumns = useMemo(() => {
-    const opts = mergeEntryChannelOptions(customViaOptions)
-    return activeColumns.map((c) =>
-      c.key === 'entry_channel' ? { ...c, options: opts } : c,
-    )
-  }, [activeColumns, customViaOptions])
+    const viaOpts = mergeCustomLeadsDropdownOptions(customViaOptions)
+    const agendaOpts = mergeCustomLeadsDropdownOptions(customAgendaPointOptions)
+    return activeColumns.map((c) => {
+      if (c.key === 'entry_channel') return { ...c, options: viaOpts }
+      if (c.key === 'agenda_point') return { ...c, options: agendaOpts }
+      return c
+    })
+  }, [activeColumns, customViaOptions, customAgendaPointOptions])
 
   const confirmNewViaOption = useCallback(() => {
     const t = viaDraft.trim()
@@ -373,6 +389,18 @@ export function LeadsPage() {
     setViaAddOpen(false)
     setViaDraft('')
   }, [viaDraft])
+
+  const confirmNewAgendaPointOption = useCallback(() => {
+    const t = agendaDraft.trim()
+    if (!t) {
+      setAgendaAddOpen(false)
+      setAgendaDraft('')
+      return
+    }
+    setCustomAgendaPointOptions((prev) => (prev.includes(t) ? prev : [...prev, t]))
+    setAgendaAddOpen(false)
+    setAgendaDraft('')
+  }, [agendaDraft])
 
   if (!ready) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -511,6 +539,11 @@ export function LeadsPage() {
                 viaDraft={viaDraft}
                 setViaDraft={setViaDraft}
                 onConfirmNewViaOption={confirmNewViaOption}
+                agendaAddOpen={agendaAddOpen}
+                setAgendaAddOpen={setAgendaAddOpen}
+                agendaDraft={agendaDraft}
+                setAgendaDraft={setAgendaDraft}
+                onConfirmNewAgendaPointOption={confirmNewAgendaPointOption}
               />
             </div>
           ))}
@@ -534,6 +567,11 @@ export function LeadsPage() {
             viaDraft={viaDraft}
             setViaDraft={setViaDraft}
             onConfirmNewViaOption={confirmNewViaOption}
+            agendaAddOpen={agendaAddOpen}
+            setAgendaAddOpen={setAgendaAddOpen}
+            agendaDraft={agendaDraft}
+            setAgendaDraft={setAgendaDraft}
+            onConfirmNewAgendaPointOption={confirmNewAgendaPointOption}
           />
         </div>
       )}
@@ -627,7 +665,7 @@ const LEADS_TABLE_CHECK_W = 48
 const LEADS_TABLE_NUM_W = 40
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly, viaAddOpen, setViaAddOpen, viaDraft, setViaDraft, onConfirmNewViaOption }: {
+function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly, viaAddOpen, setViaAddOpen, viaDraft, setViaDraft, onConfirmNewViaOption, agendaAddOpen, setAgendaAddOpen, agendaDraft, setAgendaDraft, onConfirmNewAgendaPointOption }: {
   leads: Lead[]
   columns: ColumnDef[]
   sort: SortConfig
@@ -650,12 +688,21 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
   viaDraft: string
   setViaDraft: (v: string) => void
   onConfirmNewViaOption: () => void
+  agendaAddOpen: boolean
+  setAgendaAddOpen: (v: boolean) => void
+  agendaDraft: string
+  setAgendaDraft: (v: string) => void
+  onConfirmNewAgendaPointOption: () => void
 }) {
   const stickyName = columns.some((c) => c.key === 'client_name' && c.sticky)
   const viaInputRef = useRef<HTMLInputElement>(null)
+  const agendaInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (viaAddOpen) viaInputRef.current?.focus()
   }, [viaAddOpen])
+  useEffect(() => {
+    if (agendaAddOpen) agendaInputRef.current?.focus()
+  }, [agendaAddOpen])
 
   return (
     <table
@@ -691,7 +738,7 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
           {columns.map(col => (
             <th key={col.key}
               onClick={(e) => {
-                if ((e.target as HTMLElement).closest('[data-leads-via-addon]')) return
+                if ((e.target as HTMLElement).closest('[data-leads-header-addon]')) return
                 onToggleSort(col.key)
               }}
               className={`border-b border-[var(--border2)] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] hover:text-[var(--text2)] cursor-pointer select-none whitespace-nowrap transition-colors ${
@@ -706,7 +753,7 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                   <span className="text-[var(--accent)] text-[9px] shrink-0">{sort.dir === 'asc' ? '↑' : '↓'}</span>
                 )}
                 {col.key === 'entry_channel' && !readOnly && (
-                  <span data-leads-via-addon className="inline-flex items-center gap-0.5 shrink-0 ml-0.5">
+                  <span data-leads-header-addon className="inline-flex items-center gap-0.5 shrink-0 ml-0.5">
                     {!viaAddOpen ? (
                       <button
                         type="button"
@@ -746,6 +793,56 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                           onClick={(e) => {
                             e.stopPropagation()
                             onConfirmNewViaOption()
+                          }}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] text-[var(--green)] hover:border-[var(--green)] transition-colors"
+                        >
+                          ✓
+                        </button>
+                      </>
+                    )}
+                  </span>
+                )}
+                {col.key === 'agenda_point' && !readOnly && (
+                  <span data-leads-header-addon className="inline-flex items-center gap-0.5 shrink-0 ml-0.5">
+                    {!agendaAddOpen ? (
+                      <button
+                        type="button"
+                        title="Nueva opción de punto de agenda"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setAgendaAddOpen(true)
+                        }}
+                        className="flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] font-semibold text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                      >
+                        +
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          ref={agendaInputRef}
+                          type="text"
+                          value={agendaDraft}
+                          onChange={(e) => setAgendaDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              onConfirmNewAgendaPointOption()
+                            }
+                            if (e.key === 'Escape') {
+                              setAgendaAddOpen(false)
+                              setAgendaDraft('')
+                            }
+                          }}
+                          placeholder="Nuevo pto agenda"
+                          className="h-5 w-[7.5rem] rounded border border-[var(--accent)] bg-[var(--bg3)] px-1.5 text-[10px] font-normal normal-case tracking-normal text-[var(--text)] placeholder:text-[var(--text3)] outline-none"
+                        />
+                        <button
+                          type="button"
+                          title="Confirmar"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onConfirmNewAgendaPointOption()
                           }}
                           className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] text-[var(--green)] hover:border-[var(--green)] transition-colors"
                         >
@@ -954,7 +1051,7 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
         </span>
       )
     }
-    if ((col.key === 'entry_funnel' || col.key === 'agenda_point') && value) {
+    if (col.key === 'entry_funnel' && value) {
       const text = String(value)
       const isHistoria = /^historia/i.test(text)
       const isReel = /^reel/i.test(text)
@@ -987,7 +1084,9 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
             ? agendoEnSelectOptions(lead)
             : col.key === 'entry_channel'
               ? entryChannelSelectOptions(lead, col.options!)
-              : col.options!
+              : col.key === 'agenda_point'
+                ? agendaPointSelectOptions(lead, col.options!)
+                : col.options!
       return (
         <select
           autoFocus
@@ -1153,8 +1252,8 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
     )
   }
 
-  // Content reference badges (entry_funnel, agenda_point)
-  if ((col.key === 'entry_funnel' || col.key === 'agenda_point') && value) {
+  // Content reference badges (entry_funnel)
+  if (col.key === 'entry_funnel' && value) {
     const text = String(value)
     const isHistoria = /^historia/i.test(text)
     const isReel = /^reel/i.test(text)

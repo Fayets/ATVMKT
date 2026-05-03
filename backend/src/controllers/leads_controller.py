@@ -278,7 +278,9 @@ def patch_lead(
             row.keyword = data["entry_funnel"] or ""
         if "keyword" in data:
             row.keyword = data["keyword"] or ""
-        if "agenda_point" in data:
+        if "punto_agenda" in data:
+            row.punto_agenda = (data["punto_agenda"] or "") or ""
+        elif "agenda_point" in data:
             row.punto_agenda = data["agenda_point"] or ""
         if "ctas_responded" in data:
             row.ctas_respondidos = max(0, int(data["ctas_responded"] or 0))

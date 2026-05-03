@@ -195,7 +195,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
     // Funnel de entrada
     { key: 'entry_funnel', label: 'Ingreso embudo', width: 150, type: 'text', editable: true, defaultVisible: true },
-    { key: 'agenda_point', label: 'Pto agenda', width: 130, type: 'text', editable: true, defaultVisible: true },
+    { key: 'agenda_point', label: 'Pto agenda', width: 130, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
     { key: 'ctas_responded', label: 'CTAs resp.', width: 90, type: 'number', editable: true, defaultVisible: true },
     // Fechas
     { key: 'first_contact_at', label: '1er contacto', width: 120, type: 'date', editable: true, defaultVisible: true },
