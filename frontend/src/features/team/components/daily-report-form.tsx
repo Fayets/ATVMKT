@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { useToast } from '@/shared/components/toast'
 import { formatCash } from '@/shared/lib/format-utils'
+import { apiFetch } from '@/lib/api'
+
+type TeamMemberOption = { id: number; nombre: string }
 
 type DailyReport = {
-  id?: string
   date: string
-  member_name: string
-  role: string
+  memberId: number | ''
   conversaciones: number
   agendas: number
   calendly_links: number
@@ -20,29 +21,35 @@ type DailyReport = {
   descalificados: number
   ingreso: number
   notes: string
-  month: string
 }
 
 type Props = {
   role: 'setter' | 'closer'
 }
 
+function errMessage(data: unknown): string {
+  if (data && typeof data === 'object' && 'detail' in data) {
+    const d = (data as { detail: unknown }).detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d)) return d.map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg: unknown }).msg) : JSON.stringify(x))).join(', ')
+  }
+  return 'Error en la solicitud'
+}
+
 export function DailyReportSection({ role }: Props) {
   const { ready, userId } = useAuthUser()
   const { toast } = useToast()
-  const [members, setMembers] = useState<{ name: string }[]>([])
-  const [reports, setReports] = useState<DailyReport[]>([])
+  const [members, setMembers] = useState<TeamMemberOption[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  const [lastSaved, setLastSaved] = useState<string | null>(null)
 
   const today = new Date().toISOString().split('T')[0]
-  const todayMonth = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
 
   const [form, setForm] = useState<DailyReport>({
     date: today,
-    member_name: '',
-    role,
+    memberId: '',
     conversaciones: 0,
     agendas: 0,
     calendly_links: 0,
@@ -53,46 +60,117 @@ export function DailyReportSection({ role }: Props) {
     descalificados: 0,
     ingreso: 0,
     notes: '',
-    month: todayMonth,
   })
 
-  const fetchData = useCallback(async () => {
-    if (!ready) return
+  const fetchMembers = useCallback(async () => {
+    if (!ready || !userId) {
+      setMembers([])
+      setLoading(false)
+      return
+    }
     setLoading(true)
-    setMembers([])
-    setReports([])
-    setLoading(false)
-  }, [ready, role])
+    try {
+      const res = await apiFetch('/team/members')
+      if (!res.ok) {
+        toast(errMessage(await res.json().catch(() => ({}))))
+        setMembers([])
+        return
+      }
+      const data = (await res.json()) as { setters: { id: number; nombre: string }[]; closers: { id: number; nombre: string }[] }
+      const list = role === 'setter' ? data.setters ?? [] : data.closers ?? []
+      setMembers(list.map((m) => ({ id: m.id, nombre: m.nombre })))
+    } catch {
+      toast('No se pudo cargar el equipo.')
+      setMembers([])
+    } finally {
+      setLoading(false)
+    }
+  }, [ready, userId, role])
 
-  useEffect(() => { fetchData() }, [fetchData])
-
-  // Auto-calcular month cuando cambia date
   useEffect(() => {
-    const [y, m] = form.date.split('-')
-    setForm(f => ({ ...f, month: `${y}-${m}` }))
-  }, [form.date])
+    void fetchMembers()
+  }, [fetchMembers])
 
-  const todayReport = reports.find(r => r.date === today && r.member_name === form.member_name)
+  const todaySaved = lastSaved === `${form.memberId}-${today}` && form.date === today
 
   const handleSave = async () => {
-    if (!userId || !form.member_name) { toast('Seleccioná un miembro'); return }
+    if (!userId) {
+      toast('Iniciá sesión')
+      return
+    }
+    if (form.memberId === '') {
+      toast('Seleccioná un miembro')
+      return
+    }
     setSaving(true)
-
-    toast('Reportes diarios: persistencia en backend pendiente.')
-    setShowForm(false)
-    fetchData()
-    setSaving(false)
+    try {
+      if (role === 'setter') {
+        const res = await apiFetch('/team/setter-reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            member_id: form.memberId,
+            fecha: form.date,
+            conversaciones: form.conversaciones,
+            agendas: form.agendas,
+            links_enviados: form.calendly_links,
+            notas: form.notes.trim() || null,
+          }),
+        })
+        if (!res.ok) {
+          toast(errMessage(await res.json().catch(() => ({}))))
+          return
+        }
+      } else {
+        const res = await apiFetch('/team/closer-reports', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            member_id: form.memberId,
+            fecha: form.date,
+            llamadas_agendadas: form.calls_scheduled,
+            shows: form.shows,
+            cierres: form.cierres,
+            calificados: form.calificados,
+            descalificados: form.descalificados,
+            ingreso: form.ingreso,
+            notas: form.notes.trim() || null,
+          }),
+        })
+        if (!res.ok) {
+          toast(errMessage(await res.json().catch(() => ({}))))
+          return
+        }
+      }
+      toast('Reporte guardado')
+      setLastSaved(`${form.memberId}-${form.date}`)
+      setShowForm(false)
+      void fetchMembers()
+    } catch {
+      toast('No se pudo guardar el reporte.')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  if (loading) return null
+  if (!ready || loading) return <div className="text-[13px] text-[var(--text3)]">Cargando…</div>
+
+  if (!userId) {
+    return <div className="text-[13px] text-[var(--text3)]">Iniciá sesión para cargar reportes.</div>
+  }
 
   const numField = (key: keyof DailyReport, label: string, isCurrency = false) => (
     <div>
       <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{label}</label>
       <input
         type="number"
-        value={form[key] as number || ''}
-        onChange={e => setForm(f => ({ ...f, [key]: isCurrency ? parseFloat(e.target.value) || 0 : parseInt(e.target.value) || 0 }))}
+        value={form[key] === '' ? '' : (form[key] as number) || ''}
+        onChange={(e) =>
+          setForm((f) => ({
+            ...f,
+            [key]: isCurrency ? parseFloat(e.target.value) || 0 : parseInt(e.target.value, 10) || 0,
+          }))
+        }
         placeholder="0"
         className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
       />
@@ -101,49 +179,60 @@ export function DailyReportSection({ role }: Props) {
 
   return (
     <div className="space-y-4">
-      {/* Botón para abrir formulario */}
       <div className="flex items-center gap-3">
         <button
+          type="button"
           onClick={() => setShowForm(!showForm)}
-          className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:brightness-110 transition-all"
+          className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white transition-all hover:brightness-110"
         >
-          {showForm ? 'Cerrar' : todayReport ? 'Editar reporte de hoy' : '+ Cargar reporte diario'}
+          {showForm ? 'Cerrar' : todaySaved ? 'Editar reporte de hoy' : '+ Cargar reporte diario'}
         </button>
-        {todayReport && (
-          <span className="text-[11px] text-[var(--green)] font-medium">✓ Reporte de hoy cargado</span>
-        )}
+        {todaySaved && <span className="text-[11px] font-medium text-[var(--green)]">✓ Reporte de hoy cargado</span>}
       </div>
 
-      {/* Formulario */}
       {showForm && (
         <div className="glass-card p-5">
-          <div className="text-[13px] font-semibold mb-4">
-            Reporte Diario — {role === 'setter' ? 'Setter' : 'Closer'}
-          </div>
+          <div className="mb-4 text-[13px] font-semibold">Reporte Diario — {role === 'setter' ? 'Setter' : 'Closer'}</div>
 
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="mb-4 grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Fecha</label>
               <input
                 type="date"
                 value={form.date}
-                onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
                 className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
               />
             </div>
             <div>
-              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{role === 'setter' ? 'Setter' : 'Closer'}</label>
+              <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+                {role === 'setter' ? 'Setter' : 'Closer'}
+              </label>
               <select
-                value={form.member_name}
-                onChange={e => setForm(f => ({ ...f, member_name: e.target.value }))}
-                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none cursor-pointer focus:border-[var(--text3)]"
+                value={form.memberId === '' ? '' : String(form.memberId)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setForm((f) => ({ ...f, memberId: v ? parseInt(v, 10) : '' }))
+                }}
+                className="w-full cursor-pointer rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
               >
-                {members.length === 0 ? <option value="">Sin miembros (Equipo)</option> : members.map(m => <option key={m.name} value={m.name}>{m.name}</option>)}
+                <option value="">Seleccionar…</option>
+                {members.length === 0 ? (
+                  <option value="" disabled>
+                    Sin miembros ({role})
+                  </option>
+                ) : (
+                  members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.nombre}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="mb-4 grid grid-cols-3 gap-3">
             {role === 'setter' ? (
               <>
                 {numField('conversaciones', 'Conversaciones')}
@@ -166,86 +255,46 @@ export function DailyReportSection({ role }: Props) {
             <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Notas</label>
             <textarea
               value={form.notes}
-              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
               rows={2}
               placeholder="Observaciones del día..."
-              className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)] resize-y"
+              className="w-full resize-y rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
             />
           </div>
 
-          {/* Preview de métricas calculadas */}
           {role === 'setter' && form.conversaciones > 0 && (
-            <div className="mb-4 rounded-lg bg-[var(--bg3)] border border-[var(--border)] p-3 flex gap-6">
-              <div className="text-[11px]"><span className="text-[var(--text3)]">Tasa agend.:</span> <span className="font-semibold text-[var(--accent)]">{form.conversaciones > 0 ? ((form.agendas / form.conversaciones) * 100).toFixed(1) : 0}%</span></div>
+            <div className="mb-4 flex gap-6 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3">
+              <div className="text-[11px]">
+                <span className="text-[var(--text3)]">Tasa agend.:</span>{' '}
+                <span className="font-semibold text-[var(--accent)]">
+                  {form.conversaciones > 0 ? ((form.agendas / form.conversaciones) * 100).toFixed(1) : 0}%
+                </span>
+              </div>
             </div>
           )}
           {role === 'closer' && form.shows > 0 && (
-            <div className="mb-4 rounded-lg bg-[var(--bg3)] border border-[var(--border)] p-3 flex gap-6">
-              <div className="text-[11px]"><span className="text-[var(--text3)]">Close Rate:</span> <span className="font-semibold text-[var(--accent)]">{form.shows > 0 ? ((form.cierres / form.shows) * 100).toFixed(1) : 0}%</span></div>
-              <div className="text-[11px]"><span className="text-[var(--text3)]">Ticket prom:</span> <span className="font-semibold text-[var(--green)]">{form.cierres > 0 ? formatCash(form.ingreso / form.cierres) : '$0'}</span></div>
+            <div className="mb-4 flex gap-6 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3">
+              <div className="text-[11px]">
+                <span className="text-[var(--text3)]">Close Rate:</span>{' '}
+                <span className="font-semibold text-[var(--accent)]">
+                  {form.shows > 0 ? ((form.cierres / form.shows) * 100).toFixed(1) : 0}%
+                </span>
+              </div>
+              <div className="text-[11px]">
+                <span className="text-[var(--text3)]">Ticket prom:</span>{' '}
+                <span className="font-semibold text-[var(--green)]">{form.cierres > 0 ? formatCash(form.ingreso / form.cierres) : '$0'}</span>
+              </div>
             </div>
           )}
 
           <button
-            onClick={handleSave}
+            type="button"
+            onClick={() => void handleSave()}
             disabled={saving}
-            className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-[11px] font-semibold uppercase text-white hover:brightness-110 transition-all disabled:opacity-50"
+            className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-[11px] font-semibold uppercase text-white transition-all hover:brightness-110 disabled:opacity-50"
           >
             {saving ? 'Guardando...' : 'Guardar reporte'}
           </button>
-        </div>
-      )}
-
-      {/* Historial de reportes */}
-      {reports.length > 0 && (
-        <div className="glass-card overflow-hidden">
-          <div className="px-5 py-3 border-b border-[var(--border)]">
-            <span className="text-[11px] font-medium uppercase tracking-widest text-[var(--text3)]">Historial de reportes</span>
-          </div>
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-[var(--border)]">
-                <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Fecha</th>
-                <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{role === 'setter' ? 'Setter' : 'Closer'}</th>
-                {role === 'setter' ? (
-                  <>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Conv.</th>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Agendas</th>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Tasa</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Shows</th>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Cierres</th>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Close %</th>
-                    <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Ingreso</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {reports.map(r => (
-                <tr key={r.id} className="border-b border-[var(--border)]">
-                  <td className="px-5 py-2.5 text-[13px]">{r.date}</td>
-                  <td className="px-5 py-2.5 text-[13px] font-medium">{r.member_name}</td>
-                  {role === 'setter' ? (
-                    <>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px]">{r.conversaciones}</td>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px]">{r.agendas}</td>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px] text-[var(--accent)]">{r.conversaciones > 0 ? ((r.agendas / r.conversaciones) * 100).toFixed(1) + '%' : '—'}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px]">{r.shows}</td>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px]">{r.cierres}</td>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px] text-[var(--accent)]">{r.shows > 0 ? ((r.cierres / r.shows) * 100).toFixed(1) + '%' : '—'}</td>
-                      <td className="px-5 py-2.5 font-mono-num text-[13px] text-[var(--green)]">{formatCash(r.ingreso)}</td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
     </div>

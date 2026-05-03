@@ -130,3 +130,45 @@ class Lead(db.Entity):
     estado = Optional(str, default="")
     notas = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class TeamMember(db.Entity):
+    _table_ = "teammember"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    nombre = Required(str)
+    rol = Required(str)  # 'setter' o 'closer'
+    activo = Required(bool, default=True)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class SetterReport(db.Entity):
+    _table_ = "setter_report"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    member_id = Required(int)
+    fecha = Required(date)
+    conversaciones = Required(int, default=0)
+    agendas = Required(int, default=0)
+    links_enviados = Required(int, default=0)
+    notas = Optional(str)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class CloserReport(db.Entity):
+    _table_ = "closer_report"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    member_id = Required(int)
+    fecha = Required(date)
+    llamadas_agendadas = Required(int, default=0)
+    shows = Required(int, default=0)
+    cierres = Required(int, default=0)
+    calificados = Required(int, default=0)
+    descalificados = Required(int, default=0)
+    ingreso = Required(float, default=0)
+    notas = Optional(str)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
