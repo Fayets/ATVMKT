@@ -68,7 +68,9 @@ def _serialize_slide(slide: StorySlide) -> dict[str, Any]:
         "angulo": None,
         "cta_text": None,
         "instagram_media_id": slide.instagram_media_id,
+        "views": slide.views,
         "reach": slide.reach,
+        "shares": slide.shares,
         "like_count": None,
         "replies": slide.replies,
         "navigation": slide.navigation,
@@ -107,6 +109,66 @@ def _http_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
     with urllib.request.urlopen(req, timeout=45, context=ssl_ctx) as response:
         payload = response.read().decode("utf-8")
     return json.loads(payload) if payload else {}
+
+
+def _parse_insights_data(payload: dict[str, Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        return out
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        values = item.get("values")
+        value = None
+        if isinstance(values, list) and values:
+            first = values[0]
+            if isinstance(first, dict):
+                value = first.get("value")
+        try:
+            out[name] = int(value) if value is not None else 0
+        except (TypeError, ValueError):
+            out[name] = 0
+    return out
+
+
+def _fetch_story_insights(story_id: str, headers: dict[str, str]) -> dict[str, int | None]:
+    """Métricas de story por Graph API. Puede fallar un subconjunto de métricas según versión de media.
+
+    `views` ≈ reproducciones; `reach` = cuentas únicas; `shares` = compartidos (p. ej. vía DM).
+    Los totales suelen ser estimados y no coinciden 1:1 con la app (latencia, agregación, ventana 24h).
+    """
+    base = f"https://graph.facebook.com/v25.0/{urllib.parse.quote(story_id)}/insights"
+    # Intentar el set completo (v22+); si el media no soporta alguna métrica, reintentar mínimo.
+    for metric in (
+        "views,reach,replies,shares,navigation,profile_visits",
+        "reach,replies,navigation,profile_visits",
+    ):
+        url = f"{base}?metric={metric}"
+        try:
+            payload = _http_json(url, headers=headers)
+            row = _parse_insights_data(payload)
+            return {
+                "views": row.get("views"),
+                "reach": row.get("reach"),
+                "replies": row.get("replies"),
+                "shares": row.get("shares"),
+                "navigation": row.get("navigation"),
+                "profile_visits": row.get("profile_visits"),
+            }
+        except urllib.error.HTTPError:
+            continue
+        except Exception:
+            continue
+    return {
+        "views": None,
+        "reach": None,
+        "replies": None,
+        "shares": None,
+        "navigation": None,
+        "profile_visits": None,
+    }
 
 
 async def download_story_image(url: str, user_id: str, story_id: str) -> str | None:
@@ -355,10 +417,12 @@ class StoriesService:
             order_index=order_index,
             instagram_media_id=story_id,
             image_url=image_url,
-            reach=metrics.get("reach") if metrics.get("reach") is not None else 0,
-            replies=metrics.get("replies") if metrics.get("replies") is not None else 0,
-            navigation=metrics.get("navigation") if metrics.get("navigation") is not None else 0,
-            profile_visits=metrics.get("profile_visits") if metrics.get("profile_visits") is not None else 0,
+            views=metrics.get("views") if metrics.get("views") is not None else None,
+            reach=metrics.get("reach") if metrics.get("reach") is not None else None,
+            shares=metrics.get("shares") if metrics.get("shares") is not None else None,
+            replies=metrics.get("replies") if metrics.get("replies") is not None else None,
+            navigation=metrics.get("navigation") if metrics.get("navigation") is not None else None,
+            profile_visits=metrics.get("profile_visits") if metrics.get("profile_visits") is not None else None,
             synced_at=datetime.now(AR_TZ),
         )
 
@@ -367,10 +431,14 @@ class StoriesService:
         slide = StorySlide[slide_id]
         if not slide.image_url and image_url:
             slide.image_url = image_url
-        slide.reach = metrics.get("reach") if metrics.get("reach") is not None else 0
-        slide.replies = metrics.get("replies") if metrics.get("replies") is not None else 0
-        slide.navigation = metrics.get("navigation") if metrics.get("navigation") is not None else 0
-        slide.profile_visits = metrics.get("profile_visits") if metrics.get("profile_visits") is not None else 0
+        slide.views = metrics.get("views") if metrics.get("views") is not None else slide.views
+        slide.reach = metrics.get("reach") if metrics.get("reach") is not None else slide.reach
+        slide.shares = metrics.get("shares") if metrics.get("shares") is not None else slide.shares
+        slide.replies = metrics.get("replies") if metrics.get("replies") is not None else slide.replies
+        slide.navigation = metrics.get("navigation") if metrics.get("navigation") is not None else slide.navigation
+        slide.profile_visits = (
+            metrics.get("profile_visits") if metrics.get("profile_visits") is not None else slide.profile_visits
+        )
         slide.synced_at = datetime.now(AR_TZ)
 
     @db_session
@@ -467,42 +535,8 @@ class StoriesService:
                             source_url = thumb_url if media_type == "VIDEO" and thumb_url else media_url or thumb_url
                             image_url = await download_story_image(source_url, user_id, story_id) if source_url else None
 
-                            metrics: dict[str, int | None] = {
-                                "reach": None,
-                                "replies": None,
-                                "navigation": None,
-                                "profile_visits": None,
-                            }
-                            insights_url = (
-                                f"https://graph.facebook.com/v25.0/{urllib.parse.quote(story_id)}/insights"
-                                "?metric=reach,replies,navigation,profile_visits"
-                            )
-                            try:
-                                insights_payload = _http_json(insights_url, headers=headers)
-                                insights_data = insights_payload.get("data")
-                                print(f"[sync] insights para story {story_id}:", insights_data)
-                                metrics_rows = insights_data if isinstance(insights_data, list) else []
-                                insights: dict[str, int] = {}
-                                for item in metrics_rows:
-                                    if not isinstance(item, dict):
-                                        continue
-                                    name = str(item.get("name") or "").strip()
-                                    values = item.get("values")
-                                    value = None
-                                    if isinstance(values, list) and values:
-                                        first = values[0]
-                                        if isinstance(first, dict):
-                                            value = first.get("value")
-                                    try:
-                                        insights[name] = int(value) if value is not None else 0
-                                    except Exception:
-                                        insights[name] = 0
-                                metrics["reach"] = insights.get("reach", 0)
-                                metrics["replies"] = insights.get("replies", 0)
-                                metrics["navigation"] = insights.get("navigation", 0)
-                                metrics["profile_visits"] = insights.get("profile_visits", 0)
-                            except Exception:
-                                pass
+                            metrics = _fetch_story_insights(story_id, headers)
+                            print(f"[sync] insights para story {story_id}:", metrics)
 
                             slide_ids = self._get_slide_ids_to_update(user_id, story_id)
                             if not slide_ids:

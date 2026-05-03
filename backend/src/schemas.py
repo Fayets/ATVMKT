@@ -320,7 +320,9 @@ class StorySlideOut(BaseModel):
     angulo: str | None = None
     cta_text: str | None = None
     instagram_media_id: str | None = None
+    views: int | None = None
     reach: int | None = None
+    shares: int | None = None
     like_count: int | None = None
     replies: int | None = None
     navigation: int | None = None

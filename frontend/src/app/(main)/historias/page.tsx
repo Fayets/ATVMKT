@@ -17,7 +17,9 @@ type StorySlide = {
   angulo: string | null
   cta_text: string | null
   instagram_media_id: string | null
+  views: number | null
   reach: number | null
+  shares: number | null
   like_count: number | null
   replies: number | null
   navigation: number | null
@@ -86,6 +88,9 @@ const toNumber = (v: unknown) => {
   }
   return 0
 }
+
+/** Vistas (reproducciones Graph `views`); si no hay dato nuevo, fallback a `reach` (histórico). */
+const slideViewCount = (s: Pick<StorySlide, 'views' | 'reach'>) => toNumber(s.views ?? s.reach)
 
 const hasCtaValue = (value: string | null | undefined): boolean => {
   const normalized = (value || '').trim().toLowerCase()
@@ -253,7 +258,7 @@ export default function HistoriasPage() {
         id: seq.id,
         fecha: seq.sequence_date,
         slides: seq.slides,
-        totalViews: seq.slides.reduce((acc, s) => acc + toNumber(s.reach), 0),
+        totalViews: seq.slides.reduce((acc, s) => acc + slideViewCount(s), 0),
         totalReplies: seq.slides.reduce((acc, s) => acc + toNumber(s.replies), 0),
         dolor,
         angulo: seq.angulo || angulos[0] || '',
@@ -755,9 +760,9 @@ export default function HistoriasPage() {
                   // Build slide data from Metricool stories OR base64 thumbnails
                   const slideMetrics = sec.slides.map((s, i) => ({
                     idx: i + 1,
-                    views: Number(s.reach || 0),
+                    views: slideViewCount(s),
                     likes: Number(s.replies || 0),
-                    reach: Number(s.reach || 0),
+                    shares: toNumber(s.shares),
                     thumb: getImageUrl(s.image_url) || null,
                   }))
                   const maxViews = Math.max(...slideMetrics.map(s => s.views), 1)
@@ -816,7 +821,7 @@ export default function HistoriasPage() {
                                     <>
                                       <div className="text-[9px] text-[var(--text3)]">Vistas: <span className="font-mono-num text-[var(--text)]">{s.views.toLocaleString()}</span></div>
                                       <div className="text-[9px] text-[var(--text3)]">Replies: <span className="font-mono-num text-[var(--text)]">{s.likes}</span></div>
-                                      <div className="text-[9px] text-[var(--text3)]">Alcance: <span className="font-mono-num text-[var(--text)]">{s.reach.toLocaleString()}</span></div>
+                                      <div className="text-[9px] text-[var(--text3)]">Compartidos: <span className="font-mono-num text-[var(--text)]">{s.shares.toLocaleString()}</span></div>
                                     </>
                                   )}
                                 </div>
@@ -953,12 +958,12 @@ function StorySequenceDetail({
   const [angulo, setAngulo] = useState<string>(sequence.angulo || '')
   const [ctaText, setCtaText] = useState<string>(sequence.cta_text || '')
   const cashPorChat = chats > 0 ? cash / chats : 0
-  const firstReach = toNumber(sequence.slides[0]?.reach)
+  const firstViews = slideViewCount(sequence.slides[0] ?? { views: null, reach: null })
   const retentionData = sequence.slides
     .map((s, i) => {
-      const reach = toNumber(s.reach)
-      if (firstReach <= 0) return null
-      return { slide: i + 1, retention: Math.max(0, Number(((reach / firstReach) * 100).toFixed(1))) }
+      const vc = slideViewCount(s)
+      if (firstViews <= 0) return null
+      return { slide: i + 1, retention: Math.max(0, Number(((vc / firstViews) * 100).toFixed(1))) }
     })
     .filter(Boolean) as { slide: number; retention: number }[]
 
@@ -988,17 +993,18 @@ function StorySequenceDetail({
         <div className="mb-5">
           <div className="flex items-end overflow-x-auto pb-2 gap-3">
             {sequence.slides.map((slide, i) => {
-              const prevReach = i > 0 ? toNumber(sequence.slides[i - 1]?.reach) : 0
-              const currentReach = toNumber(slide.reach)
-              const dropoff = i === 0 || prevReach <= 0 ? '—' : `${(((prevReach - currentReach) / prevReach) * 100).toFixed(1)}%`
+              const prevViews = i > 0 ? slideViewCount(sequence.slides[i - 1]!) : 0
+              const currentViews = slideViewCount(slide)
+              const dropoff = i === 0 || prevViews <= 0 ? '—' : `${(((prevViews - currentViews) / prevViews) * 100).toFixed(1)}%`
               const thumb = getImageUrl(slide.image_url)
               return (
                 <div key={slide.id} className="w-[120px] flex-shrink-0">
                   <div className="h-[200px] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)]">
                     {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover rounded-lg" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)]">{i + 1}</div>}
                   </div>
-                  <div className="mt-2 text-[10px] text-[var(--text3)]">VISTAS: <span className="text-[var(--text)]">{toNumber(slide.reach) || '—'}</span></div>
-                  <div className="text-[10px] text-[var(--text3)]">LIKES: <span className="text-[var(--text)]">{toNumber(slide.like_count) || '—'}</span></div>
+                  <div className="mt-2 text-[10px] text-[var(--text3)]">VISTAS: <span className="text-[var(--text)]">{slideViewCount(slide) || '—'}</span></div>
+                  <div className="text-[10px] text-[var(--text3)]">REPLIES: <span className="text-[var(--text)]">{toNumber(slide.replies) || '—'}</span></div>
+                  <div className="text-[10px] text-[var(--text3)]">COMPARTIDOS: <span className="text-[var(--text)]">{toNumber(slide.shares) || '—'}</span></div>
                   <div className="text-[10px] text-[var(--text3)]">PERFIL: <span className="text-[var(--text)]">{toNumber(slide.profile_visits) || '—'}</span></div>
                   <div className="text-[10px] text-[var(--text3)]">DROPOFF: <span className="text-[var(--text)]">{dropoff}</span></div>
                 </div>
