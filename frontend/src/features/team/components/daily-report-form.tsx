@@ -146,6 +146,7 @@ export function DailyReportSection({ role }: Props) {
       setLastSaved(`${form.memberId}-${form.date}`)
       setShowForm(false)
       void fetchMembers()
+      window.dispatchEvent(new Event('atvmkt-team-reports-changed'))
     } catch {
       toast('No se pudo guardar el reporte.')
     } finally {
@@ -191,7 +192,7 @@ export function DailyReportSection({ role }: Props) {
       </div>
 
       {showForm && (
-        <div className="glass-card p-5">
+        <div className="glass-card glass-card--performant p-5">
           <div className="mb-4 text-[13px] font-semibold">Reporte Diario — {role === 'setter' ? 'Setter' : 'Closer'}</div>
 
           <div className="mb-4 grid grid-cols-2 gap-3">

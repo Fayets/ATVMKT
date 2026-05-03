@@ -27,12 +27,12 @@ export function Modal({ open, onClose, title, children, maxWidth = '620px' }: Mo
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-x-hidden overflow-y-auto bg-black/70 p-4"
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
     >
       <div
-        className="glass-card relative w-[90%] max-h-[90vh] overflow-y-auto p-8 accent-top"
-        style={{ maxWidth }}
+        className="modal-panel relative w-full max-h-[min(90vh,860px)] overflow-y-auto overflow-x-hidden p-6 sm:p-8 accent-top"
+        style={{ maxWidth: `min(${maxWidth}, calc(100vw - 2rem))` }}
       >
         <div className="mb-6 flex items-center justify-between">
           <h3 className="text-[11px] font-medium uppercase tracking-widest text-[var(--accent)] opacity-85">

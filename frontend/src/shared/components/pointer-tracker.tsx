@@ -5,11 +5,13 @@ import { useEffect } from 'react'
 export function PointerTracker() {
   useEffect(() => {
     let currentCard: HTMLElement | null = null
+    let rafId = 0
 
     const sync = (e: PointerEvent) => {
-      // Find the closest glass-card under the cursor
       const target = e.target as HTMLElement
-      const card = target.closest('.glass-card') as HTMLElement | null
+      const raw = target.closest('.glass-card') as HTMLElement | null
+      const card =
+        raw && !raw.classList.contains('glass-card--performant') ? raw : null
 
       // Clear previous card if cursor left it
       if (currentCard && currentCard !== card) {
@@ -40,10 +42,19 @@ export function PointerTracker() {
       }
     }
 
-    document.addEventListener('pointermove', sync)
+    const onMove = (e: PointerEvent) => {
+      if (rafId) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        sync(e)
+      })
+    }
+
+    document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerleave', leave)
     return () => {
-      document.removeEventListener('pointermove', sync)
+      if (rafId) cancelAnimationFrame(rafId)
+      document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerleave', leave)
     }
   }, [])

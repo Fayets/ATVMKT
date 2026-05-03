@@ -18,6 +18,7 @@ type DashboardSetter = {
   conversaciones: number
   agendas: number
   links_enviados: number
+  generado: number
   comision: number
 }
 
@@ -108,6 +109,14 @@ export function TeamPage() {
     void fetchData()
   }, [fetchData])
 
+  useEffect(() => {
+    const refresh = () => {
+      void fetchData()
+    }
+    window.addEventListener('atvmkt-team-reports-changed', refresh)
+    return () => window.removeEventListener('atvmkt-team-reports-changed', refresh)
+  }, [fetchData])
+
   const handleAdd = async (name: string, role: string) => {
     if (!userId || !name.trim()) return
     const res = await apiFetch('/team/members', {
@@ -186,19 +195,19 @@ export function TeamPage() {
       </div>
 
       <div className="mb-6 grid grid-cols-4 gap-4">
-        <div className="glass-card border-l-2 border-l-[var(--green)] p-5">
+        <div className="glass-card glass-card--performant border-l-2 border-l-[var(--green)] p-5">
           <div className="text-[10px] uppercase tracking-wider text-[var(--text3)]">Cash Total Generado</div>
           <div className="font-mono-num mt-1 text-2xl font-bold text-[var(--green)]">{formatCash(totalCash)}</div>
         </div>
-        <div className="glass-card border-l-2 border-l-[#A855F7] p-5">
+        <div className="glass-card glass-card--performant border-l-2 border-l-[#A855F7] p-5">
           <div className="text-[10px] uppercase tracking-wider text-[var(--text3)]">Total Comisiones</div>
           <div className="font-mono-num mt-1 text-2xl font-bold text-[#A855F7]">{formatCash(totalCom)}</div>
         </div>
-        <div className="glass-card border-l-2 border-l-[var(--amber)] p-5">
+        <div className="glass-card glass-card--performant border-l-2 border-l-[var(--amber)] p-5">
           <div className="text-[10px] uppercase tracking-wider text-[var(--text3)]">% Sobre Cash</div>
           <div className="font-mono-num mt-1 text-2xl font-bold text-[var(--amber)]">{pctSobreCash.toFixed(1)}%</div>
         </div>
-        <div className="glass-card border-l-2 border-l-[var(--green)] p-5">
+        <div className="glass-card glass-card--performant border-l-2 border-l-[var(--green)] p-5">
           <div className="text-[10px] uppercase tracking-wider text-[var(--text3)]">Ganancia Neta</div>
           <div className="font-mono-num mt-1 text-2xl font-bold text-[var(--green)]">{formatCash(netGain)}</div>
         </div>
@@ -215,12 +224,13 @@ export function TeamPage() {
                 const st = setterStats(s.id)
                 const conversaciones = st?.conversaciones ?? 0
                 const agendados = st?.agendas ?? 0
+                const linksEnv = st?.links_enviados ?? 0
                 const comision = st?.comision ?? 0
                 const tasaAgend = conversaciones > 0 ? (agendados / conversaciones) * 100 : 0
                 const rend = agendados >= 4 ? 'Excelente' : agendados >= 2 ? 'En meta' : 'Regular'
                 const rendColor = rend === 'Excelente' ? 'var(--green)' : rend === 'En meta' ? 'var(--amber)' : 'var(--red)'
                 return (
-                  <div key={s.id} className="glass-card p-4">
+                  <div key={s.id} className="glass-card glass-card--performant p-4">
                     <div className="mb-3 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase" style={{ backgroundColor: 'rgba(212,168,67,0.15)', color: '#d4a843' }}>
@@ -252,6 +262,14 @@ export function TeamPage() {
                         <div className="font-mono-num text-lg font-semibold text-[var(--green)]">{formatCash(comision)}</div>
                       </div>
                     </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 text-[11px] text-[var(--text3)]">
+                      <span>
+                        Conv. <span className="font-mono-num text-[var(--text)]">{conversaciones}</span>
+                      </span>
+                      <span>
+                        Links <span className="font-mono-num text-[var(--text)]">{linksEnv}</span>
+                      </span>
+                    </div>
                   </div>
                 )
               })}
@@ -269,12 +287,15 @@ export function TeamPage() {
                 const calls = st?.llamadas_agendadas ?? 0
                 const shows = st?.shows ?? 0
                 const cierres = st?.cierres ?? 0
+                const ingreso = st?.ingreso ?? 0
+                const calif = st?.calificados ?? 0
+                const descalif = st?.descalificados ?? 0
                 const comision = st?.comision ?? 0
                 const closeRate = shows > 0 ? (cierres / shows) * 100 : 0
                 const rend = closeRate >= 50 ? 'Excelente' : closeRate >= 25 ? 'En meta' : 'Regular'
                 const rendColor = rend === 'Excelente' ? 'var(--green)' : rend === 'En meta' ? 'var(--amber)' : 'var(--red)'
                 return (
-                  <div key={c.id} className="glass-card p-4">
+                  <div key={c.id} className="glass-card glass-card--performant p-4">
                     <div className="mb-3 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="rounded px-1.5 py-0.5 text-[9px] font-bold uppercase" style={{ backgroundColor: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
@@ -310,6 +331,19 @@ export function TeamPage() {
                         <div className="font-mono-num text-lg font-semibold text-[var(--green)]">{formatCash(comision)}</div>
                       </div>
                     </div>
+                    <div className="mt-2 flex flex-wrap gap-x-4 text-[11px] text-[var(--text3)]">
+                      <span>
+                        Ingreso{' '}
+                        <span className="font-mono-num font-medium text-[var(--green)]">{formatCash(ingreso)}</span>
+                      </span>
+                      <span>
+                        Shows <span className="font-mono-num text-[var(--text)]">{shows}</span>
+                      </span>
+                      <span>
+                        Calif. <span className="font-mono-num text-[var(--text)]">{calif}</span> · Desc.{' '}
+                        <span className="font-mono-num text-[var(--text)]">{descalif}</span>
+                      </span>
+                    </div>
                   </div>
                 )
               })}
@@ -318,7 +352,7 @@ export function TeamPage() {
         </div>
       </div>
 
-      <div className="glass-card p-6">
+      <div className="glass-card glass-card--performant p-6">
         <div className="mb-4 text-[11px] font-medium uppercase tracking-widest text-[var(--text3)]">Tabla de Comisiones</div>
         {!dashboard || (dashboard.setters.length === 0 && dashboard.closers.length === 0) ? (
           <p className="text-[13px] text-[var(--text3)]">Sin datos de comisiones para este mes.</p>
@@ -326,7 +360,7 @@ export function TeamPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--border)]">
-                {['Nombre', 'Rol', 'Tipo', 'Generado', '% Aplicado', 'Comision', 'Estado'].map((h) => (
+                {['Nombre', 'Rol', 'Generado', '% Aplicado', 'Comision', 'Estado'].map((h) => (
                   <th key={h} className="px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
                     {h}
                   </th>
@@ -337,7 +371,6 @@ export function TeamPage() {
               {dashboard.setters.map((s) => {
                 const rowKey = `setter-${s.member_id}`
                 const estado = comEstados[rowKey] || 'Pendiente'
-                const generado = 0
                 return (
                   <tr key={rowKey} className="border-b border-[var(--border)]">
                     <td className="px-2 py-2.5 text-[13px] font-medium">{s.nombre}</td>
@@ -349,8 +382,7 @@ export function TeamPage() {
                         setter
                       </span>
                     </td>
-                    <td className="px-2 py-2.5 text-[12px] text-[var(--text2)]">Fijo {comPctGlobal}%</td>
-                    <td className="px-2 py-2.5 font-mono-num text-[13px]">{formatCash(generado)}</td>
+                    <td className="px-2 py-2.5 font-mono-num text-[13px]">{formatCash(s.generado)}</td>
                     <td className="px-2 py-2.5 font-mono-num text-[13px] text-[var(--text2)]">{comPctGlobal}%</td>
                     <td className="px-2 py-2.5 font-mono-num text-[13px] font-medium text-[var(--green)]">{formatCash(s.comision)}</td>
                     <td className="px-2 py-2.5">
@@ -381,7 +413,6 @@ export function TeamPage() {
                         closer
                       </span>
                     </td>
-                    <td className="px-2 py-2.5 text-[12px] text-[var(--text2)]">Fijo {comPctGlobal}%</td>
                     <td className="px-2 py-2.5 font-mono-num text-[13px]">{formatCash(c.ingreso)}</td>
                     <td className="px-2 py-2.5 font-mono-num text-[13px] text-[var(--text2)]">{comPctGlobal}%</td>
                     <td className="px-2 py-2.5 font-mono-num text-[13px] font-medium text-[var(--green)]">{formatCash(c.comision)}</td>

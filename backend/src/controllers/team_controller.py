@@ -26,6 +26,10 @@ def require_user_id(
     return x_user_id.strip()
 
 
+def _notas_str(val: str | None) -> str:
+    return (val or "").strip()
+
+
 def _parse_uid(user_id: str) -> int:
     try:
         return int(user_id.strip())
@@ -104,6 +108,8 @@ class SetterStatsOut(BaseModel):
     conversaciones: int
     agendas: int
     links_enviados: int
+    # Base imputable ($): agendas × ticket medio equipo (ingreso/cierres en el mes)
+    generado: float
     comision: float
 
 
@@ -191,7 +197,7 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             r.conversaciones = body.conversaciones
             r.agendas = body.agendas
             r.links_enviados = body.links_enviados
-            r.notas = body.notas
+            r.notas = _notas_str(body.notas)
             return ReportSavedOut(id=r.id, updated=True)
         r = SetterReport(
             user_id=uid,
@@ -200,7 +206,7 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             conversaciones=body.conversaciones,
             agendas=body.agendas,
             links_enviados=body.links_enviados,
-            notas=body.notas,
+            notas=_notas_str(body.notas),
         )
         r.flush()
         return ReportSavedOut(id=r.id, updated=False)
@@ -224,7 +230,7 @@ def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_us
             r.calificados = body.calificados
             r.descalificados = body.descalificados
             r.ingreso = body.ingreso
-            r.notas = body.notas
+            r.notas = _notas_str(body.notas)
             return ReportSavedOut(id=r.id, updated=True)
         r = CloserReport(
             user_id=uid,
@@ -236,7 +242,7 @@ def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_us
             calificados=body.calificados,
             descalificados=body.descalificados,
             ingreso=body.ingreso,
-            notas=body.notas,
+            notas=_notas_str(body.notas),
         )
         r.flush()
         return ReportSavedOut(id=r.id, updated=False)
@@ -298,27 +304,12 @@ def team_dashboard(
         active_setters = [m for m in members_by_id.values() if m.activo and m.rol == "setter"]
         active_closers = [m for m in members_by_id.values() if m.activo and m.rol == "closer"]
 
-        setter_out: list[SetterStatsOut] = []
-        for m in sorted(active_setters, key=lambda x: x.id):
-            t = setter_totals.get(
-                m.id,
-                {"conversaciones": 0, "agendas": 0, "links_enviados": 0},
-            )
-            # Sin ingreso en reportes de setter: comisión = 0 (alineado a la UI que usa cash de closer).
-            setter_out.append(
-                SetterStatsOut(
-                    member_id=m.id,
-                    nombre=m.nombre,
-                    conversaciones=int(t["conversaciones"]),
-                    agendas=int(t["agendas"]),
-                    links_enviados=int(t["links_enviados"]),
-                    comision=0.0,
-                )
-            )
+        pct = DEFAULT_COMMISSION_PCT / 100.0
 
         closer_out: list[CloserStatsOut] = []
-        comisiones = 0.0
+        comisiones_closer = 0.0
         cash_total = 0.0
+        total_cierres_mes = 0
         for m in sorted(active_closers, key=lambda x: x.id):
             t = closer_totals.get(
                 m.id,
@@ -332,22 +323,51 @@ def team_dashboard(
                 },
             )
             ing = float(t["ingreso"])
+            ci = int(t["cierres"])
             cash_total += ing
-            com = ing * (DEFAULT_COMMISSION_PCT / 100.0)
-            comisiones += com
+            total_cierres_mes += ci
+            com = ing * pct
+            comisiones_closer += com
             closer_out.append(
                 CloserStatsOut(
                     member_id=m.id,
                     nombre=m.nombre,
                     llamadas_agendadas=int(t["llamadas_agendadas"]),
                     shows=int(t["shows"]),
-                    cierres=int(t["cierres"]),
+                    cierres=ci,
                     calificados=int(t["calificados"]),
                     descalificados=int(t["descalificados"]),
                     ingreso=ing,
                     comision=com,
                 )
             )
+
+        avg_ticket = (cash_total / total_cierres_mes) if total_cierres_mes > 0 else 0.0
+
+        setter_out: list[SetterStatsOut] = []
+        comisiones_setter = 0.0
+        for m in sorted(active_setters, key=lambda x: x.id):
+            t = setter_totals.get(
+                m.id,
+                {"conversaciones": 0, "agendas": 0, "links_enviados": 0},
+            )
+            agendas = int(t["agendas"])
+            generado = avg_ticket * agendas
+            com_set = generado * pct
+            comisiones_setter += com_set
+            setter_out.append(
+                SetterStatsOut(
+                    member_id=m.id,
+                    nombre=m.nombre,
+                    conversaciones=int(t["conversaciones"]),
+                    agendas=agendas,
+                    links_enviados=int(t["links_enviados"]),
+                    generado=generado,
+                    comision=com_set,
+                )
+            )
+
+        comisiones = comisiones_closer + comisiones_setter
 
     return TeamDashboardOut(
         month=ym,

@@ -153,7 +153,7 @@ class SetterReport(db.Entity):
     conversaciones = Required(int, default=0)
     agendas = Required(int, default=0)
     links_enviados = Required(int, default=0)
-    notas = Optional(str)
+    notas = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
@@ -170,5 +170,5 @@ class CloserReport(db.Entity):
     calificados = Required(int, default=0)
     descalificados = Required(int, default=0)
     ingreso = Required(float, default=0)
-    notas = Optional(str)
+    notas = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())
