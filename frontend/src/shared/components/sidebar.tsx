@@ -89,12 +89,9 @@ export function Sidebar() {
 
   return (
     <aside className="flex h-screen w-56 flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg2)] sticky top-0">
-      {/* Logo */}
-      <div className="flex items-center gap-3 px-5 pt-4 pb-3">
-        <BrandLogo className="h-8 w-auto flex-shrink-0 object-contain opacity-95" />
-        <div>
-          <div className="text-[13px] font-semibold tracking-tight leading-tight">ATV</div>
-        </div>
+      {/* Logo — mismo PNG que login / favicon */}
+      <div className="flex justify-center px-4 pt-4 pb-3">
+        <BrandLogo className="h-12 w-auto max-w-[72px] flex-shrink-0 object-contain opacity-95" />
       </div>
 
       {/* Navigation */}

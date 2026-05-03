@@ -12,15 +12,10 @@ export default async function AuthLayout({
         <ThemeToggle />
       </div>
       <div className="w-full max-w-md px-6">
-        {/* Logo */}
-        <div className="mb-10 flex items-center gap-3">
-          <BrandLogo className="h-14 w-auto flex-shrink-0 object-contain opacity-95" />
-          <div>
-            <div className="text-sm font-semibold tracking-tight text-[var(--text)]">ATV</div>
-          </div>
+        <div className="mb-8 flex justify-center">
+          <BrandLogo className="h-20 w-auto max-w-[120px] flex-shrink-0 object-contain opacity-95" />
         </div>
 
-        {/* Glass card */}
         <div className="glass-card relative p-8 accent-top">
           {children}
         </div>

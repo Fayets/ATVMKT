@@ -1,17 +1,23 @@
+import Image from 'next/image'
+import atvLogo from '@/assets/atv-logo.png'
+
 type BrandLogoProps = {
-  /** Altura Tailwind (ej. h-7, h-12); ancho automático según proporción del arte. */
   className?: string
 }
 
-export function BrandLogo({ className = 'h-8 w-auto flex-shrink-0 object-contain' }: BrandLogoProps) {
+/** Logo ATV (PNG importado) — evita depender solo de `/public` por si el asset no resuelve en dev/proxy. */
+export function BrandLogo({
+  className = 'h-10 w-auto max-w-[56px] flex-shrink-0 object-contain',
+}: BrandLogoProps) {
   return (
-    <img
-      src="/atv-logo.png"
+    <Image
+      src={atvLogo}
       alt="ATV"
-      width={80}
-      height={100}
+      width={atvLogo.width}
+      height={atvLogo.height}
       className={className}
-      decoding="async"
+      sizes="120px"
+      priority
     />
   )
 }
