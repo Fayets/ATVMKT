@@ -5,6 +5,16 @@ export function getMonthRange(month: string): { start: string; end: string } {
   return { start, end }
 }
 
+/** Convierte `YYYY-MM-DD` o prefijo ISO con hora a `dd-mm-aaaa` para mostrar en UI. */
+export function formatIsoDateDdMmYyyy(iso: string): string {
+  const s = String(iso).trim()
+  if (!s) return iso
+  const head = s.includes('T') ? s.split('T')[0]! : s.split(' ')[0]!
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(head)
+  if (!m) return iso
+  return `${m[3]}-${m[2]}-${m[1]}`
+}
+
 export function formatCash(n: number): string {
   return '$' + Math.round(n).toLocaleString('es-AR')
 }

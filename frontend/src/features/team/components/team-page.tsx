@@ -3,12 +3,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
-import { Modal } from '@/shared/components/modal'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
 import { apiFetch } from '@/lib/api'
-import { DailyReportSection } from '@/features/team/components/daily-report-form'
 
 type ApiTeamMember = { id: number; nombre: string; rol: string; activo: boolean }
 
@@ -60,8 +58,6 @@ export function TeamPage() {
   const [closers, setClosers] = useState<ApiTeamMember[]>([])
   const [dashboard, setDashboard] = useState<TeamDashboardResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
-  const [addRole, setAddRole] = useState<'setter' | 'closer'>('setter')
   const [comEstados, setComEstados] = useState<Record<string, string>>({})
 
   const fetchData = useCallback(async () => {
@@ -117,29 +113,13 @@ export function TeamPage() {
     return () => window.removeEventListener('atvmkt-team-reports-changed', refresh)
   }, [fetchData])
 
-  const handleAdd = async (name: string, role: string) => {
-    if (!userId || !name.trim()) return
-    const res = await apiFetch('/team/members', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nombre: name.trim(), rol: role.toLowerCase() }),
-    })
-    if (!res.ok) {
-      toast(errMessage(await res.json().catch(() => ({}))))
-      return
-    }
-    toast('Miembro agregado')
-    setShowAdd(false)
-    void fetchData()
-  }
-
   const handleRemove = async (id: number) => {
     const res = await apiFetch(`/team/members/${id}`, { method: 'DELETE' })
     if (!res.ok) {
       toast(errMessage(await res.json().catch(() => ({}))))
       return
     }
-    toast('Miembro desactivado')
+    toast('Miembro eliminado')
     void fetchData()
   }
 
@@ -169,29 +149,7 @@ export function TeamPage() {
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-semibold tracking-tight">Dashboard de Equipo</h2>
-        <div className="flex items-center gap-3">
-          <MonthSelector month={month} options={options} onChange={setMonth} />
-          <button
-            type="button"
-            onClick={() => {
-              setAddRole('setter')
-              setShowAdd(true)
-            }}
-            className="rounded-lg border border-[var(--border2)] bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-          >
-            + Setter
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAddRole('closer')
-              setShowAdd(true)
-            }}
-            className="rounded-lg border border-[var(--border2)] bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-          >
-            + Closer
-          </button>
-        </div>
+        <MonthSelector month={month} options={options} onChange={setMonth} />
       </div>
 
       <div className="mb-6 grid grid-cols-4 gap-4">
@@ -435,71 +393,6 @@ export function TeamPage() {
         )}
       </div>
 
-      <div className="mt-8">
-        <div className="mb-4 border-b border-[var(--border)] pb-3 text-[11px] font-medium uppercase tracking-widest text-[var(--text3)]">Carga de Reportes</div>
-        <div className="grid grid-cols-2 gap-6">
-          <div>
-            <h4 className="mb-3 text-[12px] font-semibold text-[var(--amber)]">Setter</h4>
-            <DailyReportSection role="setter" />
-          </div>
-          <div>
-            <h4 className="mb-3 text-[12px] font-semibold text-[var(--green)]">Closer</h4>
-            <DailyReportSection role="closer" />
-          </div>
-        </div>
-      </div>
-
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={`Agregar ${addRole}`} maxWidth="400px">
-        <AddMemberForm role={addRole} onAdd={handleAdd} onCancel={() => setShowAdd(false)} />
-      </Modal>
-    </div>
-  )
-}
-
-function AddMemberForm({
-  role,
-  onAdd,
-  onCancel,
-}: {
-  role: string
-  onAdd: (name: string, role: string) => void | Promise<void>
-  onCancel: () => void
-}) {
-  const [name, setName] = useState('')
-  const [pending, setPending] = useState(false)
-  return (
-    <div>
-      <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Nombre</label>
-      <input
-        type="text"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        autoFocus
-        placeholder={`Nombre del ${role}`}
-        className="mb-4 w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
-      />
-      <div className="flex justify-end gap-3">
-        <button type="button" onClick={onCancel} className="rounded-lg border border-[var(--border2)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text2)]">
-          Cancelar
-        </button>
-        <button
-          type="button"
-          disabled={pending || !name.trim()}
-          onClick={() => {
-            void (async () => {
-              setPending(true)
-              try {
-                await onAdd(name, role)
-              } finally {
-                setPending(false)
-              }
-            })()
-          }}
-          className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white disabled:opacity-50"
-        >
-          {pending ? 'Guardando…' : 'Agregar'}
-        </button>
-      </div>
     </div>
   )
 }

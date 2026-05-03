@@ -8,9 +8,11 @@ type ModalProps = {
   title: string
   children: React.ReactNode
   maxWidth?: string
+  /** Menos padding y menos aire bajo el título (confirmaciones cortas). */
+  compact?: boolean
 }
 
-export function Modal({ open, onClose, title, children, maxWidth = '620px' }: ModalProps) {
+export function Modal({ open, onClose, title, children, maxWidth = '620px', compact = false }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -31,10 +33,12 @@ export function Modal({ open, onClose, title, children, maxWidth = '620px' }: Mo
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
     >
       <div
-        className="modal-panel relative w-full max-h-[min(90vh,860px)] overflow-y-auto overflow-x-hidden p-6 sm:p-8 accent-top"
+        className={`modal-panel relative w-full max-h-[min(90vh,860px)] overflow-y-auto overflow-x-hidden accent-top ${
+          compact ? 'p-4 sm:p-5' : 'p-6 sm:p-8'
+        }`}
         style={{ maxWidth: `min(${maxWidth}, calc(100vw - 2rem))` }}
       >
-        <div className="mb-6 flex items-center justify-between">
+        <div className={`flex items-center justify-between ${compact ? 'mb-2' : 'mb-6'}`}>
           <h3 className="text-[11px] font-medium uppercase tracking-widest text-[var(--accent)] opacity-85">
             {title}
           </h3>

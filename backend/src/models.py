@@ -154,6 +154,9 @@ class SetterReport(db.Entity):
     agendas = Required(int, default=0)
     links_enviados = Required(int, default=0)
     notas = Optional(str, default="")
+    sentimiento_trafico = Optional(str, default="")
+    avatar_tipo_agendas = Optional(str, default="")
+    insights_marketing = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
@@ -164,6 +167,7 @@ class CloserReport(db.Entity):
     user_id = Required(int, index=True)
     member_id = Required(int)
     fecha = Required(date)
+    reporte_tipo = Required(str, default="ventas")  # 'ventas' | 'marketing'
     llamadas_agendadas = Required(int, default=0)
     shows = Required(int, default=0)
     cierres = Required(int, default=0)
@@ -171,4 +175,11 @@ class CloserReport(db.Entity):
     descalificados = Required(int, default=0)
     ingreso = Required(float, default=0)
     notas = Optional(str, default="")
+    nombre_lead = Optional(str, default="")
+    estado_final_llamada = Optional(str, default="")
+    perfil_lead = Optional(str, default="")
+    objecion_miedo = Optional(str, default="")
+    dolores_llamada = Optional(str, default="")
+    razon_compra_final = Optional(str, default="")
+    insights_marketing_llamada = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())

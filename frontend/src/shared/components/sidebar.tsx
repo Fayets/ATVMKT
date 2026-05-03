@@ -57,6 +57,8 @@ const dataGroups: NavGroup[] = [
     items: [
       { label: 'Dashboard equipo', href: '/team' },
       { label: 'Carga de Reportes', href: '/team/reportes' },
+      { label: 'Editar equipo', href: '/team/equipo' },
+      { label: 'Historial de reportes', href: '/team/historial-reportes' },
     ],
   },
 ]

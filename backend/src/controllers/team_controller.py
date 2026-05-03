@@ -6,13 +6,29 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import db_session
 from pydantic import BaseModel, Field
+from starlette.responses import Response
 
 from src.models import CloserReport, SetterReport, TeamMember
+from src.team_reports_pdf import build_team_reports_pdf, fecha_iso_a_dd_mm_yyyy
 
 router = APIRouter(prefix="/api/team", tags=["team"], redirect_slashes=False)
 
 DEFAULT_COMMISSION_PCT = 5.0
 VALID_ROLES = frozenset({"setter", "closer"})
+CLOSER_REPORTE_TIPOS = frozenset({"ventas", "marketing"})
+CLOSER_ESTADOS_FINAL = frozenset(
+    {"Re-agendado", "Cerrado", "No cerrado", "Señado", "Descalificado"}
+)
+CLOSER_PERFILES_LEAD = frozenset(
+    {
+        "Experto en infoproductos",
+        "Dueño de agencias",
+        "Setter / closer / editor / etc.",
+        "Infoproductor (persona que ya tiene un producto digital validado)",
+        "Creador de contenido (persona que no tiene un infoproducto y solo crea contenido)",
+        "Otro",
+    }
+)
 
 
 def require_user_id(
@@ -64,6 +80,102 @@ def _month_range(ym: str) -> tuple[date, date]:
     return start, end
 
 
+def _collect_team_reports(uid: int, desde: date, hasta: date) -> list[dict[str, Any]]:
+    if hasta < desde:
+        raise HTTPException(status_code=400, detail="La fecha hasta debe ser mayor o igual que desde.")
+    if (hasta - desde).days > 400:
+        raise HTTPException(status_code=400, detail="El rango máximo es 400 días.")
+
+    def _mn(members: dict[int, TeamMember], mid: int) -> str:
+        m = members.get(mid)
+        return m.nombre if m else "(sin miembro)"
+
+    with db_session:
+        members = {m.id: m for m in _members_for_user(uid)}
+        rows: list[dict[str, Any]] = []
+        for r in list(SetterReport.select()):
+            if r.user_id != uid or not (desde <= r.fecha <= hasta):
+                continue
+            rows.append(
+                {
+                    "kind": "setter",
+                    "id": r.id,
+                    "fecha": r.fecha.isoformat(),
+                    "member_id": r.member_id,
+                    "member_nombre": _mn(members, r.member_id),
+                    "conversaciones": r.conversaciones,
+                    "agendas": r.agendas,
+                    "links_enviados": r.links_enviados,
+                    "notas": r.notas or "",
+                    "sentimiento_trafico": r.sentimiento_trafico or "",
+                    "avatar_tipo_agendas": r.avatar_tipo_agendas or "",
+                    "insights_marketing": r.insights_marketing or "",
+                }
+            )
+        for r in list(CloserReport.select()):
+            if r.user_id != uid or not (desde <= r.fecha <= hasta):
+                continue
+            rows.append(
+                {
+                    "kind": "closer",
+                    "id": r.id,
+                    "fecha": r.fecha.isoformat(),
+                    "member_id": r.member_id,
+                    "member_nombre": _mn(members, r.member_id),
+                    "reporte_tipo": getattr(r, "reporte_tipo", None) or "ventas",
+                    "llamadas_agendadas": r.llamadas_agendadas,
+                    "shows": r.shows,
+                    "cierres": r.cierres,
+                    "calificados": r.calificados,
+                    "descalificados": r.descalificados,
+                    "ingreso": float(r.ingreso),
+                    "notas": r.notas or "",
+                    "nombre_lead": getattr(r, "nombre_lead", None) or "",
+                    "estado_final_llamada": getattr(r, "estado_final_llamada", None) or "",
+                    "perfil_lead": getattr(r, "perfil_lead", None) or "",
+                    "objecion_miedo": getattr(r, "objecion_miedo", None) or "",
+                    "dolores_llamada": getattr(r, "dolores_llamada", None) or "",
+                    "razon_compra_final": getattr(r, "razon_compra_final", None) or "",
+                    "insights_marketing_llamada": getattr(r, "insights_marketing_llamada", None) or "",
+                }
+            )
+    rows.sort(key=lambda x: (x["fecha"], x["id"]), reverse=True)
+    return rows
+
+
+TEAM_REPORT_FILTROS = frozenset({"todos", "setter", "closer_marketing", "closer_ventas"})
+
+
+def _parse_team_report_filtro(raw: str | None) -> str:
+    v = (raw or "todos").strip().lower()
+    if v not in TEAM_REPORT_FILTROS:
+        raise HTTPException(
+            status_code=400,
+            detail="filtro debe ser todos, setter, closer_marketing o closer_ventas.",
+        )
+    return v
+
+
+def _filter_team_reports(rows: list[dict[str, Any]], filtro: str) -> list[dict[str, Any]]:
+    if filtro == "todos":
+        return rows
+    if filtro == "setter":
+        return [r for r in rows if r.get("kind") == "setter"]
+    if filtro == "closer_marketing":
+        return [
+            r
+            for r in rows
+            if r.get("kind") == "closer" and str(r.get("reporte_tipo") or "ventas") == "marketing"
+        ]
+    if filtro == "closer_ventas":
+        return [
+            r
+            for r in rows
+            if r.get("kind") == "closer" and str(r.get("reporte_tipo") or "ventas") != "marketing"
+        ]
+    return rows
+
+
 class CreateTeamMemberBody(BaseModel):
     nombre: str = Field(min_length=1, max_length=500)
     rol: str
@@ -76,6 +188,11 @@ class TeamMemberOut(BaseModel):
     activo: bool
 
 
+class UpdateTeamMemberBody(BaseModel):
+    nombre: str | None = None
+    activo: bool | None = None
+
+
 class SetterReportBody(BaseModel):
     member_id: int
     fecha: date
@@ -83,11 +200,15 @@ class SetterReportBody(BaseModel):
     agendas: int = 0
     links_enviados: int = 0
     notas: str | None = None
+    sentimiento_trafico: str | None = None
+    avatar_tipo_agendas: str | None = None
+    insights_marketing: str | None = None
 
 
 class CloserReportBody(BaseModel):
     member_id: int
     fecha: date
+    reporte_tipo: str = "ventas"
     llamadas_agendadas: int = 0
     shows: int = 0
     cierres: int = 0
@@ -95,6 +216,13 @@ class CloserReportBody(BaseModel):
     descalificados: int = 0
     ingreso: float = 0
     notas: str | None = None
+    nombre_lead: str | None = None
+    estado_final_llamada: str | None = None
+    perfil_lead: str | None = None
+    objecion_miedo: str | None = None
+    dolores_llamada: str | None = None
+    razon_compra_final: str | None = None
+    insights_marketing_llamada: str | None = None
 
 
 class ReportSavedOut(BaseModel):
@@ -135,18 +263,23 @@ class TeamDashboardOut(BaseModel):
 
 
 @router.get("/members")
-def list_members(user_id: str = Depends(require_user_id)) -> dict[str, Any]:
+def list_members(
+    user_id: str = Depends(require_user_id),
+    incluir_inactivos: bool = Query(False, description="Incluye miembros desactivados (útil para edición / historial)."),
+) -> dict[str, Any]:
     uid = _parse_uid(user_id)
     with db_session:
-        active = [m for m in _members_for_user(uid) if m.activo]
+        pool = _members_for_user(uid)
+        if not incluir_inactivos:
+            pool = [m for m in pool if m.activo]
         setters = [
             TeamMemberOut(id=m.id, nombre=m.nombre, rol=m.rol, activo=m.activo)
-            for m in active
+            for m in pool
             if m.rol == "setter"
         ]
         closers = [
             TeamMemberOut(id=m.id, nombre=m.nombre, rol=m.rol, activo=m.activo)
-            for m in active
+            for m in pool
             if m.rol == "closer"
         ]
         return {"setters": [s.model_dump() for s in setters], "closers": [c.model_dump() for c in closers]}
@@ -168,7 +301,8 @@ def create_member(body: CreateTeamMemberBody, user_id: str = Depends(require_use
 
 
 @router.delete("/members/{member_id}")
-def deactivate_member(member_id: int, user_id: str = Depends(require_user_id)) -> dict[str, str]:
+def delete_member(member_id: int, user_id: str = Depends(require_user_id)) -> dict[str, str]:
+    """Elimina el miembro y todos sus reportes (setter y closer) del mismo usuario."""
     uid = _parse_uid(user_id)
     with db_session:
         found: TeamMember | None = None
@@ -178,8 +312,80 @@ def deactivate_member(member_id: int, user_id: str = Depends(require_user_id)) -
                 break
         if found is None:
             raise HTTPException(status_code=404, detail="Miembro no encontrado.")
-        found.activo = False
+        for r in list(SetterReport.select()):
+            if r.user_id == uid and r.member_id == member_id:
+                r.delete()
+        for r in list(CloserReport.select()):
+            if r.user_id == uid and r.member_id == member_id:
+                r.delete()
+        found.delete()
     return {"status": "ok"}
+
+
+@router.patch("/members/{member_id}")
+def update_member(
+    member_id: int,
+    body: UpdateTeamMemberBody,
+    user_id: str = Depends(require_user_id),
+) -> TeamMemberOut:
+    uid = _parse_uid(user_id)
+    if body.nombre is None and body.activo is None:
+        raise HTTPException(status_code=400, detail="Enviá al menos nombre o activo para actualizar.")
+    with db_session:
+        found: TeamMember | None = None
+        for m in _members_for_user(uid):
+            if m.id == member_id:
+                found = m
+                break
+        if found is None:
+            raise HTTPException(status_code=404, detail="Miembro no encontrado.")
+        if body.nombre is not None:
+            n = body.nombre.strip()
+            if not n:
+                raise HTTPException(status_code=400, detail="nombre no puede estar vacío.")
+            found.nombre = n
+        if body.activo is not None:
+            found.activo = body.activo
+        return TeamMemberOut(id=found.id, nombre=found.nombre, rol=found.rol, activo=found.activo)
+
+
+@router.get("/reports")
+def list_team_reports(
+    desde: date = Query(..., description="Inicio del rango (YYYY-MM-DD)"),
+    hasta: date = Query(..., description="Fin del rango (YYYY-MM-DD)"),
+    user_id: str = Depends(require_user_id),
+) -> dict[str, Any]:
+    uid = _parse_uid(user_id)
+    rows = _collect_team_reports(uid, desde, hasta)
+    return {"reports": rows}
+
+
+@router.get("/reports/pdf")
+def team_reports_pdf(
+    desde: date = Query(...),
+    hasta: date = Query(...),
+    filtro: str = Query(
+        "todos",
+        description="todos | setter | closer_marketing | closer_ventas",
+    ),
+    user_id: str = Depends(require_user_id),
+) -> Response:
+    uid = _parse_uid(user_id)
+    rows = _collect_team_reports(uid, desde, hasta)
+    rows = _filter_team_reports(rows, _parse_team_report_filtro(filtro))
+    try:
+        body = build_team_reports_pdf(rows)
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="Falta la librería de PDF. En la carpeta backend ejecutá: pip install fpdf2",
+        ) from e
+    fn = f"reportes_equipo_{fecha_iso_a_dd_mm_yyyy(desde.isoformat())}_{fecha_iso_a_dd_mm_yyyy(hasta.isoformat())}.pdf"
+    return Response(
+        content=body,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
+    )
 
 
 @router.post("/setter-reports")
@@ -198,6 +404,9 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             r.agendas = body.agendas
             r.links_enviados = body.links_enviados
             r.notas = _notas_str(body.notas)
+            r.sentimiento_trafico = _notas_str(body.sentimiento_trafico)
+            r.avatar_tipo_agendas = _notas_str(body.avatar_tipo_agendas)
+            r.insights_marketing = _notas_str(body.insights_marketing)
             return ReportSavedOut(id=r.id, updated=True)
         r = SetterReport(
             user_id=uid,
@@ -207,6 +416,9 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             agendas=body.agendas,
             links_enviados=body.links_enviados,
             notas=_notas_str(body.notas),
+            sentimiento_trafico=_notas_str(body.sentimiento_trafico),
+            avatar_tipo_agendas=_notas_str(body.avatar_tipo_agendas),
+            insights_marketing=_notas_str(body.insights_marketing),
         )
         r.flush()
         return ReportSavedOut(id=r.id, updated=False)
@@ -215,37 +427,133 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
 @router.post("/closer-reports")
 def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_user_id)) -> ReportSavedOut:
     uid = _parse_uid(user_id)
+    tipo = (body.reporte_tipo or "ventas").strip().lower()
+    if tipo not in CLOSER_REPORTE_TIPOS:
+        raise HTTPException(status_code=400, detail="reporte_tipo debe ser 'ventas' o 'marketing'.")
+    la = body.llamadas_agendadas
+    sh = body.shows
+    ci = body.cierres
+    cal = body.calificados
+    desc = body.descalificados
+    ing = body.ingreso
+    nombre_l = _notas_str(body.nombre_lead)
+    estado_f = _notas_str(body.estado_final_llamada)
+    perfil = _notas_str(body.perfil_lead)
+    objecion = _notas_str(body.objecion_miedo)
+    dolores = _notas_str(body.dolores_llamada)
+    razon = _notas_str(body.razon_compra_final)
+    ins_mkt = _notas_str(body.insights_marketing_llamada)
+    if tipo == "marketing":
+        if not nombre_l:
+            raise HTTPException(status_code=400, detail="Indicá el nombre del lead.")
+        if estado_f not in CLOSER_ESTADOS_FINAL:
+            raise HTTPException(
+                status_code=400,
+                detail="Seleccioná el estado final de la llamada.",
+            )
+        if perfil not in CLOSER_PERFILES_LEAD:
+            raise HTTPException(status_code=400, detail="Seleccioná el perfil del lead.")
+        la = sh = ci = cal = desc = 0
+        ing = 0.0
+    else:
+        nombre_l = estado_f = perfil = objecion = dolores = razon = ins_mkt = ""
     with db_session:
         _get_active_member(uid, body.member_id, "closer")
+        if tipo == "marketing":
+            r = CloserReport(
+                user_id=uid,
+                member_id=body.member_id,
+                fecha=body.fecha,
+                reporte_tipo=tipo,
+                llamadas_agendadas=la,
+                shows=sh,
+                cierres=ci,
+                calificados=cal,
+                descalificados=desc,
+                ingreso=ing,
+                notas=_notas_str(body.notas),
+                nombre_lead=nombre_l,
+                estado_final_llamada=estado_f,
+                perfil_lead=perfil,
+                objecion_miedo=objecion,
+                dolores_llamada=dolores,
+                razon_compra_final=razon,
+                insights_marketing_llamada=ins_mkt,
+            )
+            r.flush()
+            return ReportSavedOut(id=r.id, updated=False)
         existing = [
             r
             for r in list(CloserReport.select())
-            if r.user_id == uid and r.member_id == body.member_id and r.fecha == body.fecha
+            if r.user_id == uid
+            and r.member_id == body.member_id
+            and r.fecha == body.fecha
+            and r.reporte_tipo == tipo
         ]
         if existing:
             r = existing[0]
-            r.llamadas_agendadas = body.llamadas_agendadas
-            r.shows = body.shows
-            r.cierres = body.cierres
-            r.calificados = body.calificados
-            r.descalificados = body.descalificados
-            r.ingreso = body.ingreso
+            r.llamadas_agendadas = la
+            r.shows = sh
+            r.cierres = ci
+            r.calificados = cal
+            r.descalificados = desc
+            r.ingreso = ing
             r.notas = _notas_str(body.notas)
+            r.nombre_lead = nombre_l
+            r.estado_final_llamada = estado_f
+            r.perfil_lead = perfil
+            r.objecion_miedo = objecion
+            r.dolores_llamada = dolores
+            r.razon_compra_final = razon
+            r.insights_marketing_llamada = ins_mkt
             return ReportSavedOut(id=r.id, updated=True)
         r = CloserReport(
             user_id=uid,
             member_id=body.member_id,
             fecha=body.fecha,
-            llamadas_agendadas=body.llamadas_agendadas,
-            shows=body.shows,
-            cierres=body.cierres,
-            calificados=body.calificados,
-            descalificados=body.descalificados,
-            ingreso=body.ingreso,
+            reporte_tipo=tipo,
+            llamadas_agendadas=la,
+            shows=sh,
+            cierres=ci,
+            calificados=cal,
+            descalificados=desc,
+            ingreso=ing,
             notas=_notas_str(body.notas),
+            nombre_lead=nombre_l,
+            estado_final_llamada=estado_f,
+            perfil_lead=perfil,
+            objecion_miedo=objecion,
+            dolores_llamada=dolores,
+            razon_compra_final=razon,
+            insights_marketing_llamada=ins_mkt,
         )
         r.flush()
         return ReportSavedOut(id=r.id, updated=False)
+
+
+class CloserMarketingCountOut(BaseModel):
+    count: int
+
+
+@router.get("/closer-marketing-report-count")
+def closer_marketing_report_count(
+    fecha: date = Query(..., description="Día del reporte (YYYY-MM-DD)"),
+    member_id: int = Query(..., description="TeamMember closer"),
+    user_id: str = Depends(require_user_id),
+) -> CloserMarketingCountOut:
+    """Cuántos reportes marketing (una fila por llamada) hay para ese closer en esa fecha."""
+    uid = _parse_uid(user_id)
+    with db_session:
+        _get_active_member(uid, member_id, "closer")
+        n = sum(
+            1
+            for r in list(CloserReport.select())
+            if r.user_id == uid
+            and r.member_id == member_id
+            and r.fecha == fecha
+            and r.reporte_tipo == "marketing"
+        )
+    return CloserMarketingCountOut(count=n)
 
 
 @router.get("/dashboard")
@@ -266,7 +574,7 @@ def team_dashboard(
         closer_rows = [
             r
             for r in list(CloserReport.select())
-            if r.user_id == uid and start <= r.fecha <= end
+            if r.user_id == uid and start <= r.fecha <= end and r.reporte_tipo == "ventas"
         ]
 
         members_by_id = {m.id: m for m in _members_for_user(uid)}

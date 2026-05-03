@@ -334,6 +334,154 @@ def _migrate_postgres_storyslide_views_shares() -> None:
         conn.close()
 
 
+def _migrate_postgres_setter_report_text_columns() -> None:
+    """Añade textos cualitativos al reporte diario setter (Pony no altera tablas existentes)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'setter_report'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            for ddl in (
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS sentimiento_trafico TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS avatar_tipo_agendas TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS insights_marketing TEXT",
+            ):
+                try:
+                    cur.execute(ddl)
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
+def _migrate_postgres_closer_report_tipo() -> None:
+    """Añade reporte_tipo (ventas | marketing) para dos reportes diarios por closer."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'closer_report'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            try:
+                cur.execute(
+                    f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS reporte_tipo VARCHAR(32) NOT NULL DEFAULT 'ventas'"
+                )
+            except Exception:
+                pass
+            try:
+                cur.execute(f"UPDATE {sql_table} SET reporte_tipo = 'ventas' WHERE reporte_tipo IS NULL OR reporte_tipo = ''")
+            except Exception:
+                pass
+            for ddl in (
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS nombre_lead TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS estado_final_llamada TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS perfil_lead TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS objecion_miedo TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS dolores_llamada TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS razon_compra_final TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS insights_marketing_llamada TEXT",
+            ):
+                try:
+                    cur.execute(ddl)
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
+def _migrate_postgres_closer_report_marketing_multiple_per_day() -> None:
+    """Varios reportes marketing por día (una fila por llamada); un solo reporte ventas por closer/fecha."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'closer_report'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            try:
+                cur.execute("DROP INDEX IF EXISTS uq_closer_report_user_member_fecha_tipo")
+            except Exception:
+                pass
+            try:
+                cur.execute(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_closer_report_user_member_fecha_ventas "
+                    f"ON {sql_table} (user_id, member_id, fecha) WHERE reporte_tipo = 'ventas'"
+                )
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+
 def _migrate_agendo_en_iso_to_call() -> None:
     """ISO en agendo_en → call (fecha) y agendo_en=Chat (canal)."""
     iso_pat = re.compile(r"^\d{4}-\d{2}-\d{2}")
@@ -420,6 +568,9 @@ def init_db() -> None:
     _migrate_postgres_drop_pago_en_llamada()
     _migrate_postgres_drop_canal_agendo()
     _migrate_postgres_storyslide_views_shares()
+    _migrate_postgres_setter_report_text_columns()
+    _migrate_postgres_closer_report_tipo()
+    _migrate_postgres_closer_report_marketing_multiple_per_day()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()
     _migrate_agendo_en_default_chat_when_agendado()
