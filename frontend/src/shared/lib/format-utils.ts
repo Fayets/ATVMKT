@@ -24,3 +24,8 @@ export function formatK(n: number): string {
   if (n >= 1000) return Math.round(n / 1000) + 'K'
   return n.toLocaleString()
 }
+
+/** Entero con separadores de miles (es-AR), sin abreviar en K/M — útil para visitas/comentarios exactos. */
+export function formatIntegerEsAr(n: number): string {
+  return Math.round(Number(n) || 0).toLocaleString('es-AR')
+}

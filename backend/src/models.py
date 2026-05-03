@@ -81,6 +81,39 @@ class ReelContent(db.Entity):
     updated_at = Optional(datetime)
 
 
+class YoutubeContent(db.Entity):
+    """Videos de YouTube sincronizados (Data API v3) por usuario."""
+
+    _table_ = "youtubecontent"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    external_id = Required(str)  # id del video en YouTube
+    title = Optional(str)
+    description = Optional(str, default="")
+    thumbnail_url = Optional(str)
+    published_at = Optional(datetime)
+    url = Optional(str)
+    duration_seconds = Optional(int)
+    views = Required(int, default=0)
+    likes = Required(int, default=0)
+    comments_count = Required(int, default=0)
+    # Analytics (YouTube Studio) no están en Data API v3 estándar; quedan para futuro / manual
+    ctr = Optional(float)
+    impressions = Optional(int)
+    retention = Optional(float)
+    avg_view_duration_seconds = Optional(int)
+    performance_history = Required(Json, default=lambda: [])
+    classification = Required(Json, default=lambda: {})
+    cash = Required(float, default=0)
+    chats = Required(int, default=0)
+    notes = Optional(str, default="")
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)
+
+    composite_key(user_id, external_id)
+
+
 class MasterList(db.Entity):
     id = PrimaryKey(int, auto=True)
     user_id = Required(int, index=True)

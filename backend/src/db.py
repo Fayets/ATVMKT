@@ -291,6 +291,64 @@ def _migrate_postgres_drop_canal_agendo() -> None:
         conn.close()
 
 
+def _migrate_postgres_youtube_content() -> None:
+    """Crea `youtubecontent` en Postgres (Pony no altera tablas ya mapeadas)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS youtubecontent (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    external_id VARCHAR(32) NOT NULL,
+                    title TEXT,
+                    description TEXT DEFAULT '',
+                    thumbnail_url TEXT,
+                    published_at TIMESTAMP NULL,
+                    url TEXT,
+                    duration_seconds INTEGER NULL,
+                    views INTEGER NOT NULL DEFAULT 0,
+                    likes INTEGER NOT NULL DEFAULT 0,
+                    comments_count INTEGER NOT NULL DEFAULT 0,
+                    ctr DOUBLE PRECISION NULL,
+                    impressions INTEGER NULL,
+                    retention DOUBLE PRECISION NULL,
+                    avg_view_duration_seconds INTEGER NULL,
+                    performance_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    classification JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    cash DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    chats INTEGER NOT NULL DEFAULT 0,
+                    notes TEXT DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+                    updated_at TIMESTAMP NULL,
+                    CONSTRAINT uq_youtubecontent_user_external UNIQUE (user_id, external_id)
+                )
+                """
+            )
+            try:
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_youtubecontent_user_id ON youtubecontent (user_id)")
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+
 def _migrate_postgres_storyslide_views_shares() -> None:
     """Añade `views` y `shares` a storyslide (Pony no altera tablas existentes en Postgres)."""
     if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
@@ -567,6 +625,7 @@ def init_db() -> None:
     _migrate_postgres_lead_agendo_to_timestamp()
     _migrate_postgres_drop_pago_en_llamada()
     _migrate_postgres_drop_canal_agendo()
+    _migrate_postgres_youtube_content()
     _migrate_postgres_storyslide_views_shares()
     _migrate_postgres_setter_report_text_columns()
     _migrate_postgres_closer_report_tipo()

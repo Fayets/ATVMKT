@@ -1,12 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { useMonthContext } from '@/shared/components/app-providers'
-import { MonthSelector } from '@/shared/components/month-selector'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { backendAuthHeaders } from '@/lib/api'
-import { formatK, formatCash } from '@/shared/lib/format-utils'
+import { formatK, formatCash, formatIntegerEsAr } from '@/shared/lib/format-utils'
 
 type PerfSnapshot = { date: string; views: number; likes: number; comments: number }
 type VideoMetrics = {
@@ -25,17 +23,63 @@ type Video = {
 }
 type Lead = { client_name: string | null; status: string | null; payment: number | null; program_offered: string | null; agenda_point: string | null }
 
+type YoutubeListAggregates = {
+  video_count: number
+  total_views: number
+  total_likes: number
+  total_comments: number
+  total_cash: number
+  total_chats: number
+  avg_views: number
+  avg_ctr: number
+}
+
+const emptyYoutubeAggregates: YoutubeListAggregates = {
+  video_count: 0,
+  total_views: 0,
+  total_likes: 0,
+  total_comments: 0,
+  total_cash: 0,
+  total_chats: 0,
+  avg_views: 0,
+  avg_ctr: 0,
+}
+
+const PAGE_SIZE = 12
+
+function prevMonth(ym: string): string | null {
+  const [ys, ms] = ym.split('-')
+  const y = parseInt(ys, 10)
+  const m = parseInt(ms, 10)
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return null
+  if (m <= 1) return `${y - 1}-12`
+  return `${y}-${String(m - 1).padStart(2, '0')}`
+}
+
 const UNDO_DURATION = 6000
 
+function calendarYm(): string {
+  const n = new Date()
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+}
+
 export default function YouTubePage() {
-  const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
   const { ready, userId } = useAuthUser()
   const apiBase =
     (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
+  const [monthMode, setMonthMode] = useState<'all' | 'current' | 'comparison'>('all')
+  const [comparisonMonths, setComparisonMonths] = useState<[string, string] | null>(null)
+  const [availableMonths, setAvailableMonths] = useState<string[]>([])
+  const [showComparisonModal, setShowComparisonModal] = useState(false)
+  const [comparisonDraftA, setComparisonDraftA] = useState('')
+  const [comparisonDraftB, setComparisonDraftB] = useState('')
   const [videos, setVideos] = useState<Video[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
-  const [prevVideos, setPrevVideos] = useState<Video[]>([])
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [aggregates, setAggregates] = useState<YoutubeListAggregates>(emptyYoutubeAggregates)
+  const [prevAggregates, setPrevAggregates] = useState<YoutubeListAggregates>(emptyYoutubeAggregates)
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncStatus, setSyncStatus] = useState('')
@@ -44,9 +88,21 @@ export default function YouTubePage() {
   const [undoProgress, setUndoProgress] = useState(100)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const undoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null)
-  const [transcriptInput, setTranscriptInput] = useState('')
-  const [showTranscriptFor, setShowTranscriptFor] = useState<string | null>(null)
+  const monthChoices = useMemo(() => {
+    const merged = [...new Set([...availableMonths, ...recentMonthOptions(36)])]
+    merged.sort((a, b) => b.localeCompare(a))
+    return merged
+  }, [availableMonths])
+
+  const filterSubtitle = useMemo(() => {
+    if (monthMode === 'all') return 'Todos los meses'
+    if (monthMode === 'current') return formatMonthLabel(calendarYm())
+    if (monthMode === 'comparison' && comparisonMonths) {
+      const [a, b] = comparisonMonths
+      return `${formatMonthLabel(a)} vs ${formatMonthLabel(b)}`
+    }
+    return 'Comparación'
+  }, [monthMode, comparisonMonths])
 
   const showUndo = (label: string, fn: () => Promise<void>) => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
@@ -56,17 +112,124 @@ export default function YouTubePage() {
     undoIntervalRef.current = setInterval(() => { const r = Math.max(0, 100 - ((Date.now() - start) / UNDO_DURATION) * 100); setUndoProgress(r); if (r <= 0) { clearInterval(undoIntervalRef.current!); setUndoAction(null) } }, 50)
     undoTimerRef.current = setTimeout(() => { if (undoIntervalRef.current) clearInterval(undoIntervalRef.current); setUndoAction(null) }, UNDO_DURATION)
   }
-  const handleUndo = async () => { if (!undoAction) return; if (undoTimerRef.current) clearTimeout(undoTimerRef.current); if (undoIntervalRef.current) clearInterval(undoIntervalRef.current); await undoAction.execute(); setUndoAction(null); toast('Revertido'); fetchData() }
+  const handleUndo = async () => { if (!undoAction) return; if (undoTimerRef.current) clearTimeout(undoTimerRef.current); if (undoIntervalRef.current) clearInterval(undoIntervalRef.current); await undoAction.execute(); setUndoAction(null); toast('Revertido'); void fetchData() }
 
-  const fetchData = useCallback(async () => {
-    if (!ready) return; setLoading(true)
-    setVideos([])
-    setLeads([])
-    setPrevVideos([])
-    setLoading(false)
-  }, [month, ready])
+  const fetchData = useCallback(
+    async (explicitPage?: number) => {
+      if (!ready) return
+      const pageForRequest = explicitPage ?? page
+      setLoading(true)
+      try {
+        const headers = backendAuthHeaders()
+        const vq = new URLSearchParams()
+        vq.set('page', String(pageForRequest))
+        vq.set('page_size', String(PAGE_SIZE))
+        let prevVideosUrl: string | null = null
+        let leadsUrl = `${apiBase}/api/leads`
 
-  useEffect(() => { fetchData() }, [fetchData])
+        if (monthMode === 'current') {
+          const ym = calendarYm()
+          vq.set('month', ym)
+          const pm = prevMonth(ym)
+          if (pm) {
+            const pq = new URLSearchParams({ month: pm, page: '1', page_size: '50' })
+            prevVideosUrl = `${apiBase}/api/youtube/videos?${pq.toString()}`
+          }
+          leadsUrl = `${apiBase}/api/leads?month=${encodeURIComponent(ym)}`
+        } else if (monthMode === 'comparison' && comparisonMonths?.length === 2) {
+          const sorted = [...comparisonMonths].sort((a, b) => a.localeCompare(b))
+          vq.set('months', sorted.join(','))
+        }
+
+        const videosUrl = `${apiBase}/api/youtube/videos?${vq.toString()}`
+
+        const [vRes, pvRes, lRes] = await Promise.all([
+          fetch(videosUrl, { headers }),
+          prevVideosUrl ? fetch(prevVideosUrl, { headers }) : Promise.resolve(null as unknown as Response),
+          fetch(leadsUrl, { headers }),
+        ])
+        if (vRes.ok) {
+          const vd = (await vRes.json()) as {
+            videos?: Video[]
+            available_months?: string[]
+            total_pages?: number
+            page?: number
+            aggregates?: Partial<YoutubeListAggregates>
+          }
+          setVideos(Array.isArray(vd.videos) ? vd.videos : [])
+          setAvailableMonths(Array.isArray(vd.available_months) ? vd.available_months : [])
+          setTotalPages(Math.max(0, Number(vd.total_pages) || 0))
+          if (typeof vd.page === 'number' && vd.page !== pageForRequest) {
+            setPage(vd.page)
+          }
+          const ag = vd.aggregates
+          if (ag && typeof ag.video_count === 'number') {
+            setAggregates({
+              video_count: ag.video_count,
+              total_views: Number(ag.total_views) || 0,
+              total_likes: Number(ag.total_likes) || 0,
+              total_comments: Number(ag.total_comments) || 0,
+              total_cash: Number(ag.total_cash) || 0,
+              total_chats: Number(ag.total_chats) || 0,
+              avg_views: Number(ag.avg_views) || 0,
+              avg_ctr: Number(ag.avg_ctr) || 0,
+            })
+          } else {
+            setAggregates(emptyYoutubeAggregates)
+          }
+        } else {
+          setVideos([])
+          setAvailableMonths([])
+          setTotalPages(0)
+          setAggregates(emptyYoutubeAggregates)
+        }
+        if (pvRes?.ok) {
+          const pvd = (await pvRes.json()) as { aggregates?: Partial<YoutubeListAggregates> }
+          const ag = pvd.aggregates
+          if (ag && typeof ag.video_count === 'number') {
+            setPrevAggregates({
+              video_count: ag.video_count,
+              total_views: Number(ag.total_views) || 0,
+              total_likes: Number(ag.total_likes) || 0,
+              total_comments: Number(ag.total_comments) || 0,
+              total_cash: Number(ag.total_cash) || 0,
+              total_chats: Number(ag.total_chats) || 0,
+              avg_views: Number(ag.avg_views) || 0,
+              avg_ctr: Number(ag.avg_ctr) || 0,
+            })
+          } else {
+            setPrevAggregates(emptyYoutubeAggregates)
+          }
+        } else {
+          setPrevAggregates(emptyYoutubeAggregates)
+        }
+        if (lRes.ok) {
+          const ld = (await lRes.json()) as { leads?: Lead[] }
+          setLeads(Array.isArray(ld.leads) ? ld.leads : [])
+        } else {
+          setLeads([])
+        }
+      } catch {
+        setVideos([])
+        setLeads([])
+        setAvailableMonths([])
+        setTotalPages(0)
+        setAggregates(emptyYoutubeAggregates)
+        setPrevAggregates(emptyYoutubeAggregates)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [monthMode, comparisonMonths, ready, apiBase, page],
+  )
+
+  useEffect(() => {
+    void fetchData()
+  }, [fetchData])
+
+  useEffect(() => {
+    setExpanded(null)
+  }, [page])
 
   const handleSync = async () => {
     if (!userId) {
@@ -77,19 +240,57 @@ export default function YouTubePage() {
     const rows = (await cr.json().catch(() => [])) as { platform: string; credentials: Record<string, string> }[]
     const conn = rows.find((r) => r.platform === 'youtube')
     const creds = conn?.credentials as Record<string, string> | null
-    if (!creds?.api_key || !creds?.channel_id) { toast('Configura YouTube en Conexiones API'); return }
-    setSyncing(true); setSyncStatus('Sincronizando...')
+    if (!creds?.api_key || !creds?.channel_id) {
+      toast('Configura YouTube en Conexiones API')
+      return
+    }
+    setSyncing(true)
+    setSyncStatus('Sincronizando...')
     try {
-      const res = await fetch('/api/sync/youtube', {
+      const res = await fetch(`${apiBase}/api/youtube/sync`, {
         method: 'POST',
-        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ apiKey: creds.api_key, channelId: creds.channel_id }),
+        headers: backendAuthHeaders(),
       })
-      const data = await res.json()
-      if (data.error) setSyncStatus(`Error: ${data.error}`)
-      else { setSyncStatus(`${data.total} videos. ${data.new} nuevos, ${data.updated} actualizados.`); toast('Sync completado'); await fetchData() }
-    } catch (e) { setSyncStatus(`Error: ${(e as Error).message}`) }
-    setSyncing(false)
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: string | { msg?: string }[]
+        total?: number
+        new?: number
+        updated?: number
+        months?: string[]
+      }
+      if (!res.ok) {
+        const d = data.detail
+        const msg = typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : 'Error al sincronizar'
+        setSyncStatus(`Error: ${msg}`)
+        return
+      }
+      setSyncStatus(
+        `${data.total ?? 0} videos. ${data.new ?? 0} nuevos, ${data.updated ?? 0} actualizados.`,
+      )
+      const months = Array.isArray(data.months) ? data.months : []
+      const totalSynced = data.total ?? 0
+      if (totalSynced === 0) {
+        toast('YouTube no devolvió videos (canal vacío, API o credenciales).')
+        setPage(1)
+        await fetchData(1)
+        return
+      }
+      let doneMsg = 'Sync completado'
+      if (monthMode === 'current' && months.length > 0) {
+        const ym = calendarYm()
+        if (!months.includes(ym)) {
+          const labels = months.slice(0, 3).map((m) => formatMonthLabel(m))
+          doneMsg += ` Esas publicaciones están en: ${labels.join(', ')}. Usá «Todos» para verlos.`
+        }
+      }
+      toast(doneMsg)
+      setPage(1)
+      await fetchData(1)
+    } catch (e) {
+      setSyncStatus(`Error: ${(e as Error).message}`)
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const updateField = async (id: string, field: string, value: unknown) => {
@@ -107,98 +308,267 @@ export default function YouTubePage() {
     if (expanded === id) setExpanded(null)
   }
 
-  const analyzeVideo = async (video: Video, manualTranscript?: string) => {
-    setAnalyzingId(video.id)
-    try {
-      const res = await fetch('/api/youtube-analyze', {
-        method: 'POST',
-        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          contentItemId: video.id,
-          manualTranscript: manualTranscript || undefined,
-          title: video.title,
-          classification: video.classification || {},
-        }),
-      })
-      const data = await res.json()
-      if (data.error) toast(`Error: ${data.error}`)
-      else {
-        toast(`Analisis completo (fuente: ${data.source})`)
-        setShowTranscriptFor(null)
-        setTranscriptInput('')
-        if (data.classification) {
-          setVideos((prev) =>
-            prev.map((v) =>
-              v.id === video.id ? { ...v, classification: { ...v.classification, ...(data.classification as VideoClassification) } } : v
-            )
-          )
-        }
-      }
-    } catch (e) { toast(`Error: ${(e as Error).message}`) }
-    setAnalyzingId(null)
-  }
-
-  // Stats
-  const totalViews = videos.reduce((s, v) => s + (Number(v.metrics?.views) || 0), 0)
-  const prevTotalViews = prevVideos.reduce((s, v) => s + (Number(v.metrics?.views) || 0), 0)
-  const totalCash = videos.reduce((s, v) => s + (v.cash || 0), 0)
-  const withCtr = videos.filter(v => Number(v.metrics?.ctr) > 0)
-  const avgCtr = withCtr.length > 0 ? withCtr.reduce((s, v) => s + Number(v.metrics.ctr), 0) / withCtr.length : 0
-  const cashPerVideo = videos.length > 0 ? totalCash / videos.length : 0
-  const viewsDelta = prevTotalViews > 0 ? ((totalViews - prevTotalViews) / prevTotalViews * 100).toFixed(0) : null
+  // Stats (totales del filtro vía backend; la grilla es solo la página actual)
+  const totalViews = aggregates.total_views
+  const prevTotalViews = prevAggregates.total_views
+  const totalCash = aggregates.total_cash
+  const avgCtr = aggregates.avg_ctr
+  const prevYmForDelta = monthMode === 'current' ? prevMonth(calendarYm()) : null
+  const compareLabel = prevYmForDelta ? formatMonthLabel(prevYmForDelta) : ''
+  const showMonthDeltas = monthMode === 'current' && prevYmForDelta !== null
+  const viewsDelta =
+    showMonthDeltas && prevTotalViews > 0
+      ? ((totalViews - prevTotalViews) / prevTotalViews * 100).toFixed(0)
+      : null
+  const prevAvgViews = Math.round(prevAggregates.avg_views)
+  const curAvgViews = Math.round(aggregates.avg_views)
+  const avgViewsDelta =
+    showMonthDeltas && prevAvgViews > 0 ? (((curAvgViews - prevAvgViews) / prevAvgViews) * 100).toFixed(0) : null
+  const videoCountDelta =
+    showMonthDeltas ? aggregates.video_count - prevAggregates.video_count : null
 
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   return (
-    <div>
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">YouTube</h2>
-        <MonthSelector month={month} options={options} onChange={setMonth} />
+    <div className="max-w-[1400px]">
+      <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <h2 className="text-xl font-semibold tracking-tight text-[var(--text)]">
+          YouTube{' '}
+          <span className="text-sm font-normal text-[var(--text3)]">{filterSubtitle}</span>
+        </h2>
+        <div className="inline-flex flex-wrap gap-2 rounded-xl border border-[var(--border2)] bg-[var(--bg2)] p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setPage(1)
+              setMonthMode('all')
+            }}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'all' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+          >
+            Todos
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPage(1)
+              setMonthMode('current')
+            }}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'current' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+          >
+            Mes actual
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const opts = monthChoices
+              const a = comparisonMonths?.[0] || opts[0] || ''
+              const b = comparisonMonths?.[1] || opts[1] || opts[0] || ''
+              setComparisonDraftA(a)
+              setComparisonDraftB(b)
+              setShowComparisonModal(true)
+            }}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'comparison' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+          >
+            Comparar meses
+          </button>
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="mb-6 grid grid-cols-4 gap-4">
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Views</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">{formatK(totalViews)}</div>
-          {viewsDelta !== null && <div className={`text-[11px] mt-1 font-mono-num ${Number(viewsDelta) >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'}`}>{Number(viewsDelta) >= 0 ? '+' : ''}{viewsDelta}% vs mes pasado</div>}
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Videos</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">{videos.length}</div>
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Avg Views</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">{videos.length > 0 ? formatK(Math.round(totalViews / videos.length)) : '0'}</div>
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Avg CTR</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">{avgCtr > 0 ? avgCtr.toFixed(1) + '%' : '--'}</div>
-          <div className="text-[11px] text-[var(--text3)] mt-1 font-mono-num">{formatCash(cashPerVideo)} / video</div>
-        </div>
-      </div>
-
-      {/* Sync */}
-      <div className="mb-6 flex items-center gap-3">
-        <button onClick={handleSync} disabled={syncing} className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
-          {syncing ? 'Sincronizando...' : '\u27F3 Sincronizar YouTube'}
+      <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <button
+          type="button"
+          onClick={handleSync}
+          disabled={syncing}
+          className="inline-flex w-fit items-center justify-center gap-2 rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-sm hover:opacity-90 disabled:opacity-40"
+        >
+          <span className="text-sm leading-none">+</span>
+          {syncing ? 'Sincronizando…' : 'Sincronizar YouTube'}
         </button>
-        {syncStatus && <span className={`text-[12px] ${syncStatus.includes('videos') && !syncStatus.includes('Error') ? 'text-[var(--green)]' : syncStatus.includes('Error') ? 'text-[var(--red)]' : 'text-[var(--text3)]'}`}>{syncStatus}</span>}
+        {syncStatus ? (
+          <span
+            className={`max-w-[min(100%,480px)] text-[12px] leading-snug ${
+              syncStatus.includes('videos') && !syncStatus.includes('Error')
+                ? 'text-[var(--green)]'
+                : syncStatus.includes('Error')
+                  ? 'text-[var(--red)]'
+                  : 'text-[var(--text3)]'
+            }`}
+          >
+            {syncStatus}
+          </span>
+        ) : null}
       </div>
 
-      {/* Video grid */}
-      {videos.length === 0 ? (
-        <div className="py-16 text-center text-[13px] text-[var(--text3)]">Sin videos este mes. Sincroniza YouTube para importar.</div>
+      {/* KPIs fila superior */}
+      <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <div className="glass-card rounded-xl p-5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">Visitas</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold tabular-nums">{formatK(totalViews)}</div>
+          {viewsDelta !== null ? (
+            <div
+              className={`mt-1.5 text-[11px] font-mono-num tabular-nums ${
+                Number(viewsDelta) >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'
+              }`}
+            >
+              {Number(viewsDelta) >= 0 ? '+' : ''}
+              {viewsDelta}% <span className="text-[var(--text3)]">vs {compareLabel}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="glass-card rounded-xl p-5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">Videos</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold tabular-nums">{aggregates.video_count}</div>
+          {videoCountDelta !== null ? (
+            <div
+              className={`mt-1.5 text-[11px] font-mono-num ${
+                videoCountDelta >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'
+              }`}
+            >
+              {videoCountDelta >= 0 ? '+' : ''}
+              {videoCountDelta} <span className="text-[var(--text3)]">vs {compareLabel}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="glass-card rounded-xl p-5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">Prom. visitas</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold tabular-nums">
+            {aggregates.video_count > 0 ? formatK(curAvgViews) : '0'}
+          </div>
+          {avgViewsDelta !== null ? (
+            <div
+              className={`mt-1.5 text-[11px] font-mono-num ${
+                Number(avgViewsDelta) >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'
+              }`}
+            >
+              {Number(avgViewsDelta) >= 0 ? '+' : ''}
+              {avgViewsDelta}% <span className="text-[var(--text3)]">vs {compareLabel}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="glass-card rounded-xl p-5">
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">CTR prom.</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold tabular-nums">
+            {avgCtr > 0 ? `${avgCtr.toFixed(1)}%` : '—'}
+          </div>
+        </div>
+      </div>
+
+      {/* Grilla de videos */}
+      {aggregates.video_count === 0 ? (
+        <div className="rounded-xl border border-dashed border-[var(--border2)] py-16 text-center text-[13px] text-[var(--text3)]">
+          {monthMode === 'all' ? (
+            <>
+              No hay videos importados. Tocá <span className="text-[var(--text2)]">Sincronizar YouTube</span> o
+              revisá Conexiones API.
+            </>
+          ) : monthMode === 'current' ? (
+            <>
+              No hay videos con publicación en <span className="text-[var(--text2)]">{formatMonthLabel(calendarYm())}</span>{' '}
+              (Argentina). Probá <span className="text-[var(--text2)]">Todos</span> o <span className="text-[var(--text2)]">Comparar meses</span>.
+            </>
+          ) : (
+            <>
+              No hay videos en los meses seleccionados. Elegí otros meses en «Comparar meses» o usá «Todos».
+            </>
+          )}
+        </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {videos.map(v => (
             <VideoCard key={v.id} video={v} isExpanded={expanded === v.id}
               onToggle={() => setExpanded(expanded === v.id ? null : v.id)}
-              onUpdate={updateField} onDelete={deleteVideo} leads={leads}
-              analyzingId={analyzingId} analyzeVideo={analyzeVideo}
-              showTranscriptFor={showTranscriptFor} setShowTranscriptFor={setShowTranscriptFor}
-              transcriptInput={transcriptInput} setTranscriptInput={setTranscriptInput} />
+              onUpdate={updateField} onDelete={deleteVideo} leads={leads} />
           ))}
+        </div>
+      )}
+
+      {totalPages > 1 ? (
+        <div className="mt-6 flex items-center justify-center gap-3">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="rounded-lg border border-[var(--border2)] px-3 py-1.5 text-[12px] disabled:opacity-40"
+          >
+            Anterior
+          </button>
+          <span className="text-[12px] text-[var(--text3)]">
+            Página {page} de {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="rounded-lg border border-[var(--border2)] px-3 py-1.5 text-[12px] disabled:opacity-40"
+          >
+            Siguiente
+          </button>
+        </div>
+      ) : null}
+
+      {showComparisonModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-5">
+            <div className="mb-4 text-[14px] font-semibold">Comparar meses</div>
+            <p className="mb-4 text-[12px] text-[var(--text3)]">
+              Elegí dos meses (fecha de publicación YouTube, Argentina). Se listan los videos de ambos.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Primer mes</label>
+                <select
+                  value={comparisonDraftA}
+                  onChange={(e) => setComparisonDraftA(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                >
+                  {monthChoices.map((ym) => (
+                    <option key={ym} value={ym}>
+                      {formatMonthLabel(ym)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Segundo mes</label>
+                <select
+                  value={comparisonDraftB}
+                  onChange={(e) => setComparisonDraftB(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                >
+                  {monthChoices.map((ym) => (
+                    <option key={`b-${ym}`} value={ym}>
+                      {formatMonthLabel(ym)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowComparisonModal(false)}
+                className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!comparisonDraftA || !comparisonDraftB) {
+                    toast('Elegí los dos meses.')
+                    return
+                  }
+                  setPage(1)
+                  setComparisonMonths([comparisonDraftA, comparisonDraftB])
+                  setMonthMode('comparison')
+                  setShowComparisonModal(false)
+                }}
+                className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -219,90 +589,87 @@ export default function YouTubePage() {
 
 /* ---------- Video Card ---------- */
 
-function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads, analyzingId, analyzeVideo, showTranscriptFor, setShowTranscriptFor, transcriptInput, setTranscriptInput }: {
+function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }: {
   video: Video; isExpanded: boolean; onToggle: () => void
   onUpdate: (id: string, field: string, value: unknown) => void
   onDelete: (id: string) => void; leads: Lead[]
-  analyzingId: string | null; analyzeVideo: (v: Video, t?: string) => void
-  showTranscriptFor: string | null; setShowTranscriptFor: (id: string | null) => void
-  transcriptInput: string; setTranscriptInput: (v: string) => void
 }) {
   const cls = v.classification || {}
   const title = v.title || 'Sin titulo'
   const related = leads.filter(l => l.agenda_point && title.length > 3 && l.agenda_point.toLowerCase().includes(title.toLowerCase().substring(0, 25)))
-  const cierres = related.filter(l => l.status === 'Cerrado').length
+
+  const visitas = Number(v.metrics?.views) || 0
+  const comentarios = Number(v.metrics?.comments) || 0
+  const buyers = related.filter(
+    (l) => l.status === 'Cerrado' || (Number(l.payment) || 0) > 0,
+  )
 
   if (isExpanded) return (
-    <div className="glass-card overflow-hidden col-span-3 grid grid-cols-[400px_1fr]">
-      {/* Left: thumbnail */}
-      <div className="relative">
+    <div className="glass-card col-span-full overflow-hidden rounded-xl border border-[var(--border2)] lg:grid lg:min-h-[380px] lg:grid-cols-[minmax(280px,420px)_1fr]">
+      <div className="relative min-h-[220px] lg:min-h-full">
         {v.metrics?.thumbnail ? (
-          <img src={v.metrics.thumbnail} alt="" className="w-full h-full min-h-[350px] object-cover" />
+          <img src={v.metrics.thumbnail} alt="" className="h-full w-full object-cover lg:absolute lg:inset-0 lg:min-h-full" />
         ) : (
-          <div className="w-full h-full min-h-[350px] bg-gradient-to-br from-[var(--bg3)] to-[var(--bg4)] flex items-center justify-center">
-            <div className="text-4xl">&#9654;</div>
+          <div className="flex h-full min-h-[220px] items-center justify-center bg-gradient-to-br from-[var(--bg3)] to-[var(--bg4)] lg:absolute lg:inset-0">
+            <div className="text-4xl text-[var(--text3)]">&#9654;</div>
           </div>
         )}
       </div>
 
-      {/* Right: content */}
-      <div className="p-5 space-y-4 overflow-y-auto max-h-[550px]">
+      <div className="flex max-h-[min(70vh,640px)] flex-col gap-4 overflow-y-auto p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="text-[14px] font-semibold leading-tight">{title}</div>
-            <div className="text-[11px] text-[var(--text3)] mt-0.5">{v.published_at?.split('T')[0]}</div>
+            <div className="text-[15px] font-semibold leading-snug text-[var(--text)]">{title}</div>
+            <div className="mt-1 text-[11px] text-[var(--text3)]">{v.published_at?.split('T')[0]}</div>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button onClick={(e) => { e.stopPropagation(); onDelete(v.id) }} className="rounded-md bg-[var(--bg4)] px-3 py-1.5 text-[10px] text-[var(--red)] hover:opacity-80">Eliminar</button>
-            <button onClick={onToggle} className="rounded-md bg-[var(--bg4)] px-3 py-1.5 text-[10px] text-[var(--text3)] hover:text-[var(--text)]">\u2715 Cerrar</button>
+          <div className="flex flex-shrink-0 gap-2">
+            <button type="button" onClick={(e) => { e.stopPropagation(); onDelete(v.id) }} className="rounded-md bg-[var(--bg4)] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--red)] hover:opacity-90">Eliminar</button>
+            <button type="button" onClick={onToggle} className="rounded-md border border-[var(--border2)] bg-[var(--bg4)] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text3)] hover:text-[var(--text)]">Cerrar</button>
           </div>
         </div>
 
-        {/* KPIs */}
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-            <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cash</div>
+            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Visitas</div>
+            <div className="font-mono-num text-[15px] font-bold tabular-nums leading-tight text-[var(--text)] sm:text-[17px]">
+              {formatIntegerEsAr(visitas)}
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">CTR</div>
+            <div className="font-mono-num text-[17px] font-bold tabular-nums">{Number(v.metrics?.ctr) > 0 ? `${v.metrics.ctr}%` : '—'}</div>
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Comentarios</div>
+            <div className="font-mono-num text-[17px] font-bold tabular-nums text-[var(--text)]">{formatIntegerEsAr(comentarios)}</div>
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Cash generado</div>
             <input type="number" value={v.cash || 0} onChange={e => onUpdate(v.id, 'cash', Number(e.target.value) || 0)}
-              className="w-full bg-transparent text-center font-mono-num text-[16px] font-bold text-[var(--green)] outline-none" onClick={e => e.stopPropagation()} />
-          </div>
-          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-            <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Agendas / Chats</div>
-            <input type="number" value={v.chats || 0} onChange={e => onUpdate(v.id, 'chats', Number(e.target.value) || 0)}
-              className="w-full bg-transparent text-center font-mono-num text-[16px] font-bold text-[var(--text)] outline-none" onClick={e => e.stopPropagation()} />
-          </div>
-          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-            <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">CTR</div>
-            <div className="font-mono-num text-[16px] font-bold">{Number(v.metrics?.ctr) > 0 ? `${v.metrics.ctr}%` : '--'}</div>
-          </div>
-          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-            <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cierres</div>
-            <div className="font-mono-num text-[16px] font-bold">{cierres}</div>
+              className="w-full bg-transparent text-center font-mono-num text-[17px] font-bold text-[var(--green)] outline-none tabular-nums" onClick={e => e.stopPropagation()} />
           </div>
         </div>
 
-        {/* Link */}
         {v.url && (
-          <a href={v.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-md bg-[var(--bg4)] px-3 py-1.5 text-[11px] text-[var(--text2)] hover:text-[var(--text)] transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            Ver en YouTube
+          <a href={v.url} target="_blank" rel="noopener noreferrer" className="inline-flex w-fit items-center gap-2 rounded-lg border border-[var(--border2)] bg-[var(--bg4)] px-4 py-2 text-[12px] font-medium text-[var(--accent)] transition-colors hover:border-[var(--accent)]">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            Link al video de YouTube
           </a>
         )}
 
-        {/* Description */}
-        {cls.description && (
+        {cls.description ? (
           <div>
-            <div className="text-[9px] font-medium uppercase tracking-wider text-[var(--text3)] mb-1">Descripcion</div>
-            <div className="text-[11px] text-[var(--text2)] bg-[var(--bg3)] rounded-lg p-3 border border-[var(--border)] whitespace-pre-wrap max-h-[120px] overflow-y-auto">{cls.description}</div>
+            <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-[var(--text3)]">Descripción</div>
+            <div className="max-h-[140px] overflow-y-auto whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3 text-[12px] leading-relaxed text-[var(--text2)]">{cls.description}</div>
           </div>
-        )}
+        ) : null}
 
-        {/* Summary */}
-        {cls.summary && (
+        {cls.summary ? (
           <div>
-            <div className="text-[9px] font-medium uppercase tracking-wider text-[var(--text3)] mb-1">Resumen</div>
-            <div className="text-[12px] text-[var(--text2)] leading-relaxed bg-[var(--bg3)] rounded-lg p-3 border border-[var(--border)] whitespace-pre-wrap">{cls.summary}</div>
+            <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-[var(--text3)]">Resumen</div>
+            <div className="whitespace-pre-wrap rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3 text-[13px] leading-relaxed text-[var(--text2)]">{cls.summary}</div>
           </div>
-        )}
+        ) : null}
 
         {/* Performance chart */}
         {(v.metrics?.performanceHistory?.length || 0) > 1 && (
@@ -312,84 +679,95 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads, 
           </div>
         )}
 
-        {/* Related leads */}
-        {related.length > 0 && (
+        {buyers.length > 0 ? (
           <div>
-            <div className="text-[9px] font-medium uppercase tracking-wider text-[var(--text3)] mb-2">Leads relacionados</div>
-            <div className="space-y-1">
-              {related.slice(0, 6).map((l, i) => (
-                <div key={i} className="flex items-center justify-between rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px]">
-                  <span className="text-[var(--text2)]">{l.client_name || 'Anonimo'}</span>
-                  <div className="flex items-center gap-2">
-                    {l.program_offered && <span className="text-[var(--text3)]">{l.program_offered}</span>}
-                    <span className={l.status === 'Cerrado' ? 'text-[var(--green)] font-semibold' : 'text-[var(--text3)]'}>{l.status}</span>
-                    {Number(l.payment) > 0 && <span className="font-mono-num text-[var(--green)]">{formatCash(Number(l.payment))}</span>}
+            <div className="mb-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text3)]">Leads que compraron por este video</div>
+            <div className="space-y-1.5">
+              {buyers.slice(0, 8).map((l, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg4)] px-3 py-2.5 text-[11px]">
+                  <span className="truncate font-medium text-[var(--text2)]">{l.client_name || 'Sin nombre'}</span>
+                  <div className="flex flex-shrink-0 items-center gap-2">
+                    {l.program_offered ? <span className="hidden max-w-[100px] truncate text-[var(--text3)] sm:inline">{l.program_offered}</span> : null}
+                    <span className="text-[var(--green)] font-semibold">{formatCash(Number(l.payment) || 0)}</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-        )}
-
-        {/* AI Analysis */}
-        {!cls.summary && (
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              <button onClick={() => analyzeVideo(v)} disabled={analyzingId === v.id}
-                className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
-                {analyzingId === v.id ? 'Analizando...' : '\u2726 Analizar con IA'}
-              </button>
-              <button onClick={() => setShowTranscriptFor(showTranscriptFor === v.id ? null : v.id)}
-                className="rounded-lg border border-[var(--border2)] px-4 py-2.5 text-[11px] font-semibold uppercase text-[var(--text3)] hover:border-[var(--accent)]">
-                {showTranscriptFor === v.id ? 'Cerrar' : '+ Pegar transcript'}
-              </button>
+        ) : related.length > 0 ? (
+          <div>
+            <div className="mb-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text3)]">Leads relacionados (misma agenda / título)</div>
+            <div className="space-y-1.5">
+              {related.slice(0, 6).map((l, i) => (
+                <div key={i} className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--bg4)] px-3 py-2 text-[11px]">
+                  <span className="truncate text-[var(--text2)]">{l.client_name || 'Sin nombre'}</span>
+                  <span className={l.status === 'Cerrado' ? 'font-semibold text-[var(--green)]' : 'text-[var(--text3)]'}>{l.status}</span>
+                </div>
+              ))}
             </div>
-            {showTranscriptFor === v.id && (
-              <div className="space-y-2">
-                <textarea value={transcriptInput} onChange={e => setTranscriptInput(e.target.value)} rows={3} placeholder="Pega el transcript del video..."
-                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none resize-y" onClick={e => e.stopPropagation()} />
-                <button onClick={() => analyzeVideo(v, transcriptInput)} disabled={analyzingId === v.id || !transcriptInput.trim()}
-                  className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90 disabled:opacity-30">
-                  {analyzingId === v.id ? 'Analizando...' : '\u2726 Analizar con transcript'}
-                </button>
-              </div>
-            )}
           </div>
-        )}
-        {cls.summary && (
-          <button onClick={() => analyzeVideo(v)} disabled={analyzingId === v.id}
-            className="rounded-lg border border-[var(--border2)] px-4 py-2 text-[10px] font-semibold uppercase text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--accent)]">
-            {analyzingId === v.id ? 'Analizando...' : '\u27F3 Re-analizar con IA'}
-          </button>
-        )}
+        ) : null}
+
       </div>
     </div>
   )
 
-  // Collapsed card
   return (
-    <div className="glass-card overflow-hidden cursor-pointer" onClick={onToggle}>
-      <div className="relative" style={{ aspectRatio: '16/9' }}>
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Abrir detalle: ${title}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onToggle()
+        }
+      }}
+      className="glass-card group w-full cursor-pointer overflow-hidden rounded-xl border border-[var(--border2)] text-left transition-shadow hover:border-[var(--text3)]/30 hover:shadow-md"
+      onClick={onToggle}
+    >
+      <div className="relative aspect-video w-full overflow-hidden bg-[var(--bg4)]">
         {v.metrics?.thumbnail ? (
-          <img src={v.metrics.thumbnail} alt="" className="w-full h-full object-cover rounded-t-lg" />
+          <img src={v.metrics.thumbnail} alt="" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.02]" />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-[var(--bg3)] to-[var(--bg4)] flex items-center justify-center rounded-t-lg">
-            <div className="text-3xl">&#9654;</div>
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[var(--bg3)] to-[var(--bg4)]">
+            <span className="text-3xl text-[var(--text3)]">&#9654;</span>
           </div>
         )}
-        <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-          <div className="font-mono-num text-lg font-bold text-[var(--green)]">{formatCash(v.cash)}</div>
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent px-3 pb-3 pt-12">
+          <p className="line-clamp-2 text-[12px] font-medium leading-snug text-white">{title}</p>
         </div>
-        {v.url && (
-          <a href={v.url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            className="absolute top-2 right-2 rounded-md bg-black/50 p-1.5 text-white/70 hover:text-white transition-colors backdrop-blur-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          </a>
-        )}
       </div>
-      <div className="p-3">
-        <div className="text-[12px] font-medium truncate">{title}</div>
-        <div className="text-[11px] text-[var(--text3)] mt-0.5">{v.chats} agendas</div>
+      <div className="grid grid-cols-3 divide-x divide-[var(--border)] border-t border-[var(--border)] bg-[var(--bg3)]">
+        <div className="px-2 py-3 text-center sm:px-3">
+          <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Visitas</div>
+          <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--text)] sm:text-lg">{formatIntegerEsAr(visitas)}</div>
+        </div>
+        <div className="px-2 py-3 text-center sm:px-3">
+          <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Comentarios</div>
+          <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--text)] sm:text-lg">{formatIntegerEsAr(comentarios)}</div>
+        </div>
+        <div className="px-2 py-3 text-center sm:px-3">
+          <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Cash</div>
+          <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--green)] sm:text-lg">{formatCash(v.cash)}</div>
+        </div>
+      </div>
+      <div className="border-t border-[var(--border)] px-3 py-2.5">
+        {v.url ? (
+          <a
+            href={v.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:underline"
+          >
+            Link al video de YouTube
+            <span aria-hidden>→</span>
+          </a>
+        ) : (
+          <span className="text-[11px] text-[var(--text3)]">Sin enlace</span>
+        )}
+        <p className="mt-1 text-[10px] text-[var(--text3)]">Tocá la tarjeta para ver detalle</p>
       </div>
     </div>
   )
@@ -408,10 +786,29 @@ function PerfChart({ data }: { data: PerfSnapshot[] }) {
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ maxHeight: 120 }}>
       <defs><linearGradient id="vg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--accent)" stopOpacity="0.25" /><stop offset="100%" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
-      {[0, 0.5, 1].map(p => { const y = pT + cH - p * cH; return <g key={p}><line x1={pL} y1={y} x2={w - pR} y2={y} stroke="var(--border)" strokeWidth="0.5" /><text x={pL - 3} y={y + 3} fill="var(--text3)" fontSize="7" textAnchor="end">{formatK(Math.round(maxV * p))}</text></g> })}
+      {[0, 0.5, 1].map(p => { const y = pT + cH - p * cH; return <g key={p}><line x1={pL} y1={y} x2={w - pR} y2={y} stroke="var(--border)" strokeWidth="0.5" /><text x={pL - 3} y={y + 3} fill="var(--text3)" fontSize="7" textAnchor="end">{formatIntegerEsAr(Math.round(maxV * p))}</text></g> })}
       <path d={area} fill="url(#vg)" /><path d={line} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
       {pts.map((p, i) => <circle key={i} cx={p.x} cy={p.y} r="2" fill="var(--accent)" />)}
       {[0, pts.length - 1].map(i => <text key={i} x={pts[i].x} y={pT + cH + 12} fill="var(--text3)" fontSize="7" textAnchor="middle">{pts[i].date.split('T')[0].slice(5)}</text>)}
     </svg>
   )
+}
+
+function recentMonthOptions(count: number): string[] {
+  const out: string[] = []
+  const d = new Date()
+  for (let i = 0; i < count; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth() - i, 1)
+    out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return out
+}
+
+function formatMonthLabel(ym: string): string {
+  const parts = ym.split('-')
+  const y = Number(parts[0])
+  const m = Number(parts[1])
+  if (!y || !m) return ym
+  const d = new Date(y, m - 1, 1)
+  return d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
 }
