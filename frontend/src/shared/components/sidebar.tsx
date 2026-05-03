@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { logout } from '@/features/auth/services/auth-service'
 import { useState } from 'react'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
+import { BrandLogo } from '@/shared/components/brand-logo'
 
 type NavItem = { label: string; href: string }
 type NavGroup = {
@@ -90,12 +91,9 @@ export function Sidebar() {
     <aside className="flex h-screen w-56 flex-shrink-0 flex-col border-r border-[var(--border)] bg-[var(--bg2)] sticky top-0">
       {/* Logo */}
       <div className="flex items-center gap-3 px-5 pt-4 pb-3">
-        <svg viewBox="0 0 60 80" className="h-6 w-[18px] flex-shrink-0 opacity-90">
-          <path d="M8 4 L32 4 L52 38 L36 38 L52 76 L28 76 L8 42 L26 42 Z" fill="#E63946" />
-        </svg>
+        <BrandLogo className="h-8 w-auto flex-shrink-0 object-contain opacity-95" />
         <div>
-          <div className="text-[13px] font-semibold tracking-tight leading-tight">Aumenta Tu Valor</div>
-          <div className="text-[10px] text-[var(--text3)] font-normal mt-0.5">Laboratorio 3.0</div>
+          <div className="text-[13px] font-semibold tracking-tight leading-tight">ATV</div>
         </div>
       </div>
 
@@ -137,7 +135,7 @@ export function Sidebar() {
             Salir
           </button>
         </div>
-        © 2025-2026 Aumenta Tu Valor
+        © 2025-2026 ATV
       </div>
     </aside>
   )

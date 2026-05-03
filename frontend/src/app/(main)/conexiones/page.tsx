@@ -20,6 +20,8 @@ type PlatformDef = {
   subtitle: string
   fields: { key: string; label: string; placeholder?: string; type?: string; span?: 2 }[]
   guide: { title: string; steps: string[] }
+  /** Solo guía: no guarda credenciales en el servidor (por ahora). */
+  infoOnly?: boolean
 }
 
 const PLATFORMS: PlatformDef[] = [
@@ -97,22 +99,42 @@ const PLATFORMS: PlatformDef[] = [
     },
   },
   {
-    key: 'youtube', label: 'YouTube', icon: '▶️', subtitle: 'Importa videos de tu canal con YouTube Data API',
+    key: 'youtube',
+    label: 'YouTube',
+    icon: '▶️',
+    subtitle: 'Importá videos de tu canal con YouTube Data API v3 (API pública de Google).',
     fields: [
       { key: 'api_key', label: 'API Key de Google', placeholder: 'AIzaSy...', type: 'password' },
       { key: 'channel_id', label: 'Channel ID', placeholder: 'UCxxxxxxxxxx' },
     ],
     guide: {
-      title: 'Como configurar YouTube',
+      title: 'Como configurar YouTube (Data API v3 pública)',
       steps: [
         'Anda a console.cloud.google.com',
         'Crea un proyecto nuevo (o usa uno existente)',
-        'Anda a APIs & Services → Library → busca "YouTube Data API v3" → Enable',
+        'Anda a APIs & Services → Library → busca "YouTube Data API v3" → Enable (API pública con cuota en Google Cloud)',
         'Anda a APIs & Services → Credentials → Create Credentials → API Key',
         'Copia la API Key y pegala aca',
         'Para tu Channel ID: abri YouTube → tu canal → la URL tiene /channel/UCxxxxxxxxxx',
         'Alternativa: busca "YouTube Channel ID finder" en Google y pega tu URL',
         'Listo! Anda a YouTube y apreta sincronizar',
+      ],
+    },
+  },
+  {
+    key: 'youtube_analytics',
+    label: 'YouTube Analytics API',
+    icon: '▶️',
+    subtitle: 'Métricas avanzadas de canal y videos; habilitala en la misma consola de Google Cloud.',
+    fields: [],
+    infoOnly: true,
+    guide: {
+      title: 'YouTube Analytics API',
+      steps: [
+        'Usá el mismo proyecto de Google Cloud que para YouTube Data API v3.',
+        'Anda a APIs & Services → Library → busca "YouTube Analytics API" → Enable.',
+        'Esta API suele requerir OAuth 2.0 del propietario del canal; la integración desde acá puede sumarse en una próxima versión.',
+        'Por ahora el tablero de YouTube usa Data API v3 para listar videos y estadísticas básicas.',
       ],
     },
   },
@@ -210,7 +232,8 @@ export default function ConexionesPage() {
       <div className="space-y-4">
         {PLATFORMS.map((p) => {
           const conn = connections[p.key]
-          const isConnected = conn && Object.values(conn.credentials).some(v => v)
+          const isConnected =
+            !p.infoOnly && conn && Object.values(conn.credentials).some((v) => v)
           return (
             <ConnectionCard
               key={p.key}
@@ -261,10 +284,16 @@ function ConnectionCard({
           <div className="text-[12px] text-[var(--text3)]">{platform.subtitle}</div>
         </div>
         <div className="flex items-center gap-2">
-          <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--green)] shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-[var(--text3)]'}`} />
-          <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text3)]">
-            {isConnected ? 'Conectado' : 'Desconectado'}
-          </span>
+          {platform.infoOnly ? (
+            <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text3)]">Guía</span>
+          ) : (
+            <>
+              <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--green)] shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-[var(--text3)]'}`} />
+              <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text3)]">
+                {isConnected ? 'Conectado' : 'Desconectado'}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -323,28 +352,30 @@ function ConnectionCard({
           )}
 
           {/* Save / Connect button */}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            {['manychat', 'calendly', 'fathom'].includes(platform.key) && !isConnected ? (
-              <button
-                onClick={() => onSave({ ...form, webhook_token: crypto.randomUUID().replace(/-/g, '') })}
-                className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
-              >
-                Conectar {platform.label}
-              </button>
-            ) : (
-              <button
-                onClick={() => onSave(form)}
-                className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
-              >
-                Guardar
-              </button>
-            )}
-            {connection?.last_sync_at && (
-              <span className="text-[11px] text-[var(--text3)]">
-                Ultima sync: {new Date(connection.last_sync_at).toLocaleString('es-AR')}
-              </span>
-            )}
-          </div>
+          {!platform.infoOnly && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {['manychat', 'calendly', 'fathom'].includes(platform.key) && !isConnected ? (
+                <button
+                  onClick={() => onSave({ ...form, webhook_token: crypto.randomUUID().replace(/-/g, '') })}
+                  className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
+                >
+                  Conectar {platform.label}
+                </button>
+              ) : (
+                <button
+                  onClick={() => onSave(form)}
+                  className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
+                >
+                  Guardar
+                </button>
+              )}
+              {connection?.last_sync_at && (
+                <span className="text-[11px] text-[var(--text3)]">
+                  Ultima sync: {new Date(connection.last_sync_at).toLocaleString('es-AR')}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Webhook URL display for platforms with webhooks */}
           {['manychat', 'calendly', 'fathom'].includes(platform.key) && connection?.credentials?.webhook_token && (

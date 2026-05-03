@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Laboratorio de Contenido 3.0 — Aumenta Tu Valor',
+  title: 'ATV',
   description: 'Plataforma integral de gestion de contenido y ventas para creadores high-ticket',
 }
 

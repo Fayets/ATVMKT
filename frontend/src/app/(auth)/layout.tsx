@@ -1,4 +1,5 @@
 import { ThemeToggle } from '@/shared/components/theme-toggle'
+import { BrandLogo } from '@/shared/components/brand-logo'
 
 export default async function AuthLayout({
   children,
@@ -13,16 +14,9 @@ export default async function AuthLayout({
       <div className="w-full max-w-md px-6">
         {/* Logo */}
         <div className="mb-10 flex items-center gap-3">
-          <svg viewBox="0 0 60 80" className="h-8 w-6 opacity-90">
-            <path d="M8 4 L32 4 L52 38 L36 38 L52 76 L28 76 L8 42 L26 42 Z" fill="#E63946" />
-          </svg>
+          <BrandLogo className="h-14 w-auto flex-shrink-0 object-contain opacity-95" />
           <div>
-            <div className="text-sm font-semibold tracking-tight text-[var(--text)]">
-              Laboratorio de Contenido
-            </div>
-            <div className="text-[11px] text-[var(--text3)]">
-              Aumenta Tu Valor
-            </div>
+            <div className="text-sm font-semibold tracking-tight text-[var(--text)]">ATV</div>
           </div>
         </div>
 
