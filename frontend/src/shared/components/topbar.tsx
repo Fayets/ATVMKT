@@ -11,8 +11,6 @@ const titles: Record<string, string> = {
   '/youtube': 'YouTube',
   '/leads': 'Leads',
   '/sales-dashboard': 'Ventas',
-  '/setter': 'Setter',
-  '/closer': 'Closer',
   '/team': 'Equipo',
   '/bio': 'BIO',
   '/referidos': 'Referidos',
@@ -25,8 +23,6 @@ const titles: Record<string, string> = {
 const subtitles: Record<string, string> = {
   '/dashboard': 'Contenido',
   '/sales-dashboard': 'Dashboard',
-  '/setter': 'Metricas',
-  '/closer': 'Metricas',
   '/team': 'Dashboard',
   '/bio': 'Canal directo',
   '/referidos': 'Canal directo',

@@ -1,3 +1,4 @@
+import { apiFetch } from '@/lib/api'
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // TYPES
@@ -85,12 +86,71 @@ export function distribute(total: number, n: number): number[] {
 // FULL ANALYTICS (for sales-dashboard)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export async function getLeadsAnalytics(_month: string): Promise<{ leads: LeadRow[]; analytics: LeadsAnalytics; conversaciones: number }> {
-  const leads = [] as LeadRow[]
+function monthRangeIso(month: string): { desde: string; hasta: string } | null {
+  const m = /^(\d{4})-(\d{2})$/.exec(month.trim())
+  if (!m) return null
+  const y = Number(m[1])
+  const mo = Number(m[2])
+  if (!Number.isFinite(y) || mo < 1 || mo > 12) return null
+  const desde = `${y}-${String(mo).padStart(2, '0')}-01`
+  const last = new Date(y, mo, 0).getDate()
+  const hasta = `${y}-${String(mo).padStart(2, '0')}-${String(last).padStart(2, '0')}`
+  return { desde, hasta }
+}
+
+export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow[]; analytics: LeadsAnalytics; conversaciones: number }> {
+  const leads: LeadRow[] = []
   const setterReports: Record<string, unknown>[] = []
   const closerReports: Record<string, unknown>[] = []
 
-  // Fuente de datos: daily_reports del setter y closer
+  const range = monthRangeIso(month)
+  try {
+    const leadsReq = apiFetch(`/leads?month=${encodeURIComponent(month)}`)
+    const reportsReq =
+      range != null
+        ? apiFetch(
+            `/team/reports?desde=${encodeURIComponent(range.desde)}&hasta=${encodeURIComponent(range.hasta)}`,
+          )
+        : Promise.resolve(new Response('', { status: 400 }))
+    const [leadsRes, repRes] = await Promise.all([leadsReq, reportsReq])
+    if (leadsRes.ok) {
+      const j = (await leadsRes.json().catch(() => ({}))) as { leads?: LeadRow[] }
+      if (Array.isArray(j.leads)) leads.push(...j.leads)
+    }
+    if (repRes.ok && range != null) {
+      const j = (await repRes.json().catch(() => ({}))) as { reports?: unknown[] }
+      if (Array.isArray(j.reports)) {
+        for (const raw of j.reports) {
+          const r = raw as Record<string, unknown>
+          const fecha = String(r.fecha ?? '').slice(0, 10)
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) continue
+          if (r.kind === 'setter') {
+            setterReports.push({
+              date: fecha,
+              conversaciones: Number(r.conversaciones) || 0,
+              agendas: Number(r.agendas) || 0,
+              shows: 0,
+              cierres: 0,
+              ingreso: 0,
+            })
+          } else if (r.kind === 'closer' && String(r.reporte_tipo || 'ventas').toLowerCase() === 'ventas') {
+            closerReports.push({
+              date: fecha,
+              conversaciones: 0,
+              agendas: 0,
+              shows: Number(r.shows) || 0,
+              cierres: Number(r.cierres) || 0,
+              ingreso: Number(r.ingreso) || 0,
+            })
+          }
+        }
+      }
+    }
+  } catch {
+    /* red / sin sesión: seguimos con arrays vacíos */
+  }
+
+  // Embudo y series: reportes diarios setter + closer (ventas); programas y revenue desde leads
   const sumField = (reports: Record<string, unknown>[], field: string) =>
     reports.reduce((s, r) => s + (Number(r[field]) || 0), 0)
 
@@ -100,6 +160,11 @@ export async function getLeadsAnalytics(_month: string): Promise<{ leads: LeadRo
   const cierres = sumField(closerReports, 'cierres')
   const ingresos = sumField(closerReports, 'ingreso')
   const noShows = Math.max(0, agendas - shows)
+  const revenueLeads = leads.reduce(
+    (s, l) => s + (Number(l.revenue) || Number(l.payment) || 0),
+    0,
+  )
+  const facturacion = revenueLeads > 0 ? revenueLeads : ingresos
 
   const funnel: LeadsFunnel = {
     conversaciones,
@@ -108,14 +173,14 @@ export async function getLeadsAnalytics(_month: string): Promise<{ leads: LeadRo
     noShows,
     cierres,
     ingresos,
-    facturacion: ingresos,
+    facturacion,
     ticketPromedio: cierres > 0 ? ingresos / cierres : 0,
     closeRate: shows > 0 ? (cierres / shows) * 100 : 0,
     showUpRate: agendas > 0 ? (shows / agendas) * 100 : 0,
     tasaAgendamiento: conversaciones > 0 ? (agendas / conversaciones) * 100 : 0,
     cashPorAgenda: agendas > 0 ? ingresos / agendas : 0,
     cashPorShow: shows > 0 ? ingresos / shows : 0,
-    aov: cierres > 0 ? ingresos / cierres : 0,
+    aov: cierres > 0 ? facturacion / cierres : 0,
   }
 
   // Programs breakdown (from leads table)
@@ -144,6 +209,7 @@ export async function getLeadsAnalytics(_month: string): Promise<{ leads: LeadRo
 
   allReports.forEach((r: Record<string, unknown>) => {
     const date = new Date((r.date as string) + 'T12:00:00')
+    if (Number.isNaN(date.getTime())) return
     const dayOfMonth = date.getDate()
     const w = Math.min(3, Math.floor((dayOfMonth - 1) / 7))
     const dow = (date.getDay() + 6) % 7 // Mon=0 Sun=6

@@ -36,18 +36,44 @@ export function SalesDashboardPage() {
   }, [])
 
   const fetchData = useCallback(async () => {
-    if (!ready || !userId) return
+    if (!ready) return
+    if (!userId) {
+      setCurr(null)
+      setPrev(null)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     const [y, m] = month.split('-').map(Number)
     const prevMonth = `${new Date(y, m - 2, 1).getFullYear()}-${String(new Date(y, m - 2, 1).getMonth() + 1).padStart(2, '0')}`
-    const [c, p] = await Promise.all([buildVD(month), buildVD(prevMonth)])
-    setCurr(c); setPrev(p)
-    setLoading(false)
+    try {
+      const [c, p] = await Promise.all([buildVD(month), buildVD(prevMonth)])
+      setCurr(c)
+      setPrev(p)
+    } finally {
+      setLoading(false)
+    }
   }, [month, ready, userId, buildVD])
 
-  useEffect(() => { fetchData() }, [fetchData])
+  useEffect(() => {
+    void fetchData()
+  }, [fetchData])
 
-  if (loading || !curr || !prev) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
+  useEffect(() => {
+    const refresh = () => {
+      void fetchData()
+    }
+    window.addEventListener('atvmkt-team-reports-changed', refresh)
+    return () => window.removeEventListener('atvmkt-team-reports-changed', refresh)
+  }, [fetchData])
+
+  if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
+
+  if (!userId) {
+    return <div className="py-12 text-center text-[var(--text3)]">Iniciá sesión para ver el panel de ventas.</div>
+  }
+
+  if (!curr || !prev) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   const delta = (key: keyof VDData) => pct(prev[key] as number, curr[key] as number)
 

@@ -27,11 +27,7 @@ const navigation: NavGroup[] = [
   },
   {
     title: 'Dashboard ventas', icon: '◆', defaultOpen: true,
-    items: [
-      { label: 'Panel', href: '/sales-dashboard' },
-      { label: 'Setter', href: '/setter' },
-      { label: 'Closer', href: '/closer' },
-    ],
+    items: [{ label: 'Panel', href: '/sales-dashboard' }],
   },
 ]
 
@@ -57,8 +53,8 @@ const dataGroups: NavGroup[] = [
     items: [
       { label: 'Dashboard equipo', href: '/team' },
       { label: 'Carga de Reportes', href: '/team/reportes' },
-      { label: 'Editar equipo', href: '/team/equipo' },
       { label: 'Historial de reportes', href: '/team/historial-reportes' },
+      { label: 'Equipo', href: '/team/equipo' },
     ],
   },
 ]
