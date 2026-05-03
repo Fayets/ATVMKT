@@ -316,7 +316,7 @@ class StoriesService:
     @db_session
     def _get_or_create_sequence_id(self, user_id: str, story_day: date) -> tuple[int, bool]:
         uid = int(user_id)
-        for s in StorySequence.select():
+        for s in list(StorySequence.select()):
             if s.user_id == uid and s.sequence_date == story_day:
                 return s.id, False
         seq = StorySequence(
@@ -334,7 +334,7 @@ class StoriesService:
         uid = int(user_id)
         return [
             s.id
-            for s in StorySlide.select()
+            for s in list(StorySlide.select())
             if (s.instagram_media_id or "") == story_id and s.sequence.user_id == uid
         ]
 
