@@ -199,6 +199,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'ctas_responded', label: 'CTAs resp.', width: 90, type: 'number', editable: true, defaultVisible: true },
     // Fechas
     { key: 'first_contact_at', label: '1er contacto', width: 120, type: 'date', editable: true, defaultVisible: true },
+    { key: 'agendo', label: 'Agendo', width: 120, type: 'date', editable: true, defaultVisible: true },
     { key: 'scheduled_at', label: 'Call', width: 110, type: 'date', editable: true, defaultVisible: true },
     { key: 'dias_agendamiento', label: 'Días p/ agendar', width: 100, type: 'number', editable: false, defaultVisible: true },
     { key: 'agendo_en', label: 'Agendó en', width: 120, type: 'select', editable: true, options: [...AGENDO_EN_OPTIONS], colors: AGENDO_EN_COLORS, defaultVisible: true },
@@ -231,7 +232,6 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'lead_user_id', label: 'User cuenta', width: 96, type: 'text', editable: false, defaultVisible: false },
     { key: 'keyword', label: 'Keyword (BD)', width: 120, type: 'text', editable: false, defaultVisible: false },
     { key: 'fecha_bot', label: 'Fecha bot', width: 130, type: 'date', editable: false, defaultVisible: false },
-    { key: 'agendo', label: 'Form Calendly (ISO)', width: 180, type: 'text', editable: false, defaultVisible: false },
     { key: 'call', label: 'Call (ISO BD)', width: 140, type: 'text', editable: false, defaultVisible: false },
     { key: 'content_url', label: 'Content URL', width: 160, type: 'link', editable: false, defaultVisible: false },
     { key: 'manychat_contact_id', label: 'ManyChat ID', width: 130, type: 'text', editable: false, defaultVisible: false },
