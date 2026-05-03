@@ -52,7 +52,7 @@ type Secuencia = {
   id: number
   fecha: string
   slides: StorySlide[]
-  totalViews: number
+  totalReach: number
   totalReplies: number
   dolor?: string
   angulo?: string
@@ -89,8 +89,8 @@ const toNumber = (v: unknown) => {
   return 0
 }
 
-/** Vistas (reproducciones Graph `views`); si no hay dato nuevo, fallback a `reach` (histórico). */
-const slideViewCount = (s: Pick<StorySlide, 'views' | 'reach'>) => toNumber(s.views ?? s.reach)
+/** Alcance único por slide (Graph API `reach`); métrica principal de historias — no views ni navigation. */
+const slideReachCount = (s: Pick<StorySlide, 'reach'>) => toNumber(s.reach)
 
 const hasCtaValue = (value: string | null | undefined): boolean => {
   const normalized = (value || '').trim().toLowerCase()
@@ -258,7 +258,7 @@ export default function HistoriasPage() {
         id: seq.id,
         fecha: seq.sequence_date,
         slides: seq.slides,
-        totalViews: seq.slides.reduce((acc, s) => acc + slideViewCount(s), 0),
+        totalReach: seq.slides.reduce((acc, s) => acc + slideReachCount(s), 0),
         totalReplies: seq.slides.reduce((acc, s) => acc + toNumber(s.replies), 0),
         dolor,
         angulo: seq.angulo || angulos[0] || '',
@@ -701,7 +701,7 @@ export default function HistoriasPage() {
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-4">
                     <div className="text-[14px] font-semibold">{sec.fecha}</div>
-                    <span className="font-mono-num text-[12px] text-[var(--text2)]">VISITAS: {sec.totalViews.toLocaleString()}</span>
+                    <span className="font-mono-num text-[12px] text-[var(--text2)]">ALCANCE: {sec.totalReach.toLocaleString('es-AR')}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash_generado)}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CHATS: {sec.chats}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CPC: {formatCash(cpc)}</span>
@@ -760,14 +760,14 @@ export default function HistoriasPage() {
                   // Build slide data from Metricool stories OR base64 thumbnails
                   const slideMetrics = sec.slides.map((s, i) => ({
                     idx: i + 1,
-                    views: slideViewCount(s),
+                    reach: slideReachCount(s),
                     likes: Number(s.replies || 0),
                     shares: toNumber(s.shares),
                     thumb: getImageUrl(s.image_url) || null,
                   }))
-                  const maxViews = Math.max(...slideMetrics.map(s => s.views), 1)
-                  const retentionData = slideMetrics.map(s => maxViews > 0 ? (s.views / maxViews) * 100 : 100)
-                  const hasMetrics = slideMetrics.some(s => s.views > 0)
+                  const maxReach = Math.max(...slideMetrics.map(s => s.reach), 1)
+                  const retentionData = slideMetrics.map(s => maxReach > 0 ? (s.reach / maxReach) * 100 : 100)
+                  const hasMetrics = slideMetrics.some(s => s.reach > 0)
 
                   return (
                   <div className="mt-4 pt-4 border-t border-[var(--border)]" onClick={e => e.stopPropagation()}>
@@ -796,8 +796,8 @@ export default function HistoriasPage() {
                       <div className="mb-5">
                         <div className="flex items-end overflow-x-auto pb-2">
                           {slideMetrics.map((s, i) => {
-                            const dropoff = i > 0 && slideMetrics[i - 1].views > 0
-                              ? Math.round(((slideMetrics[i - 1].views - s.views) / slideMetrics[i - 1].views) * 100)
+                            const dropoff = i > 0 && slideMetrics[i - 1].reach > 0
+                              ? Math.round(((slideMetrics[i - 1].reach - s.reach) / slideMetrics[i - 1].reach) * 100)
                               : 0
                             return (
                               <div key={s.idx} className="flex items-end flex-1 min-w-0">
@@ -819,7 +819,7 @@ export default function HistoriasPage() {
                                   </div>
                                   {hasMetrics && (
                                     <>
-                                      <div className="text-[9px] text-[var(--text3)]">Vistas: <span className="font-mono-num text-[var(--text)]">{s.views.toLocaleString()}</span></div>
+                                      <div className="text-[9px] text-[var(--text3)]">Alcance: <span className="font-mono-num text-[var(--text)]">{s.reach.toLocaleString('es-AR')}</span></div>
                                       <div className="text-[9px] text-[var(--text3)]">Replies: <span className="font-mono-num text-[var(--text)]">{s.likes}</span></div>
                                       <div className="text-[9px] text-[var(--text3)]">Compartidos: <span className="font-mono-num text-[var(--text)]">{s.shares.toLocaleString()}</span></div>
                                     </>
@@ -880,7 +880,7 @@ export default function HistoriasPage() {
                     {/* Retention chart — only when we have real metrics */}
                     {hasMetrics && slideMetrics.length > 1 && (
                       <div className="mb-5">
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">Grafico de Retencion</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">Retención de alcance entre slides</div>
                         <div className="h-32">
                           <Line data={{
                             labels: slideMetrics.map(s => `S${s.idx}`),
@@ -897,7 +897,7 @@ export default function HistoriasPage() {
                               x: { grid: { display: false }, ticks: { color: '#A1A1AA', font: { size: 9 } } },
                               y: { min: 0, max: 100, ticks: { callback: (v) => `${v}%`, color: '#52525B', font: { size: 9 } }, grid: { color: 'rgba(255,255,255,0.03)' } },
                             },
-                            plugins: { tooltip: { callbacks: { label: (ctx) => `${Number(ctx.raw).toFixed(1)}% retencion` } }, legend: { display: false } },
+                            plugins: { tooltip: { callbacks: { label: (ctx) => `${Number(ctx.raw).toFixed(1)}% retención (vs 1er slide, alcance)` } }, legend: { display: false } },
                           }} />
                         </div>
                       </div>
@@ -958,12 +958,12 @@ function StorySequenceDetail({
   const [angulo, setAngulo] = useState<string>(sequence.angulo || '')
   const [ctaText, setCtaText] = useState<string>(sequence.cta_text || '')
   const cashPorChat = chats > 0 ? cash / chats : 0
-  const firstViews = slideViewCount(sequence.slides[0] ?? { views: null, reach: null })
+  const firstReach = slideReachCount(sequence.slides[0] ?? { reach: null })
   const retentionData = sequence.slides
     .map((s, i) => {
-      const vc = slideViewCount(s)
-      if (firstViews <= 0) return null
-      return { slide: i + 1, retention: Math.max(0, Number(((vc / firstViews) * 100).toFixed(1))) }
+      const rc = slideReachCount(s)
+      if (firstReach <= 0) return null
+      return { slide: i + 1, retention: Math.max(0, Number(((rc / firstReach) * 100).toFixed(1))) }
     })
     .filter(Boolean) as { slide: number; retention: number }[]
 
@@ -993,16 +993,17 @@ function StorySequenceDetail({
         <div className="mb-5">
           <div className="flex items-end overflow-x-auto pb-2 gap-3">
             {sequence.slides.map((slide, i) => {
-              const prevViews = i > 0 ? slideViewCount(sequence.slides[i - 1]!) : 0
-              const currentViews = slideViewCount(slide)
-              const dropoff = i === 0 || prevViews <= 0 ? '—' : `${(((prevViews - currentViews) / prevViews) * 100).toFixed(1)}%`
+              const reachVal = slideReachCount(slide)
+              const prevReach = i > 0 ? slideReachCount(sequence.slides[i - 1]!) : 0
+              const currentReach = reachVal
+              const dropoff = i === 0 || prevReach <= 0 ? '—' : `${(((prevReach - currentReach) / prevReach) * 100).toFixed(1)}%`
               const thumb = getImageUrl(slide.image_url)
               return (
                 <div key={slide.id} className="w-[120px] flex-shrink-0">
                   <div className="h-[200px] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)]">
                     {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover rounded-lg" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)]">{i + 1}</div>}
                   </div>
-                  <div className="mt-2 text-[10px] text-[var(--text3)]">VISTAS: <span className="text-[var(--text)]">{slideViewCount(slide) || '—'}</span></div>
+                  <div className="mt-2 text-[10px] text-[var(--text3)]">ALCANCE: <span className="text-[var(--text)]">{reachVal ? reachVal.toLocaleString('es-AR') : '—'}</span></div>
                   <div className="text-[10px] text-[var(--text3)]">REPLIES: <span className="text-[var(--text)]">{toNumber(slide.replies) || '—'}</span></div>
                   <div className="text-[10px] text-[var(--text3)]">COMPARTIDOS: <span className="text-[var(--text)]">{toNumber(slide.shares) || '—'}</span></div>
                   <div className="text-[10px] text-[var(--text3)]">PERFIL: <span className="text-[var(--text)]">{toNumber(slide.profile_visits) || '—'}</span></div>
@@ -1030,7 +1031,7 @@ function StorySequenceDetail({
 
         {retentionData.length > 0 && (
           <div className="mb-5">
-            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">Grafico de Retencion</div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">Retención de alcance entre slides</div>
             <div className="h-56 w-full rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={retentionData}>

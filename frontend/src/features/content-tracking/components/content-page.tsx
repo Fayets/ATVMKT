@@ -113,7 +113,9 @@ export function ContentPage({ contentType, platform, title, columns }: ContentPa
       content_type: contentType === 'historia' ? 'historia' : contentType,
       platform,
       metrics: {
-        views: Number(formData.views) || 0,
+        ...(contentType === 'historia'
+          ? {}
+          : { views: Number(formData.views) || 0 }),
         likes: Number(formData.likes) || 0,
         comments: Number(formData.comments) || 0,
         saves: Number(formData.saves) || 0,
@@ -408,22 +410,39 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
     ? mcTags.filter(t => t.name.toLowerCase().includes(tagSearch.toLowerCase()))
     : mcTags
 
-  const fields: { key: string; label: string; type?: string; span?: number }[] = [
-    { key: 'title', label: contentType === 'video' ? 'Titulo del video' : 'Hook / Titulo', span: 2 },
-    { key: 'fecha', label: 'Fecha', type: 'date' },
-    { key: 'url', label: 'Link' },
-    { key: 'views', label: 'Views', type: 'number' },
-    { key: 'likes', label: 'Likes', type: 'number' },
-    { key: 'comments', label: 'Comments', type: 'number' },
-    { key: 'saves', label: 'Saves', type: 'number' },
-    { key: 'shares', label: 'Shares', type: 'number' },
-    { key: 'reach', label: 'Reach', type: 'number' },
-    { key: 'dolor', label: 'Dolor' },
-    { key: 'angulos', label: 'Angulos (separar con coma)' },
-    { key: 'cta', label: 'CTA' },
-    { key: 'cash', label: 'Cash $', type: 'number' },
-    { key: 'notes', label: 'Notas', span: 2 },
-  ]
+  const fields: { key: string; label: string; type?: string; span?: number }[] = (() => {
+    const base: { key: string; label: string; type?: string; span?: number }[] = [
+      { key: 'title', label: contentType === 'video' ? 'Titulo del video' : 'Hook / Titulo', span: 2 },
+      { key: 'fecha', label: 'Fecha', type: 'date' },
+      { key: 'url', label: 'Link' },
+    ]
+    if (contentType === 'historia') {
+      base.push(
+        { key: 'reach', label: 'Alcance (reach)', type: 'number' },
+        { key: 'likes', label: 'Likes', type: 'number' },
+        { key: 'comments', label: 'Comments', type: 'number' },
+        { key: 'saves', label: 'Saves', type: 'number' },
+        { key: 'shares', label: 'Shares', type: 'number' },
+      )
+    } else {
+      base.push(
+        { key: 'views', label: 'Views', type: 'number' },
+        { key: 'likes', label: 'Likes', type: 'number' },
+        { key: 'comments', label: 'Comments', type: 'number' },
+        { key: 'saves', label: 'Saves', type: 'number' },
+        { key: 'shares', label: 'Shares', type: 'number' },
+        { key: 'reach', label: 'Reach', type: 'number' },
+      )
+    }
+    base.push(
+      { key: 'dolor', label: 'Dolor' },
+      { key: 'angulos', label: 'Angulos (separar con coma)' },
+      { key: 'cta', label: 'CTA' },
+      { key: 'cash', label: 'Cash $', type: 'number' },
+      { key: 'notes', label: 'Notas', span: 2 },
+    )
+    return base
+  })()
 
   return (
     <Modal open={open} onClose={onClose} title={title}>
