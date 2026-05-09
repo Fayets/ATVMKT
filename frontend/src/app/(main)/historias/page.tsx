@@ -89,6 +89,14 @@ const toNumber = (v: unknown) => {
   return 0
 }
 
+/** Fecha de secuencia en pantalla: DD-MM-AAAA (API envía ISO YYYY-MM-DD o con hora). */
+function formatSequenceDateDisplay(iso: string): string {
+  const dayPart = String(iso || '').trim().slice(0, 10)
+  const m = dayPart.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!m) return String(iso || '').trim() || '—'
+  return `${m[3]}-${m[2]}-${m[1]}`
+}
+
 /** Alcance único por slide (Graph API `reach`); métrica principal de historias — no views ni navigation. */
 const slideReachCount = (s: Pick<StorySlide, 'reach'>) => toNumber(s.reach)
 
@@ -396,7 +404,7 @@ export default function HistoriasPage() {
       .filter((x) => x.desc.trim().length > 0)
     if (selectedSlides.length === 0) { toast('Selecciona al menos una story'); return }
     const tieneCTA = hasCtaValue(form.cta)
-    const titulo = form.secuenciaDesc || `Secuencia ${form.fecha}`
+    const titulo = form.secuenciaDesc || `Secuencia ${formatSequenceDateDisplay(form.fecha)}`
     const selectedThumbs = formSlideThumbs.filter((_, i) => formSelected.has(i + 1))
     const res = await apiFetch('/stories/sequences', {
       method: 'POST',
@@ -526,7 +534,7 @@ export default function HistoriasPage() {
             onClick={() => setMonthMode('comparison')}
             className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'comparison' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
           >
-            MES DE COMPARACION
+            SELECCIONAR MES Y AÑO
           </button>
         </div>
       </div>
@@ -700,7 +708,7 @@ export default function HistoriasPage() {
                 {/* Header with date + metrics */}
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-4">
-                    <div className="text-[14px] font-semibold">{sec.fecha}</div>
+                    <div className="text-[14px] font-semibold">{formatSequenceDateDisplay(sec.fecha)}</div>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">ALCANCE: {sec.totalReach.toLocaleString('es-AR')}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash_generado)}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CHATS: {sec.chats}</span>
@@ -713,7 +721,7 @@ export default function HistoriasPage() {
                     {!isExpanded && (
                       <button onClick={async (e) => {
                         e.stopPropagation()
-                        if (!confirm(`Eliminar secuencia del ${sec.fecha}?`)) return
+                        if (!confirm(`Eliminar secuencia del ${formatSequenceDateDisplay(sec.fecha)}?`)) return
                         await apiFetch(`/stories/sequences/${sec.id}`, {
                           method: 'DELETE',
                           headers: authHeaders(),
@@ -971,7 +979,7 @@ function StorySequenceDetail({
     <div className="fixed inset-0 z-[500] bg-black/70 flex items-stretch justify-end" onClick={onClose}>
       <div className="h-full w-full max-w-[920px] bg-[var(--bg2)] border-l border-[var(--border)] p-6 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <div className="mb-5 flex items-center justify-between">
-          <h3 className="text-[14px] font-semibold">Detalle secuencia {sequence.fecha}</h3>
+          <h3 className="text-[14px] font-semibold">Detalle secuencia {formatSequenceDateDisplay(sequence.fecha)}</h3>
           <button className="text-[var(--text3)]" onClick={onClose}>✕</button>
         </div>
 

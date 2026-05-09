@@ -13,6 +13,9 @@ pnpm-lock.yaml
 /out/
 *.rsc
 
+# TypeScript incremental (local cache; no commitear)
+*.tsbuildinfo
+
 # Production
 /build
 /dist

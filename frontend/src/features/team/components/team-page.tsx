@@ -37,6 +37,7 @@ type TeamDashboardResponse = {
   cash_total: number
   comisiones: number
   commission_pct: number
+  total_conversaciones: number
   setters: DashboardSetter[]
   closers: DashboardCloser[]
 }

@@ -35,7 +35,7 @@ function CashBarChart({ labels, values, prevValues, activeIndex, onBarClick, com
 
               {/* Value on top — shown on hover/active for all modes */}
               {(isActive || isHovered) && values[i] > 0 && (
-                <div className="text-center text-[10px] font-mono-num font-bold mb-1 text-[#4ADE80]" style={{ textShadow: '0 0 8px rgba(74,222,128,0.5)' }}>
+                <div className="text-center text-[10px] font-mono-num font-bold mb-1 text-[var(--green)]">
                   {formatCash(values[i])}
                 </div>
               )}
@@ -51,7 +51,7 @@ function CashBarChart({ labels, values, prevValues, activeIndex, onBarClick, com
                       : isHovered
                         ? 'linear-gradient(to top, rgba(22,163,74,0.45), rgba(74,222,128,0.65))'
                         : 'linear-gradient(to top, rgba(22,163,74,0.15), rgba(74,222,128,0.3))',
-                    boxShadow: isActive ? '0 0 20px rgba(74,222,128,0.3)' : 'none',
+                    boxShadow: isActive ? '0 2px 12px rgba(34,197,94,0.2)' : 'none',
                   }} />
                 <div className="flex-1 rounded-t-[5px] transition-all duration-300"
                   style={{
@@ -71,8 +71,7 @@ function CashBarChart({ labels, values, prevValues, activeIndex, onBarClick, com
             const hasData = values[i] > 0
             const lit = (i === activeIndex || i === hover) && hasData
             return (
-              <div key={i} className={`flex-1 text-center text-[10px] truncate cursor-pointer transition-all duration-200 ${lit && i === activeIndex ? 'text-[#4ADE80] font-semibold' : lit ? 'text-[#4ADE80]' : 'text-[#52525B]'}`}
-                style={lit ? { textShadow: '0 0 10px rgba(74,222,128,0.6)' } : undefined}
+              <div key={i} className={`flex-1 text-center text-[10px] truncate cursor-pointer transition-all duration-200 ${lit && i === activeIndex ? 'text-[var(--green)] font-semibold' : lit ? 'text-[var(--green)]' : 'text-[var(--text3)]'}`}
                 onClick={() => onBarClick(i)} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
                 {label}
               </div>
@@ -89,8 +88,7 @@ function CashBarChart({ labels, values, prevValues, activeIndex, onBarClick, com
               <div key={i} className="flex-1 text-center cursor-pointer"
                 onClick={() => onBarClick(i)} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
                 {show && (
-                  <span className={`text-[9px] transition-all duration-200 ${lit && i === activeIndex ? 'text-[#4ADE80] font-semibold' : lit ? 'text-[#4ADE80]' : 'text-[#52525B]'}`}
-                    style={lit ? { textShadow: '0 0 10px rgba(74,222,128,0.6)' } : undefined}>
+                  <span className={`text-[9px] transition-all duration-200 ${lit && i === activeIndex ? 'text-[var(--green)] font-semibold' : lit ? 'text-[var(--green)]' : 'text-[var(--text3)]'}`}>
                     {label}
                   </span>
                 )}
@@ -118,8 +116,6 @@ type BioMetrics = {
   cash_por_chat: number
   tasa_respuesta_auto: number | null
 }
-
-type LeadsMonthMetrics = Pick<BioMetrics, 'total_leads' | 'agendaron' | 'cash_total' | 'cash_por_chat'>
 
 function asFiniteNumber(v: unknown): number {
   const n = Number(v)
@@ -192,12 +188,90 @@ async function fetchReelsAsContent(monthKey: string, userId: string): Promise<Da
   return out
 }
 
+async function fetchStoriesAsContent(monthKey: string, userId: string): Promise<DashContentRow[]> {
+  try {
+    const res = await apiFetch(
+      `/stories/sequences?month=${encodeURIComponent(monthKey)}`,
+      dashUserHeaders(userId),
+    )
+    if (!res.ok) return []
+    const body = await res.json().catch(() => null)
+    if (!Array.isArray(body)) return []
+    return body.map((s: { sequence_date?: string; cash_generado?: number; chats?: number }) => ({
+      content_type: 'historia',
+      cash: Number(s.cash_generado) || 0,
+      chats: Number(s.chats) || 0,
+      published_at: String(s.sequence_date || '').trim(),
+    }))
+  } catch {
+    return []
+  }
+}
+
+async function fetchYoutubeAsContent(monthKey: string, userId: string): Promise<DashContentRow[]> {
+  const out: DashContentRow[] = []
+  let page = 1
+  const pageSize = 50
+  for (;;) {
+    const res = await apiFetch(
+      `/youtube/videos?month=${encodeURIComponent(monthKey)}&page=${page}&page_size=${pageSize}`,
+      dashUserHeaders(userId),
+    )
+    if (!res.ok) break
+    const body = (await res.json().catch(() => ({}))) as {
+      videos?: Array<{ cash?: number; chats?: number; published_at?: string | null }>
+      total_pages?: number
+    }
+    const videos = body.videos ?? []
+    for (const v of videos) {
+      out.push({
+        content_type: 'youtube',
+        cash: Number(v.cash) || 0,
+        chats: Number(v.chats) || 0,
+        published_at: v.published_at ? String(v.published_at).trim() : '',
+      })
+    }
+    const tp = Math.max(0, Number(body.total_pages) || 0)
+    if (videos.length === 0) break
+    if (tp > 0 && page >= tp) break
+    if (videos.length < pageSize) break
+    page += 1
+  }
+  return out
+}
+
 async function fetchLeadsForMonth(monthKey: string, userId: string): Promise<LeadRow[]> {
   try {
     const res = await apiFetch(`/leads?month=${encodeURIComponent(monthKey)}`, dashUserHeaders(userId))
     if (!res.ok) return []
     const body = (await res.json().catch(() => ({}))) as { leads?: unknown[] }
     return Array.isArray(body.leads) ? (body.leads as LeadRow[]) : []
+  } catch {
+    return []
+  }
+}
+
+async function fetchTeamDashboardDaily(
+  monthKey: string,
+  userId: string,
+): Promise<{ fecha: string; conversaciones: number }[]> {
+  try {
+    const res = await apiFetch(
+      `/team/dashboard/daily?month=${encodeURIComponent(monthKey)}`,
+      dashUserHeaders(userId),
+    )
+    if (!res.ok) return []
+    const body = await res.json().catch(() => null)
+    if (!Array.isArray(body)) return []
+    return body
+      .map((row: unknown) => {
+        if (!row || typeof row !== 'object') return null
+        const o = row as Record<string, unknown>
+        const fecha = String(o.fecha ?? '').trim().slice(0, 10)
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return null
+        return { fecha, conversaciones: asFiniteNumber(o.conversaciones) }
+      })
+      .filter((r): r is { fecha: string; conversaciones: number } => r !== null)
   } catch {
     return []
   }
@@ -212,6 +286,75 @@ function leadDayForFilter(l: LeadRow): string {
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
   }
   return ''
+}
+
+/** Calendario (año, mes, día) en una zona horaria IANA (uso: “hoy” = Argentina, alineado al backend). */
+function calendarPartsInTimeZone(date: Date, timeZone: string): { year: number; month: number; day: number } {
+  const dtf = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' })
+  const parts = dtf.formatToParts(date)
+  const n = (t: string) => Number(parts.find(p => p.type === t)?.value ?? 0)
+  return { year: n('year'), month: n('month'), day: n('day') }
+}
+
+const AR_TZ = 'America/Argentina/Buenos_Aires'
+
+function todayArgentinaParts(): { year: number; month: number; day: number } {
+  return calendarPartsInTimeZone(new Date(), AR_TZ)
+}
+
+/** YYYY-MM-DD en calendario Argentina (ISO con hora → convierte; evita cortar UTC y desfasar un día). */
+function publishedDateKey(publishedAt: string): string {
+  const s = String(publishedAt || '').trim()
+  if (!s) return ''
+  const ms = Date.parse(s)
+  if (!Number.isNaN(ms)) {
+    const p = calendarPartsInTimeZone(new Date(ms), AR_TZ)
+    return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
+  }
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : ''
+}
+
+function contentInPublishedRange(c: { published_at: string }, start: string, end: string): boolean {
+  const d = publishedDateKey(c.published_at)
+  if (!d) return false
+  return d >= start && d <= end
+}
+
+/** Suma `dailyChats` (setter por día) en el rango YYYY-MM-DD inclusive; `range` null = mes completo. */
+function sumSetterConversacionesInRange(
+  dailyChats: number[],
+  range: { start: string; end: string } | null,
+  year: number,
+  month: number,
+  daysInMonth: number,
+): number {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  if (!range) {
+    return dailyChats.reduce((a, b) => a + b, 0)
+  }
+  const { start, end } = range
+  let sum = 0
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${year}-${pad(month)}-${pad(d)}`
+    if (ds >= start && ds <= end) sum += dailyChats[d - 1] || 0
+  }
+  return sum
+}
+
+/** Reparte `total` en tres enteros ≥0 según pesos; la suma coincide con `total`. Si los pesos suman 0, todo va a Reels. */
+function splitTotalByWeights(total: number, wReel: number, wHist: number, wBio: number): [number, number, number] {
+  const t = Math.max(0, Math.floor(total))
+  const a = Math.max(0, wReel)
+  const b = Math.max(0, wHist)
+  const c = Math.max(0, wBio)
+  const s = a + b + c
+  if (t === 0) return [0, 0, 0]
+  if (s <= 0) return [t, 0, 0]
+  const ra = Math.floor((t * a) / s)
+  const rb = Math.floor((t * b) / s)
+  const rc = t - ra - rb
+  return [ra, rb, rc]
 }
 
 function emptyDashForMonth(month: string): DashData {
@@ -262,8 +405,6 @@ export default function DashboardPage() {
   const { ready, userId } = useAuthUser()
   const [data, setData] = useState<DashData | null>(null)
   const [bioMetrics, setBioMetrics] = useState<BioMetrics | null>(null)
-  const [leadsMonthMetrics, setLeadsMonthMetrics] = useState<LeadsMonthMetrics | null>(null)
-  const [loadingLeadsMonthMetrics, setLoadingLeadsMonthMetrics] = useState(false)
   const [view, setView] = useState<'mensual' | 'semanal' | 'diaria'>('mensual')
   const [selectedDay, setSelectedDay] = useState<number | null>(null)   // 1-based day of month
   const [selectedWeek, setSelectedWeek] = useState<number | null>(null) // 0-based week index
@@ -291,17 +432,28 @@ export default function DashboardPage() {
       fetchReelsAsContent(prev, userId),
       fetchLeadsForMonth(month, userId),
       fetchLeadsForMonth(prev, userId),
+      fetchTeamDashboardDaily(month, userId),
+      fetchStoriesAsContent(month, userId),
+      fetchYoutubeAsContent(month, userId),
+      fetchStoriesAsContent(prev, userId),
+      fetchYoutubeAsContent(prev, userId),
     ])
-    const currRows = settled[0].status === 'fulfilled' ? settled[0].value : []
-    const prevRows = settled[1].status === 'fulfilled' ? settled[1].value : []
+    const currReelRows = settled[0].status === 'fulfilled' ? settled[0].value : []
+    const prevReelRows = settled[1].status === 'fulfilled' ? settled[1].value : []
     currLeads = settled[2].status === 'fulfilled' ? settled[2].value : []
     prevLeadsData = settled[3].status === 'fulfilled' ? settled[3].value : []
+    const setterDailyRows = settled[4].status === 'fulfilled' ? settled[4].value : []
+    const currStoryRows = settled[5].status === 'fulfilled' ? settled[5].value : []
+    const currYtRows = settled[6].status === 'fulfilled' ? settled[6].value : []
+    const prevStoryRows = settled[7].status === 'fulfilled' ? settled[7].value : []
+    const prevYtRows = settled[8].status === 'fulfilled' ? settled[8].value : []
+    const currRows = [...currReelRows, ...currStoryRows, ...currYtRows]
+    const prevRows = [...prevReelRows, ...prevStoryRows, ...prevYtRows]
     items = currRows as unknown as Record<string, unknown>[]
     pItems = prevRows as unknown as Record<string, unknown>[]
 
     const bio: Record<string, unknown>[] = []
     const def_: Record<string, unknown>[] = []
-    const metricsRes = { data: [] as Record<string, unknown>[] }
     const sum = (arr: Record<string, unknown>[], key: string) => arr.reduce((s, i) => s + (Number(i[key]) || 0), 0)
     const byType = (type: string) => items.filter((i: Record<string, unknown>) => i.content_type === type || (type === 'historia' && i.content_type === 'story'))
 
@@ -370,9 +522,8 @@ export default function DashboardPage() {
     const rawPrevDailyCash = [...prevDailyCash]
     for (let i = 1; i < prevDailyCash.length; i++) prevDailyCash[i] += prevDailyCash[i - 1]
 
-    // Previous cash at same day of month
-    const dayNow = new Date().getDate()
-    const prevCashAtDay = prevDailyCash[Math.min(dayNow - 1, prevDailyCash.length - 1)] || 0
+    const arNow = todayArgentinaParts()
+    const prevCashAtDay = prevDailyCash[Math.min(arNow.day - 1, prevDailyCash.length - 1)] || 0
 
     // Calls report — fecha de llamada agendada (call_at legacy o scheduled_at / columna call en BD)
     const calls = currLeads
@@ -399,24 +550,19 @@ export default function DashboardPage() {
     })
     const programCounts = Object.entries(progMap).map(([program, count]) => ({ program, count })).sort((a, b) => b.count - a.count)
 
-    // Daily metrics for tooltip
-    const metricsData = (metricsRes.data || []) as { date: string; conversaciones: number; agendas: number; cierres: number }[]
+    // Conversaciones por día (setter) — GET /api/team/dashboard/daily
     const dailyChats = Array(daysInMonth).fill(0)
+    for (const row of setterDailyRows) {
+      const parts = row.fecha.split('-')
+      if (parts.length !== 3) continue
+      const py = Number(parts[0])
+      const pm = Number(parts[1])
+      const pd = Number(parts[2])
+      if (py !== y || pm !== m || pd < 1 || pd > daysInMonth) continue
+      dailyChats[pd - 1] += row.conversaciones
+    }
     const dailyAgendas = Array(daysInMonth).fill(0)
     const dailyCierres = Array(daysInMonth).fill(0)
-    metricsData.forEach(row => {
-      const day = new Date(String(row.date)).getDate()
-      if (day >= 1 && day <= daysInMonth) {
-        dailyChats[day - 1] = Number(row.conversaciones) || 0
-        dailyAgendas[day - 1] = Number(row.agendas) || 0
-        dailyCierres[day - 1] = Number(row.cierres) || 0
-      }
-    })
-    if (!metricsData.length) {
-      items.forEach((row: Record<string, unknown>) => {
-        addToMonthDayBucket(dailyChats, y, m, String(row.published_at || ''), Number(row.chats) || 0)
-      })
-    }
 
     setData({
       cash, prevCash, prevCashAtDay, chats, prevChats,
@@ -471,39 +617,7 @@ export default function DashboardPage() {
     }
     loadBioMetrics()
   }, [apiBase, month, ready, userId])
-  useEffect(() => {
-    if (!ready || !userId) {
-      setLeadsMonthMetrics(null)
-      return
-    }
-    const load = async () => {
-      setLoadingLeadsMonthMetrics(true)
-      try {
-        const res = await apiFetch(`/leads/metrics?month=${encodeURIComponent(month)}`)
-        const txt = await res.text()
-        const payload = (() => {
-          try { return txt ? JSON.parse(txt) : {} } catch { return {} }
-        })() as Partial<LeadsMonthMetrics>
-        if (!res.ok) {
-          setLeadsMonthMetrics(null)
-          return
-        }
-        setLeadsMonthMetrics({
-          total_leads: asFiniteNumber(payload.total_leads),
-          agendaron: asFiniteNumber(payload.agendaron),
-          cash_total: asFiniteNumber(payload.cash_total),
-          cash_por_chat: asFiniteNumber(payload.cash_por_chat),
-        })
-      } catch {
-        setLeadsMonthMetrics(null)
-      } finally {
-        setLoadingLeadsMonthMetrics(false)
-      }
-    }
-    load()
-  }, [month, ready, userId])
   useEffect(() => { setTfMonth(month); setTfProgram(''); setSelectedDay(null); setSelectedWeek(null) }, [month])
-  useEffect(() => { setSelectedDay(null); setSelectedWeek(null) }, [view])
   useEffect(() => {
     setTypeform(null)
     const params = new URLSearchParams({ month: tfMonth })
@@ -523,15 +637,15 @@ export default function DashboardPage() {
 
   const [y, m] = month.split('-').map(Number)
   const daysInMonth = new Date(y, m, 0).getDate()
-  const dayNow = new Date().getMonth() + 1 === m && new Date().getFullYear() === y ? new Date().getDate() : daysInMonth
-  const cashPerDay = dayNow > 0 ? dashData.cash / dayNow : 0
-  const projectedClose = Math.round(cashPerDay * daysInMonth)
+
+  const arToday = todayArgentinaParts()
+  const isMonthCurrent = arToday.year === y && arToday.month === m
+  const dayNow = isMonthCurrent ? arToday.day : daysInMonth
 
   // Chart data
   const sparkDays = Array.from({ length: daysInMonth }, (_, i) => i + 1)
   const sparkCurrent = sparkDays.map((d, i) => d <= dayNow ? dashData.dailyCash[i] || 0 : null)
   const sparkPrev = dashData.prevDailyCash
-  const sparkProj = sparkDays.map((d, i) => d >= dayNow ? Math.round(cashPerDay * d) : null)
 
   const cashTrend = dashData.prevCashAtDay > 0 ? ((dashData.cash - dashData.prevCashAtDay) / dashData.prevCashAtDay * 100) : 0
 
@@ -548,29 +662,18 @@ export default function DashboardPage() {
     weeklyCash.push(wc); weeklyPrevCash.push(wp)
   }
 
-  // Current week index
-  const currentWeekIdx = Math.min(Math.floor((dayNow - 1) / 7), weeksCount - 1)
-
-  // === View-based filtering ===
-  const getViewRange = () => {
-    const pad = (n: number) => String(n).padStart(2, '0')
-    if (view === 'diaria') {
-      const day = selectedDay || dayNow
-      const dayStr = `${y}-${pad(m)}-${pad(day)}`
-      return { start: dayStr, end: dayStr, day }
-    }
-    if (view === 'semanal') {
-      const wIdx = selectedWeek ?? currentWeekIdx
-      const wg = weekGroups[wIdx]
-      if (!wg) return null
-      const startStr = `${y}-${pad(m)}-${pad(wg.startDay)}`
-      const endStr = `${y}-${pad(m)}-${pad(wg.endDay)}`
-      return { start: startStr, end: endStr, weekIdx: wIdx }
-    }
-    return null // mensual = no filter
+  const weeklyConversaciones: number[] = []
+  for (let w = 0; w < weeksCount; w++) {
+    const s = w * 7
+    const e = Math.min(s + 7, daysInMonth)
+    let conv = 0
+    for (let d = s; d < e; d++) conv += dashData.dailyChats[d] || 0
+    weeklyConversaciones.push(conv)
   }
 
-  // Week groups for filtering
+  // Current week index (franjas 1–7, 8–14, … del mes seleccionado)
+  const currentWeekIdx = Math.min(Math.floor((dayNow - 1) / 7), weeksCount - 1)
+
   const weekGroups = (() => {
     const groups: { startDay: number; endDay: number }[] = []
     for (let i = 1; i <= daysInMonth; i += 7) {
@@ -579,7 +682,87 @@ export default function DashboardPage() {
     return groups
   })()
 
-  const viewRange = getViewRange()
+  const padYm = (n: number) => String(n).padStart(2, '0')
+
+  const countPiecesInWeekIdx = (wi: number) => {
+    const wg = weekGroups[wi]
+    if (!wg) return 0
+    const startStr = `${y}-${padYm(m)}-${padYm(wg.startDay)}`
+    const endStr = `${y}-${padYm(m)}-${padYm(wg.endDay)}`
+    return dashData.rawContent.filter(c => contentInPublishedRange(c, startStr, endStr)).length
+  }
+
+  const setterSumInWeekIdx = (wi: number) => {
+    const wg = weekGroups[wi]
+    if (!wg) return 0
+    const startStr = `${y}-${padYm(m)}-${padYm(wg.startDay)}`
+    const endStr = `${y}-${padYm(m)}-${padYm(wg.endDay)}`
+    return sumSetterConversacionesInRange(
+      dashData.dailyChats,
+      { start: startStr, end: endStr },
+      y,
+      m,
+      daysInMonth,
+    )
+  }
+
+  const weekHasActivity = (wi: number) =>
+    setterSumInWeekIdx(wi) > 0 || countPiecesInWeekIdx(wi) > 0
+
+  /**
+   * Sin semana elegida en el gráfico: la franja que contiene “hoy” en AR.
+   * Si esa franja no tiene ni conversaciones setter ni piezas en el mes, pasamos a la última franja con datos (típico: semana 1–7 con reels/reportes y semana 8–14 aún vacía).
+   */
+  const semanalWeekIdxDefault =
+    view === 'semanal'
+      ? (() => {
+          let w = Math.min(Math.max(0, currentWeekIdx), Math.max(0, weekGroups.length - 1))
+          if (weekHasActivity(w)) return w
+          for (let i = w - 1; i >= 0; i--) {
+            if (weekHasActivity(i)) return i
+          }
+          for (let i = w + 1; i < weekGroups.length; i++) {
+            if (weekHasActivity(i)) return i
+          }
+          return w
+        })()
+      : currentWeekIdx
+
+  const effectiveSemanalWeekIdx =
+    view === 'semanal'
+      ? selectedWeek !== null
+        ? selectedWeek
+        : semanalWeekIdxDefault
+      : currentWeekIdx
+
+  const effectiveDiariaDay =
+    view === 'diaria' ? (selectedDay !== null ? selectedDay : dayNow) : dayNow
+
+  const viewRange: { start: string; end: string; day?: number; weekIdx?: number } | null = (() => {
+    if (view === 'diaria') {
+      const day = effectiveDiariaDay
+      const dayStr = `${y}-${padYm(m)}-${padYm(day)}`
+      return { start: dayStr, end: dayStr, day }
+    }
+    if (view === 'semanal') {
+      const wIdx = effectiveSemanalWeekIdx
+      const wg = weekGroups[wIdx]
+      if (!wg) return null
+      return {
+        start: `${y}-${padYm(m)}-${padYm(wg.startDay)}`,
+        end: `${y}-${padYm(m)}-${padYm(wg.endDay)}`,
+        weekIdx: wIdx,
+      }
+    }
+    return null
+  })()
+  const viewSetterConversacionesSum = sumSetterConversacionesInRange(
+    dashData.dailyChats,
+    viewRange,
+    y,
+    m,
+    daysInMonth,
+  )
   const viewLeads = viewRange
     ? dashData.rawLeads.filter(l => {
         const d = leadDayForFilter(l)
@@ -647,13 +830,9 @@ export default function DashboardPage() {
 
   // Filter content by published_at date
   const viewContent = viewRange
-    ? dashData.rawContent.filter(c => { const d = c.published_at.split('T')[0]; return d >= viewRange.start && d <= viewRange.end })
+    ? dashData.rawContent.filter(c => contentInPublishedRange(c, viewRange.start, viewRange.end))
     : dashData.rawContent
   const viewBio = viewRange ? [] : dashData.rawBio // bio has no daily dates
-
-  const leadChatsHistorias = viewLeads.filter(l => dashboardChatBucket(l) === 'Historias').length
-  const leadChatsReels = viewLeads.filter(l => dashboardChatBucket(l) === 'Reels').length
-  const leadChatsPerfil = viewLeads.filter(l => dashboardChatBucket(l) === 'Perfil').length
 
   const viewReelsChatsContent = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.chats, 0)
   const viewHistoriasChatsContent = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').reduce((s, c) => s + c.chats, 0)
@@ -662,14 +841,18 @@ export default function DashboardPage() {
     ? bioDisplay.total_leads
     : viewBioChatsFromSupabase
 
-  // Con CRM en la vista: un lead = un solo canal (no mezclar con chats agregados de IG en piezas).
-  // Math.max(reels, contenido) inflaba Reels cuando IG sumaba más conversaciones que leads en bucket Reels.
-  const hasLeadsInView = viewLeads.length > 0
-  const viewReelsChats = hasLeadsInView ? leadChatsReels : viewReelsChatsContent
-  const viewHistoriasChats = hasLeadsInView ? leadChatsHistorias : viewHistoriasChatsContent
-  const viewBioChats = hasLeadsInView ? leadChatsPerfil : viewBioChatsFallback
-  const viewTotalChatsFromChannels = viewReelsChats + viewHistoriasChats + viewBioChats
-  const viewTotalChats = viewTotalChatsFromChannels
+  /** Peso bio: sin fechas por día, solo aplica al mes completo; en semana/día no repartimos bio si no hay filas. */
+  const weightBioChats = viewRange ? viewBioChatsFromSupabase : viewBioChatsFallback
+
+  const [viewReelsChats, viewHistoriasChats, viewBioChats] = splitTotalByWeights(
+    viewSetterConversacionesSum,
+    viewReelsChatsContent,
+    viewHistoriasChatsContent,
+    weightBioChats,
+  )
+
+  /** Misma base que las barras “Conversaciones” (setter / equipo) y que la tabla CHATS & CPC. */
+  const viewTotalChats = viewSetterConversacionesSum
 
   const viewReelsCash = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.cash, 0)
   const viewHistoriasCash = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').reduce((s, c) => s + c.cash, 0)
@@ -687,11 +870,10 @@ export default function DashboardPage() {
   // View period label
   const viewLabel = (() => {
     if (view === 'diaria') {
-      const day = selectedDay || dayNow
-      return `Dia ${day}`
+      return `Dia ${effectiveDiariaDay}`
     }
     if (view === 'semanal') {
-      const wIdx = selectedWeek ?? currentWeekIdx
+      const wIdx = effectiveSemanalWeekIdx
       const wg = weekGroups[wIdx]
       if (wg) return `Semana ${wIdx + 1} (${wg.startDay}-${wg.endDay})`
       return ''
@@ -737,14 +919,25 @@ export default function DashboardPage() {
   const contentCashTotal = asFiniteNumber(reelCashForCpc) + asFiniteNumber(histCashForCpc) + asFiniteNumber(viewBioCashReal)
   const cpcTotal = viewTotalChats > 0 ? contentCashTotal / viewTotalChats : 0
 
+  const kpiConversaciones = viewSetterConversacionesSum
+  const kpiReelsPublicados = viewContent.filter(c => c.content_type === 'reel').length
+  const kpiHistoriasPublicadas = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').length
+  const kpiYoutubePublicados = viewContent.filter(c => c.content_type === 'youtube').length
+  const kpiCashPorChat = cpcTotal
+
   return (
     <div>
       {/* Header with tabs + month selector */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex gap-1">
-          {(['diaria', 'semanal', 'mensual'] as const).map(v => (
-            <button key={v} onClick={() => setView(v)} className={`px-4 py-2 rounded-lg text-[11px] font-semibold uppercase transition-colors ${view === v ? 'bg-[var(--accent)] text-white' : 'text-[var(--text3)] hover:text-[var(--text)]'}`}>
-              Vista {v}
+          {(['mensual', 'semanal', 'diaria'] as const).map(v => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`px-4 py-2 rounded-lg text-[11px] font-semibold uppercase transition-colors ${view === v ? 'bg-[var(--accent)] text-white' : 'text-[var(--text3)] hover:text-[var(--text)]'}`}
+            >
+              {v === 'mensual' ? 'MENSUAL' : v === 'semanal' ? 'SEMANAL' : 'DIARIO'}
             </button>
           ))}
         </div>
@@ -753,29 +946,26 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
+      <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className="glass-card p-4">
-          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Leads</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">
-            {loadingLeadsMonthMetrics ? '—' : (leadsMonthMetrics?.total_leads ?? 0)}
-          </div>
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Conversaciones</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold">{kpiConversaciones}</div>
         </div>
         <div className="glass-card p-4">
-          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Tasa de agenda</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">
-            {loadingLeadsMonthMetrics ? '—' : (() => {
-              const leads = leadsMonthMetrics?.total_leads ?? 0
-              const agendaron = leadsMonthMetrics?.agendaron ?? 0
-              if (leads <= 0) return '—'
-              return `${((agendaron / leads) * 100).toFixed(1)}%`
-            })()}
-          </div>
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Reels publicados</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold">{kpiReelsPublicados}</div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Historias publicadas</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold">{kpiHistoriasPublicadas}</div>
+        </div>
+        <div className="glass-card p-4">
+          <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Videos YouTube publicados</div>
+          <div className="font-mono-num mt-1 text-2xl font-bold">{kpiYoutubePublicados}</div>
         </div>
         <div className="glass-card p-4">
           <div className="text-[11px] font-medium text-[var(--text3)] tracking-tight">Cash por chat</div>
-          <div className="font-mono-num mt-1 text-2xl font-bold">
-            {loadingLeadsMonthMetrics ? '—' : formatCash(Number(leadsMonthMetrics?.cash_por_chat || 0))}
-          </div>
+          <div className="font-mono-num mt-1 text-2xl font-bold">{formatCash(kpiCashPorChat)}</div>
         </div>
       </div>
 
@@ -803,41 +993,43 @@ export default function DashboardPage() {
 
           {/* Chart */}
           {view === 'mensual' && (
-            <div className="h-36 mb-3 relative" ref={chartContainerRef}
-              onMouseLeave={() => { if (chartTooltipRef.current) chartTooltipRef.current.style.opacity = '0' }}>
-              <Line data={{
-                labels: sparkDays.map(d => String(d)),
-                datasets: [
-                  { data: sparkCurrent as (number | null)[], borderColor: '#22C55E', backgroundColor: 'rgba(34,197,94,0.08)', fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#22C55E', pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, borderWidth: 2.5 },
-                  { data: sparkPrev, borderColor: 'rgba(161,161,170,0.4)', borderDash: [5, 5], fill: false, tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
-                  { data: sparkProj as (number | null)[], borderColor: 'rgba(230,57,70,0.6)', borderDash: [4, 4], fill: false, tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
-                ],
-              }} options={{
-                responsive: true, maintainAspectRatio: false,
-                scales: { x: { display: false }, y: { display: false } },
-                plugins: {
-                  tooltip: {
-                    enabled: false,
-                    external: (context: { tooltip: { opacity: number; dataPoints?: { dataIndex: number }[]; caretX: number; caretY: number } }) => {
-                      const el = chartTooltipRef.current
-                      if (!el) return
-                      const { tooltip } = context
-                      if (tooltip.opacity === 0 || !tooltip.dataPoints?.length) {
-                        el.style.opacity = '0'; return
-                      }
-                      const i = tooltip.dataPoints[0].dataIndex
-                      const left = tooltip.caretX > 400 ? tooltip.caretX - 200 : tooltip.caretX + 16
-                      el.style.opacity = '1'
-                      el.style.left = `${left}px`
-                      el.style.top = `${Math.max(0, tooltip.caretY - 60)}px`
-                      // Update content only if day changed
-                      if (tooltipDataRef.current?.dayIndex !== i) {
-                        tooltipDataRef.current = { dayIndex: i }
-                        const cc = dashData.rawDailyCash[i] || 0
-                        const chats = dashData.dailyChats[i] || 0
-                        const agendas = dashData.dailyAgendas[i] || 0
-                        const cierres = dashData.dailyCierres[i] || 0
-                        el.innerHTML = `
+            <div className="mb-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div
+                className="relative h-36 rounded-xl border border-[var(--border)] bg-[var(--bg4)]/25 p-1"
+                ref={chartContainerRef}
+                onMouseLeave={() => { if (chartTooltipRef.current) chartTooltipRef.current.style.opacity = '0' }}
+              >
+                <Line data={{
+                  labels: sparkDays.map(d => String(d)),
+                  datasets: [
+                    { data: sparkCurrent as (number | null)[], borderColor: '#22C55E', backgroundColor: 'rgba(34,197,94,0.08)', fill: true, tension: 0.4, pointRadius: 0, pointHoverRadius: 5, pointHoverBackgroundColor: '#22C55E', pointHoverBorderColor: '#fff', pointHoverBorderWidth: 2, borderWidth: 2.5 },
+                    { data: sparkPrev, borderColor: 'rgba(161,161,170,0.4)', borderDash: [5, 5], fill: false, tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
+                  ],
+                }} options={{
+                  responsive: true, maintainAspectRatio: false,
+                  scales: { x: { display: false }, y: { display: false } },
+                  plugins: {
+                    tooltip: {
+                      enabled: false,
+                      external: (context: { tooltip: { opacity: number; dataPoints?: { dataIndex: number }[]; caretX: number; caretY: number } }) => {
+                        const el = chartTooltipRef.current
+                        if (!el) return
+                        const { tooltip } = context
+                        if (tooltip.opacity === 0 || !tooltip.dataPoints?.length) {
+                          el.style.opacity = '0'; return
+                        }
+                        const i = tooltip.dataPoints[0].dataIndex
+                        const left = tooltip.caretX > 400 ? tooltip.caretX - 200 : tooltip.caretX + 16
+                        el.style.opacity = '1'
+                        el.style.left = `${left}px`
+                        el.style.top = `${Math.max(0, tooltip.caretY - 60)}px`
+                        if (tooltipDataRef.current?.dayIndex !== i) {
+                          tooltipDataRef.current = { dayIndex: i }
+                          const cc = dashData.rawDailyCash[i] || 0
+                          const chats = dashData.dailyChats[i] || 0
+                          const agendas = dashData.dailyAgendas[i] || 0
+                          const cierres = dashData.dailyCierres[i] || 0
+                          el.innerHTML = `
                           <div class="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[rgba(8,8,12,0.96)] px-5 py-4 shadow-2xl backdrop-blur-sm" style="box-shadow:0 8px 32px rgba(0,0,0,0.5),0 0 0 1px rgba(255,255,255,0.05)">
                             <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:12px">Día ${i + 1}</div>
                             <div style="display:flex;flex-direction:column;gap:10px">
@@ -847,34 +1039,146 @@ export default function DashboardPage() {
                               <div style="display:flex;justify-content:space-between;gap:24px"><span style="font-size:12px;font-weight:500;color:#E63946">Cierres</span><span style="font-size:13px;font-weight:700;color:#fff;font-variant-numeric:tabular-nums">${cierres}</span></div>
                             </div>
                           </div>`
-                      }
+                        }
+                      },
                     },
+                    legend: { display: false },
                   },
-                  legend: { display: false },
-                },
-                interaction: { intersect: false, mode: 'index' as const },
-              }} />
-              {/* Tooltip container — updated via ref, no React re-renders */}
-              <div ref={chartTooltipRef} className="absolute z-50 pointer-events-none transition-opacity duration-150" style={{ opacity: 0 }} />
+                  interaction: { intersect: false, mode: 'index' as const },
+                }} />
+                <div ref={chartTooltipRef} className="absolute z-50 pointer-events-none transition-opacity duration-150" style={{ opacity: 0 }} />
+              </div>
+              <div className="flex h-36 flex-col rounded-xl border border-[var(--border)] bg-[var(--bg4)]/30 p-2">
+                <div className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">
+                  Conversaciones por día
+                </div>
+                <div className="relative min-h-0 flex-1 w-full">
+                  <Bar
+                    data={{
+                      labels: sparkDays.map(d => String(d)),
+                      datasets: [
+                        {
+                          label: 'Conversaciones',
+                          data: dashData.dailyChats,
+                          backgroundColor: 'rgba(34,197,94,0.32)',
+                          borderColor: 'rgba(34,197,94,0.75)',
+                          borderWidth: 1,
+                          borderRadius: 6,
+                        },
+                      ],
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                          backgroundColor: 'rgba(255,255,255,0.96)',
+                          titleColor: '#0f172a',
+                          bodyColor: '#334155',
+                          borderColor: 'rgba(148,163,184,0.35)',
+                          borderWidth: 1,
+                          padding: 10,
+                          cornerRadius: 8,
+                        },
+                      },
+                      scales: {
+                        x: {
+                          ticks: { color: '#64748b', maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 9 } },
+                          grid: { color: 'rgba(148,163,184,0.22)' },
+                        },
+                        y: {
+                          beginAtZero: true,
+                          ticks: { color: '#64748b', font: { size: 9 } },
+                          grid: { color: 'rgba(148,163,184,0.18)' },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           )}
 
-          {view === 'diaria' && <CashBarChart
-            labels={sparkDays.map(d => String(d))}
-            values={sparkDays.map((d, i) => d <= dayNow ? dashData.rawDailyCash[i] || 0 : 0)}
-            prevValues={dashData.rawPrevDailyCash}
-            activeIndex={(() => { const d = selectedDay || dayNow; return d - 1 })()}
-            onBarClick={(i) => { if (i + 1 <= dayNow) setSelectedDay(i + 1) }}
-            compact
-          />}
-
-          {view === 'semanal' && <CashBarChart
-            labels={weeklyLabels}
-            values={weeklyCash}
-            prevValues={weeklyPrevCash}
-            activeIndex={selectedWeek ?? currentWeekIdx}
-            onBarClick={(i) => setSelectedWeek(i)}
-          />}
+          {(view === 'semanal' || view === 'diaria') && (
+            <div className="mb-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--bg4)]/30 p-2">
+                {view === 'diaria' ? (
+                  <CashBarChart
+                    labels={sparkDays.map(d => String(d))}
+                    values={sparkDays.map((d, i) => d <= dayNow ? dashData.rawDailyCash[i] || 0 : 0)}
+                    prevValues={dashData.rawPrevDailyCash}
+                    activeIndex={effectiveDiariaDay - 1}
+                    onBarClick={(i) => { if (i + 1 <= dayNow) setSelectedDay(i + 1) }}
+                    compact
+                  />
+                ) : (
+                  <CashBarChart
+                    labels={weeklyLabels}
+                    values={weeklyCash}
+                    prevValues={weeklyPrevCash}
+                    activeIndex={effectiveSemanalWeekIdx}
+                    onBarClick={(i) => setSelectedWeek(i)}
+                  />
+                )}
+              </div>
+              <div className="flex h-36 flex-col rounded-xl border border-[var(--border)] bg-[var(--bg4)]/30 p-2">
+                <div className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">
+                  {view === 'diaria' ? 'Conversaciones por día' : 'Conversaciones por semana'}
+                </div>
+                <div className="relative min-h-0 flex-1 w-full">
+                  <Bar
+                    data={{
+                      labels: view === 'diaria' ? sparkDays.map(String) : weeklyLabels,
+                      datasets: [
+                        {
+                          label: 'Conversaciones',
+                          data: view === 'diaria' ? dashData.dailyChats : weeklyConversaciones,
+                          backgroundColor: 'rgba(34,197,94,0.32)',
+                          borderColor: 'rgba(34,197,94,0.75)',
+                          borderWidth: 1,
+                          borderRadius: 6,
+                        },
+                      ],
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                          backgroundColor: 'rgba(255,255,255,0.96)',
+                          titleColor: '#0f172a',
+                          bodyColor: '#334155',
+                          borderColor: 'rgba(148,163,184,0.35)',
+                          borderWidth: 1,
+                          padding: 10,
+                          cornerRadius: 8,
+                        },
+                      },
+                      scales: {
+                        x: {
+                          ticks: {
+                            color: '#64748b',
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: view === 'diaria' ? 8 : 12,
+                            font: { size: 9 },
+                          },
+                          grid: { color: 'rgba(148,163,184,0.22)' },
+                        },
+                        y: {
+                          beginAtZero: true,
+                          ticks: { color: '#64748b', font: { size: 9 } },
+                          grid: { color: 'rgba(148,163,184,0.18)' },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Legend */}
           <div className="flex items-center gap-5 text-[11px] mt-3 pt-3 border-t border-[var(--border)]">
@@ -888,11 +1192,6 @@ export default function DashboardPage() {
                   <div className="h-[2px] w-5 rounded-full" style={{ background: 'repeating-linear-gradient(90deg, #71717A 0 4px, transparent 4px 8px)' }} />
                   <span className="text-[var(--text3)]">Anterior</span>
                   <span className={`font-mono-num font-medium ${cashTrend >= 0 ? 'text-[var(--green)]' : 'text-[var(--red)]'}`}>{formatCash(dashData.prevCashAtDay)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-[2px] w-5 rounded-full" style={{ background: 'repeating-linear-gradient(90deg, #E63946 0 3px, transparent 3px 7px)' }} />
-                  <span className="text-[var(--text3)]">Proyeccion</span>
-                  <span className="font-mono-num font-medium text-[var(--accent)]">{formatCash(projectedClose)}</span>
                 </div>
               </>
             ) : (

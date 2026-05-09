@@ -188,13 +188,13 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'client_name', label: 'Nombre', width: 160, type: 'text', editable: true, sticky: true, defaultVisible: true },
     { key: 'ig_handle', label: 'IG', width: 130, type: 'text', editable: true, defaultVisible: true },
     { key: 'phone', label: 'Tel', width: 140, type: 'text', editable: true, defaultVisible: true },
-    { key: 'email', label: 'Email', width: 180, type: 'text', editable: true, defaultVisible: true },
+    { key: 'email', label: 'Email', width: 180, type: 'text', editable: false, defaultVisible: true },
     { key: 'avatar_type', label: 'Avatar', width: 170, type: 'badge', editable: true, options: AVATAR_OPTIONS, colors: AVATAR_COLORS, defaultVisible: true },
     // Estado y equipo
     { key: 'status', label: 'Status', width: 130, type: 'select', editable: true, options: STATUS_OPTIONS, colors: STATUS_COLORS, defaultVisible: true },
     { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
     // entry_funnel (keyword) no se muestra en esta vista
-    { key: 'agenda_point', label: 'Pto agenda', width: 130, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
+    { key: 'agenda_point', label: 'Pto agenda', width: 160, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
     { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
     { key: 'ctas_responded', label: 'CTAs resp.', width: 90, type: 'number', editable: true, defaultVisible: true },
     // Fechas
@@ -209,8 +209,8 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'dolores_setting', label: 'Dolores setting', width: 200, type: 'text', editable: true, defaultVisible: true },
     // Llamada (closer)
     { key: 'closer', label: 'Closer', width: 110, type: 'badge', editable: true, options: ['', ...closerNames], colors: Object.fromEntries(closerNames.map(n => [n, '#8B5CF6'])), defaultVisible: true },
-    { key: 'call_link', label: 'Link de llamada', width: 110, type: 'link', editable: true, defaultVisible: true },
     { key: 'closer_report', label: 'Reporte closer', width: 200, type: 'text', editable: true, defaultVisible: true },
+    { key: 'call_link', label: 'Link de llamada', width: 110, type: 'link', editable: true, defaultVisible: true },
     { key: 'dolores_llamada', label: 'Dolores llamada', width: 200, type: 'text', editable: true, defaultVisible: true },
     { key: 'razon_compra', label: 'Razón compra', width: 200, type: 'text', editable: true, defaultVisible: true },
     { key: 'ingresos_mensuales', label: 'Ingresos lead', width: 130, type: 'currency', editable: true, defaultVisible: true },

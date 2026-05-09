@@ -8,14 +8,53 @@ import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
 import { apiFetch } from '@/lib/api'
+import { AgendaPointPickerModal } from './agenda-point-picker-modal'
 import {
-  Lead, ColumnDef, SortConfig, FilterConfig,
-  STATUS_TABS, buildColumns, canonicalLeadStatus,
+  Lead,
+  ColumnDef,
+  SortConfig,
+  FilterConfig,
+  STATUS_TABS,
+  buildColumns,
+  canonicalLeadStatus,
   ORIGIN_OPTIONS,
   AGENDO_EN_OPTIONS,
 } from '../types'
 
-/** Solo '' + valores agregados con + en el header (sin lista fija). Vía / Pto agenda. */
+type AgendaReelLookup = { title: string; publishedAt: string | null }
+type AgendaSequenceLookup = { title: string; sequenceDate: string | null }
+
+/** Fecha para badge Pto agenda (ISO reel o YYYY-MM-DD de historia). */
+function formatAgendaPointDate(raw: string | null | undefined): string {
+  if (raw == null || !String(raw).trim()) return '—'
+  const s = String(raw).trim()
+  const head = s.includes('T') ? s.split('T')[0] : s.split(' ')[0]
+  if (/^\d{4}-\d{2}-\d{2}$/.test(head)) {
+    const [y, mo, d] = head.split('-').map(Number)
+    return `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${y}`
+  }
+  const d = new Date(s)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+const LEGACY_AGENDA_SNIPPET_LEN = 42
+
+function formatAgendaPointBadgeText(
+  raw: string | null | undefined,
+  lookups: { reels: Record<string, AgendaReelLookup>; sequences: Record<string, AgendaSequenceLookup> },
+): string {
+  const k = String(raw || '').trim()
+  if (!k) return ''
+  if (k.toLowerCase() === 'bio') return '[BIO]'
+  const reel = lookups.reels[k]
+  if (reel) return `[REEL] · ${formatAgendaPointDate(reel.publishedAt)}`
+  const seq = lookups.sequences[k]
+  if (seq) return `[HISTORIA] · ${formatAgendaPointDate(seq.sequenceDate)}`
+  if (k.length > LEGACY_AGENDA_SNIPPET_LEN) return `${k.slice(0, LEGACY_AGENDA_SNIPPET_LEN)}…`
+  return k
+}
+
+/** Solo '' + valores agregados con + en el header (sin lista fija). Vía. */
 function mergeCustomLeadsDropdownOptions(custom: string[]): string[] {
   const nonEmpty = [
     ...new Set(custom.map((c) => String(c || '').trim()).filter(Boolean)),
@@ -31,11 +70,24 @@ function entryChannelSelectOptions(lead: Lead, parentOpts: string[]): string[] {
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
 }
 
-function agendaPointSelectOptions(lead: Lead, parentOpts: string[]): string[] {
-  const v = String(lead.agenda_point || '').trim()
+/** Setter/closer: incluye el nombre guardado aunque ya no esté en el equipo activo. */
+function teamRoleSelectOptions(
+  lead: Lead,
+  field: 'setter' | 'closer',
+  parentOpts: string[],
+): string[] {
+  const v = String(lead[field] || '').trim()
   if (!v || parentOpts.includes(v)) return parentOpts
   const rest = parentOpts.filter((x) => x !== '')
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
+}
+
+/** Columna Email (solo vista): extrae de `notes` la línea `Calendly email: …`. */
+function calendlyEmailFromNotes(notes: string | null | undefined): string | null {
+  if (notes == null || !String(notes).trim()) return null
+  const m = /Calendly email:\s*(.+)/.exec(String(notes))
+  const cap = m?.[1]?.trim()
+  return cap || null
 }
 
 /** ISO `YYYY-MM-DD` o `…T00:00:00…` → solo fecha `dd/mm/aaaa`; si no parsea, null. */
@@ -150,16 +202,48 @@ export function LeadsPage() {
   const [viaAddOpen, setViaAddOpen] = useState(false)
   const [viaDraft, setViaDraft] = useState('')
 
-  const [customAgendaPointOptions, setCustomAgendaPointOptions] = useState<string[]>([])
-  const [agendaAddOpen, setAgendaAddOpen] = useState(false)
-  const [agendaDraft, setAgendaDraft] = useState('')
+  const [agendaLookups, setAgendaLookups] = useState<{
+    reels: Record<string, AgendaReelLookup>
+    sequences: Record<string, AgendaSequenceLookup>
+  }>({
+    reels: {},
+    sequences: {},
+  })
+  const [agendaModalLead, setAgendaModalLead] = useState<Lead | null>(null)
 
   // ── Data fetching ──
   const fetchTeamMembers = useCallback(async () => {
-    if (!ready) return
-    setSetterNames([])
-    setCloserNames([])
-  }, [ready])
+    if (!ready || !userId) {
+      setSetterNames([])
+      setCloserNames([])
+      return
+    }
+    try {
+      const res = await apiFetch('/team/members')
+      const data = (await res.json().catch(() => ({}))) as {
+        setters?: { nombre: string; activo?: boolean }[]
+        closers?: { nombre: string; activo?: boolean }[]
+      }
+      if (!res.ok) {
+        setSetterNames([])
+        setCloserNames([])
+        return
+      }
+      const active = (m: { nombre: string; activo?: boolean }) =>
+        m.activo !== false && String(m.nombre || '').trim()
+      const sn = [...new Set((data.setters ?? []).filter(active).map((m) => m.nombre.trim()))].sort(
+        (a, b) => a.localeCompare(b, 'es'),
+      )
+      const cn = [...new Set((data.closers ?? []).filter(active).map((m) => m.nombre.trim()))].sort(
+        (a, b) => a.localeCompare(b, 'es'),
+      )
+      setSetterNames(sn)
+      setCloserNames(cn)
+    } catch {
+      setSetterNames([])
+      setCloserNames([])
+    }
+  }, [ready, userId])
 
   const fetchLeads = useCallback(async () => {
     if (!ready || !userId) {
@@ -191,6 +275,56 @@ export function LeadsPage() {
       setLoading(false)
     }
   }, [ready, userId, month, toast])
+
+  const loadAgendaLookups = useCallback(async () => {
+    if (!ready || !userId) return
+    const reels: Record<string, AgendaReelLookup> = {}
+    const sequences: Record<string, AgendaSequenceLookup> = {}
+    try {
+      let page = 1
+      for (;;) {
+        const res = await apiFetch(`/reels?page=${page}&page_size=50&skip_agg=1`)
+        const data = (await res.json().catch(() => ({}))) as {
+          reels?: { id: string; title: string | null; published_at?: string | null }[]
+          total_pages?: number
+        }
+        if (!res.ok) break
+        for (const r of data.reels || []) {
+          reels[String(r.id)] = {
+            title: (r.title && r.title.trim()) || `Reel ${r.id}`,
+            publishedAt: r.published_at ?? null,
+          }
+        }
+        const tp = Math.max(1, data.total_pages ?? 1)
+        if (page >= tp) break
+        page += 1
+        if (page > 30) break
+      }
+      const sr = await apiFetch('/stories/sequences?all_months=true')
+      const seqData = (await sr.json().catch(() => [])) as {
+        id: number
+        sequence_date: string
+        title: string | null
+      }[]
+      if (sr.ok && Array.isArray(seqData)) {
+        for (const s of seqData) {
+          sequences[String(s.id)] = {
+            title:
+              (s.title && s.title.trim()) ||
+              (s.sequence_date ? `Historia ${s.sequence_date}` : `Historia #${s.id}`),
+            sequenceDate: s.sequence_date ?? null,
+          }
+        }
+      }
+      setAgendaLookups({ reels, sequences })
+    } catch {
+      /* noop */
+    }
+  }, [ready, userId])
+
+  useEffect(() => {
+    void loadAgendaLookups()
+  }, [loadAgendaLookups])
 
   useEffect(() => { fetchTeamMembers() }, [fetchTeamMembers])
   useEffect(() => { fetchLeads() }, [fetchLeads])
@@ -319,6 +453,7 @@ export function LeadsPage() {
         l.ig_handle?.toLowerCase().includes(s) ||
         l.phone?.toLowerCase().includes(s) ||
         l.closer?.toLowerCase().includes(s) ||
+        l.setter?.toLowerCase().includes(s) ||
         l.status?.toLowerCase().includes(s) ||
         l.origin?.toLowerCase().includes(s)
       )
@@ -402,13 +537,16 @@ export function LeadsPage() {
 
   const tableColumns = useMemo(() => {
     const viaOpts = mergeCustomLeadsDropdownOptions(customViaOptions)
-    const agendaOpts = mergeCustomLeadsDropdownOptions(customAgendaPointOptions)
     return activeColumns.map((c) => {
       if (c.key === 'entry_channel') return { ...c, options: viaOpts }
-      if (c.key === 'agenda_point') return { ...c, options: agendaOpts }
       return c
     })
-  }, [activeColumns, customViaOptions, customAgendaPointOptions])
+  }, [activeColumns, customViaOptions])
+
+  const resolveAgendaBadgeLabel = useCallback(
+    (raw: string | null | undefined) => formatAgendaPointBadgeText(raw, agendaLookups),
+    [agendaLookups],
+  )
 
   const confirmNewViaOption = useCallback(() => {
     const t = viaDraft.trim()
@@ -421,18 +559,6 @@ export function LeadsPage() {
     setViaAddOpen(false)
     setViaDraft('')
   }, [viaDraft])
-
-  const confirmNewAgendaPointOption = useCallback(() => {
-    const t = agendaDraft.trim()
-    if (!t) {
-      setAgendaAddOpen(false)
-      setAgendaDraft('')
-      return
-    }
-    setCustomAgendaPointOptions((prev) => (prev.includes(t) ? prev : [...prev, t]))
-    setAgendaAddOpen(false)
-    setAgendaDraft('')
-  }, [agendaDraft])
 
   if (!ready) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -571,11 +697,8 @@ export function LeadsPage() {
                 viaDraft={viaDraft}
                 setViaDraft={setViaDraft}
                 onConfirmNewViaOption={confirmNewViaOption}
-                agendaAddOpen={agendaAddOpen}
-                setAgendaAddOpen={setAgendaAddOpen}
-                agendaDraft={agendaDraft}
-                setAgendaDraft={setAgendaDraft}
-                onConfirmNewAgendaPointOption={confirmNewAgendaPointOption}
+                resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
+                onOpenAgendaPicker={(lead) => setAgendaModalLead(lead)}
               />
             </div>
           ))}
@@ -599,14 +722,34 @@ export function LeadsPage() {
             viaDraft={viaDraft}
             setViaDraft={setViaDraft}
             onConfirmNewViaOption={confirmNewViaOption}
-            agendaAddOpen={agendaAddOpen}
-            setAgendaAddOpen={setAgendaAddOpen}
-            agendaDraft={agendaDraft}
-            setAgendaDraft={setAgendaDraft}
-            onConfirmNewAgendaPointOption={confirmNewAgendaPointOption}
+            resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
+            onOpenAgendaPicker={(lead) => setAgendaModalLead(lead)}
           />
         </div>
       )}
+
+      <AgendaPointPickerModal
+        open={!!agendaModalLead}
+        onClose={() => setAgendaModalLead(null)}
+        hasAssignedPuntoAgenda={Boolean(agendaModalLead?.agenda_point?.trim())}
+        onSavePuntoAgenda={async (value) => {
+          const lead = agendaModalLead
+          if (!lead) return
+          await handleInlineUpdate(lead.id, 'agenda_point', value)
+        }}
+        onCacheReel={(id, meta) =>
+          setAgendaLookups((prev) => ({
+            ...prev,
+            reels: { ...prev.reels, [id]: meta },
+          }))
+        }
+        onCacheSequence={(id, meta) =>
+          setAgendaLookups((prev) => ({
+            ...prev,
+            sequences: { ...prev.sequences, [id]: meta },
+          }))
+        }
+      />
 
       {/* ━━ MODAL confirmar eliminación ━━ */}
       {deleteConfirmIds && deleteConfirmIds.length > 0 && (
@@ -697,7 +840,32 @@ const LEADS_TABLE_CHECK_W = 48
 const LEADS_TABLE_NUM_W = 40
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlineUpdate, onToggleSort, selectedRows, onToggleRow, onToggleAll, allSelected, onDelete, onAddRow, addingRow, totalLeads, onPreviewText, readOnly, viaAddOpen, setViaAddOpen, viaDraft, setViaDraft, onConfirmNewViaOption, agendaAddOpen, setAgendaAddOpen, agendaDraft, setAgendaDraft, onConfirmNewAgendaPointOption }: {
+function LeadsTable({
+  leads,
+  columns,
+  sort,
+  editingCell,
+  setEditingCell,
+  onInlineUpdate,
+  onToggleSort,
+  selectedRows,
+  onToggleRow,
+  onToggleAll,
+  allSelected,
+  onDelete,
+  onAddRow,
+  addingRow,
+  totalLeads,
+  onPreviewText,
+  readOnly,
+  viaAddOpen,
+  setViaAddOpen,
+  viaDraft,
+  setViaDraft,
+  onConfirmNewViaOption,
+  resolveAgendaBadgeLabel,
+  onOpenAgendaPicker,
+}: {
   leads: Lead[]
   columns: ColumnDef[]
   sort: SortConfig
@@ -720,21 +888,14 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
   viaDraft: string
   setViaDraft: (v: string) => void
   onConfirmNewViaOption: () => void
-  agendaAddOpen: boolean
-  setAgendaAddOpen: (v: boolean) => void
-  agendaDraft: string
-  setAgendaDraft: (v: string) => void
-  onConfirmNewAgendaPointOption: () => void
+  resolveAgendaBadgeLabel: (raw: string | null | undefined) => string
+  onOpenAgendaPicker: (lead: Lead) => void
 }) {
   const stickyName = columns.some((c) => c.key === 'client_name' && c.sticky)
   const viaInputRef = useRef<HTMLInputElement>(null)
-  const agendaInputRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (viaAddOpen) viaInputRef.current?.focus()
   }, [viaAddOpen])
-  useEffect(() => {
-    if (agendaAddOpen) agendaInputRef.current?.focus()
-  }, [agendaAddOpen])
 
   return (
     <table
@@ -834,56 +995,6 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                     )}
                   </span>
                 )}
-                {col.key === 'agenda_point' && !readOnly && (
-                  <span data-leads-header-addon className="inline-flex items-center gap-0.5 shrink-0 ml-0.5">
-                    {!agendaAddOpen ? (
-                      <button
-                        type="button"
-                        title="Nueva opción de punto de agenda"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setAgendaAddOpen(true)
-                        }}
-                        className="flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] font-semibold text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-                      >
-                        +
-                      </button>
-                    ) : (
-                      <>
-                        <input
-                          ref={agendaInputRef}
-                          type="text"
-                          value={agendaDraft}
-                          onChange={(e) => setAgendaDraft(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault()
-                              onConfirmNewAgendaPointOption()
-                            }
-                            if (e.key === 'Escape') {
-                              setAgendaAddOpen(false)
-                              setAgendaDraft('')
-                            }
-                          }}
-                          placeholder="Nuevo pto agenda"
-                          className="h-5 w-[7.5rem] rounded border border-[var(--accent)] bg-[var(--bg3)] px-1.5 text-[10px] font-normal normal-case tracking-normal text-[var(--text)] placeholder:text-[var(--text3)] outline-none"
-                        />
-                        <button
-                          type="button"
-                          title="Confirmar"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onConfirmNewAgendaPointOption()
-                          }}
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] text-[var(--green)] hover:border-[var(--green)] transition-colors"
-                        >
-                          ✓
-                        </button>
-                      </>
-                    )}
-                  </span>
-                )}
               </div>
             </th>
           ))}
@@ -930,7 +1041,8 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                 style={{ width: col.width, minWidth: col.width }}
               >
                 <LeadsTableCell
-                  lead={lead} col={col}
+                  lead={lead}
+                  col={col}
                   editing={editingCell?.id === lead.id && editingCell?.field === col.key}
                   onStartEdit={() => {
                     if (col.editable === false) return
@@ -940,6 +1052,8 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
                   onSave={(value) => onInlineUpdate(lead.id, col.key, value)}
                   onPreviewText={onPreviewText}
                   readOnly={readOnly}
+                  resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
+                  onOpenAgendaPicker={onOpenAgendaPicker}
                 />
               </td>
             ))}
@@ -980,7 +1094,18 @@ function LeadsTable({ leads, columns, sort, editingCell, setEditingCell, onInlin
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LEAD TABLE CELL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave, onPreviewText, readOnly }: {
+function LeadsTableCell({
+  lead,
+  col,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSave,
+  onPreviewText,
+  readOnly,
+  resolveAgendaBadgeLabel,
+  onOpenAgendaPicker,
+}: {
   lead: Lead
   col: ColumnDef
   editing: boolean
@@ -989,6 +1114,8 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
   onSave: (value: string | number | null) => void
   onPreviewText: (title: string, text: string) => void
   readOnly?: boolean
+  resolveAgendaBadgeLabel: (raw: string | null | undefined) => string
+  onOpenAgendaPicker: (lead: Lead) => void
 }) {
   const raw = (lead as Record<string, unknown>)[col.key]
   const value =
@@ -996,13 +1123,30 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
       ? originDisplayValue(lead)
       : col.key === 'agendo_en'
         ? agendoEnStoredValue(lead)
-        : raw
+        : col.key === 'email'
+          ? calendlyEmailFromNotes(lead.notes)
+          : raw
 
   if (readOnly) {
     if (col.key === 'client_name') {
       return (
         <span className="text-[13px] font-medium truncate block text-[var(--text)]">
           {String(value || '—')}
+        </span>
+      )
+    }
+    if (col.key === 'agenda_point') {
+      const rawAp = String(lead.agenda_point || '').trim()
+      if (!rawAp) return <span className="text-[12px] text-[var(--text3)]">—</span>
+      const label = resolveAgendaBadgeLabel(lead.agenda_point)
+      const color = '#6B7280'
+      return (
+        <span
+          title={rawAp}
+          className="inline-flex max-w-full items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium"
+          style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}
+        >
+          {label}
         </span>
       )
     }
@@ -1106,8 +1250,8 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
             ? agendoEnSelectOptions(lead)
             : col.key === 'entry_channel'
               ? entryChannelSelectOptions(lead, col.options!)
-              : col.key === 'agenda_point'
-                ? agendaPointSelectOptions(lead, col.options!)
+              : col.key === 'setter' || col.key === 'closer'
+                ? teamRoleSelectOptions(lead, col.key, col.options!)
                 : col.options!
       return (
         <select
@@ -1147,6 +1291,30 @@ function LeadsTableCell({ lead, col, editing, onStartEdit, onCancelEdit, onSave,
 
   // ── Display mode ──
   const cellClass = "text-[12px] cursor-pointer hover:opacity-80 truncate block max-w-full"
+
+  if (col.key === 'agenda_point' && !readOnly) {
+    const rawAp = String(lead.agenda_point || '').trim()
+    const label = rawAp ? resolveAgendaBadgeLabel(lead.agenda_point) : ''
+    const color = '#6B7280'
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        title={rawAp || undefined}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onOpenAgendaPicker(lead)
+          }
+        }}
+        onClick={() => onOpenAgendaPicker(lead)}
+        className="inline-flex max-w-full cursor-pointer items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium hover:opacity-90"
+        style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}
+      >
+        {label || '—'}
+      </span>
+    )
+  }
 
   // Name column
   if (col.key === 'client_name') {

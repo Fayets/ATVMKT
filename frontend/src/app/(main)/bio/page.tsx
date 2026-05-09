@@ -6,7 +6,6 @@ import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
-import { canonicalLeadStatus } from '@/features/leads/types'
 
 type BioLead = {
   id: string
@@ -55,15 +54,6 @@ type BioViaOptionsResponse = {
   options?: string[]
 }
 
-/** Opciones de estado en BIO (sin Pendiente en el dropdown). */
-const STATUS_OPTIONS = [
-  'Seguimiento',
-  'Descalificado',
-  'Cerrado',
-  'No show',
-  'Seña',
-] as const
-
 const AR_TZ = 'America/Argentina/Buenos_Aires'
 
 /** Fecha agendó: dd/mm/año en Argentina; si no es parseable, se muestra el texto tal cual. */
@@ -109,7 +99,6 @@ export default function BioPage() {
     tasa_respuesta_auto: null,
   })
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null)
   const [viaFilter, setViaFilter] = useState<string>('all')
   const [viaOptionsFromApi, setViaOptionsFromApi] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState<string>('')
@@ -202,35 +191,6 @@ export default function BioPage() {
     fetchViaOptions()
   }, [fetchViaOptions])
 
-  const patchStatusOptimistic = async (lead: BioLead, nextStatus: string) => {
-    if (!userId || !lead.id) return
-    const prevRows = rows
-    setUpdatingStatusId(lead.id)
-    const normalized = canonicalLeadStatus(nextStatus)
-    setRows((prev) => prev.map((r) => (r.id === lead.id ? { ...r, status: normalized } : r)))
-    try {
-      const res = await fetch(`${apiBase}/api/bio/leads/${encodeURIComponent(lead.id)}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-User-Id': userId },
-        body: JSON.stringify({ status: normalized }),
-      })
-      if (!res.ok) {
-        const tx = await res.text()
-        setRows(prevRows)
-        toast(`No se pudo actualizar estado: ${tx || res.statusText}`)
-        return
-      }
-      const updated = (await res.json()) as Partial<BioLead>
-      setRows((prev) => prev.map((r) => (r.id === lead.id ? { ...r, status: updated.status || normalized } : r)))
-      fetchMetrics()
-    } catch (e) {
-      setRows(prevRows)
-      toast(`No se pudo actualizar estado: ${(e as Error).message}`)
-    } finally {
-      setUpdatingStatusId(null)
-    }
-  }
-
   const visibleRows = useMemo(() => {
     let out = rows
     if (viaFilter !== 'all') {
@@ -317,32 +277,17 @@ export default function BioPage() {
         <div className="py-12 text-center text-[13px] text-[var(--text3)]">Sin leads de ManyChat para este período/filtro</div>
       ) : (
         <div className="space-y-2">
-          <div className="grid grid-cols-[1.4fr_1fr_0.9fr_0.9fr_0.9fr_0.8fr_70px] gap-3 px-4 py-2">
-            {['Instagram', 'Estado', 'Keyword', 'Setter', 'Programa', 'Fecha', ''].map((h) => (
+          <div className="grid grid-cols-[1.4fr_0.9fr_0.9fr_0.9fr_0.8fr_70px] gap-3 px-4 py-2">
+            {['Instagram', 'Keyword', 'Setter', 'Programa', 'Fecha', ''].map((h) => (
               <div key={h} className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{h}</div>
             ))}
           </div>
 
           {visibleRows.map((lead) => (
             <div key={lead.id} className="glass-card">
-              <div className="grid grid-cols-[1.4fr_1fr_0.9fr_0.9fr_0.9fr_0.8fr_70px] gap-3 px-4 py-3 items-center">
+              <div className="grid grid-cols-[1.4fr_0.9fr_0.9fr_0.9fr_0.8fr_70px] gap-3 px-4 py-3 items-center">
                 <div className="min-w-0">
                   <span className="truncate text-[13px]">{lead.handle}</span>
-                </div>
-
-                <div>
-                  {!lead.airtable_found ? (
-                    <span className="inline-flex rounded-md border border-[var(--border2)] bg-[var(--bg4)] px-2 py-1 text-[10px] font-medium text-[var(--text3)]">No agendó</span>
-                  ) : (
-                    <select
-                      value={canonicalLeadStatus(lead.status || 'Seguimiento')}
-                      disabled={updatingStatusId === lead.id}
-                      onChange={(e) => patchStatusOptimistic(lead, e.target.value)}
-                      className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-2 py-1.5 text-[12px] outline-none"
-                    >
-                      {STATUS_OPTIONS.map((op) => <option key={op} value={op}>{op}</option>)}
-                    </select>
-                  )}
                 </div>
 
                 <div className="text-[12px] text-[var(--text2)] truncate">{lead.keyword || '—'}</div>

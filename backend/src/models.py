@@ -151,7 +151,9 @@ class Lead(db.Entity):
     dias_para_agendar = Optional(int)
     call = Optional(datetime)
     link_llamada = Optional(str, default="")
-    # Negocio
+    # Negocio (setter/closer = nombre en `teammember`, texto libre para compatibilidad)
+    setter = Optional(str, default="")
+    closer = Optional(str, default="")
     dolores_setting = Optional(str, default="")
     ingresos_lead = Optional(float, default=0)
     dolores_llamada = Optional(str, default="")

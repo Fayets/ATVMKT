@@ -7,12 +7,38 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
-from src.models import Lead as LeadEntity
+from src.models import Lead as LeadEntity, ReelContent
 from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse, LeadsMetricsOut
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
 
 _AR = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
+    """Persistir id interno del reel cuando corresponde; `bio` literal; resto (p. ej. id de historia) sin cambiar."""
+    s = (str(raw) if raw is not None else "").strip()
+    if not s:
+        return ""
+    if s.lower() == "bio":
+        return "bio"
+    try:
+        rid = int(s)
+    except ValueError:
+        rid = None
+    if rid is not None:
+        try:
+            row = ReelContent.get(id=rid, user_id=user_id_int)
+            return str(row.id)
+        except ObjectNotFound:
+            pass
+    try:
+        insta_row = ReelContent.get(instagram_id=s)
+        if int(insta_row.user_id) == user_id_int:
+            return str(insta_row.id)
+    except ObjectNotFound:
+        pass
+    return s
 
 
 def _lead_effective_dt(row: LeadEntity) -> datetime | None:
@@ -156,8 +182,8 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
         revenue=ing,
         payment=float(row.pago or 0),
         owed=float(row.debe or 0),
-        closer=None,
-        setter=None,
+        closer=(row.closer or "").strip() or None,
+        setter=(row.setter or "").strip() or None,
         notes=row.notas,
         date=date_s,
         month=month_s,
@@ -322,9 +348,9 @@ def patch_lead(
         if "keyword" in data:
             row.keyword = data["keyword"] or ""
         if "punto_agenda" in data:
-            row.punto_agenda = (data["punto_agenda"] or "") or ""
+            row.punto_agenda = _normalize_punto_agenda_value(uid, data.get("punto_agenda"))
         elif "agenda_point" in data:
-            row.punto_agenda = data["agenda_point"] or ""
+            row.punto_agenda = _normalize_punto_agenda_value(uid, data.get("agenda_point"))
         if "ctas_responded" in data:
             row.ctas_respondidos = max(0, int(data["ctas_responded"] or 0))
         if "first_contact_at" in data:
@@ -366,6 +392,10 @@ def patch_lead(
             row.dolores_llamada = data["dolores_llamada"] or ""
         if "razon_compra" in data:
             row.razon_compra = data["razon_compra"] or ""
+        if "setter" in data:
+            row.setter = (str(data["setter"]).strip() if data["setter"] is not None else "") or ""
+        if "closer" in data:
+            row.closer = (str(data["closer"]).strip() if data["closer"] is not None else "") or ""
 
         _sync_dias_para_agendar(row)
 

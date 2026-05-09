@@ -1,6 +1,7 @@
 import calendar
 import re
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -258,8 +259,17 @@ class TeamDashboardOut(BaseModel):
     cash_total: float
     comisiones: float
     commission_pct: float
+    total_conversaciones: int = Field(
+        ...,
+        description="Suma de conversaciones de todos los SetterReport del mes (user_id).",
+    )
     setters: list[SetterStatsOut]
     closers: list[CloserStatsOut]
+
+
+class TeamDashboardDailyRow(BaseModel):
+    fecha: str = Field(..., description="YYYY-MM-DD (día calendario del reporte setter).")
+    conversaciones: int = Field(..., ge=0, description="Suma de conversaciones ese día (todos los SetterReport del usuario).")
 
 
 @router.get("/members")
@@ -556,6 +566,37 @@ def closer_marketing_report_count(
     return CloserMarketingCountOut(count=n)
 
 
+@router.get("/dashboard/daily", response_model=list[TeamDashboardDailyRow])
+def team_dashboard_daily(
+    month: str = Query(..., description="YYYY-MM"),
+    user_id: str = Depends(require_user_id),
+) -> list[TeamDashboardDailyRow]:
+    """Conversaciones por día (suma de SetterReport del usuario en ese mes)."""
+    uid = _parse_uid(user_id)
+    start, end = _month_range(month)
+    with db_session:
+        rows_data = [
+            (r.fecha, int(r.conversaciones))
+            for r in list(SetterReport.select())
+            if r.user_id == uid and start <= r.fecha <= end
+        ]
+    by_day: dict[date, int] = defaultdict(int)
+    for f, c in rows_data:
+        by_day[f] += c
+
+    out: list[TeamDashboardDailyRow] = []
+    d = start
+    while d <= end:
+        out.append(
+            TeamDashboardDailyRow(
+                fecha=d.isoformat(),
+                conversaciones=int(by_day.get(d, 0)),
+            )
+        )
+        d += timedelta(days=1)
+    return out
+
+
 @router.get("/dashboard")
 def team_dashboard(
     month: str = Query(..., description="YYYY-MM"),
@@ -571,6 +612,7 @@ def team_dashboard(
             for r in list(SetterReport.select())
             if r.user_id == uid and start <= r.fecha <= end
         ]
+        total_conversaciones = sum(int(r.conversaciones) for r in setter_rows)
         closer_rows = [
             r
             for r in list(CloserReport.select())
@@ -682,6 +724,7 @@ def team_dashboard(
         cash_total=cash_total,
         comisiones=comisiones,
         commission_pct=DEFAULT_COMMISSION_PCT,
+        total_conversaciones=total_conversaciones,
         setters=setter_out,
         closers=closer_out,
     )

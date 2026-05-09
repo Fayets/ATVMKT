@@ -28,8 +28,14 @@ def get_current_user(
 def get_sequences(
     user_id: Annotated[str, Depends(get_current_user)],
     month: str | None = Query(default=None, description="Formato YYYY-MM"),
+    all_months: bool = Query(
+        default=False,
+        description="Si es true, devuelve todas las secuencias del usuario (ignora month).",
+    ),
 ) -> list[StorySequenceOut]:
     try:
+        if all_months:
+            return service.get_all_sequences(user_id)
         effective_month = month or datetime.now(AR_TZ).strftime("%Y-%m")
         return service.get_sequences(user_id, effective_month)
     except HTTPException as e:

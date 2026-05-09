@@ -24,6 +24,7 @@ type Reel = {
   manual_chats: number | null
   cash_total: number
   cpc: number
+  agendas?: number | null
 }
 
 type ReelsListResponse = {
@@ -44,12 +45,24 @@ type ReelsMetrics = {
   reels_sin_cta: number
 }
 
+type ComparisonMonthMetrics = { ym: string; metrics: ReelsMetrics }
+
+function normalizeReelsMetrics(data: ReelsMetrics): ReelsMetrics {
+  return {
+    chats_del_mes: Number(data.chats_del_mes ?? 0),
+    piezas_publicadas: Number(data.piezas_publicadas ?? 0),
+    reels_con_cta: Number(data.reels_con_cta ?? 0),
+    reels_sin_cta: Number(data.reels_sin_cta ?? 0),
+  }
+}
+
 type SyncStatus = {
   total: number
   processed: number
   status: 'idle' | 'running' | 'done' | 'error'
-  phase?: 'idle' | 'collecting' | 'processing' | 'done' | 'error'
+  phase?: 'idle' | 'collecting' | 'processing' | 'done' | 'error' | 'preview_ready'
   discovered?: number
+  range_preview_count?: number
 }
 
 export default function ReelsPage() {
@@ -65,10 +78,12 @@ export default function ReelsPage() {
   const [comparisonDraftB, setComparisonDraftB] = useState('')
   const [comparisonMonths, setComparisonMonths] = useState<[string, string] | null>(null)
   const [availableMonths, setAvailableMonths] = useState<string[]>([])
-  const [rangeFrom, setRangeFrom] = useState('')
-  const [rangeTo, setRangeTo] = useState('')
+  const [rangeModalStep, setRangeModalStep] = useState<1 | 2>(1)
+  const [rangeDiscoverLoading, setRangeDiscoverLoading] = useState(false)
+  const [rangeImportTake, setRangeImportTake] = useState('1')
+  const [rangePickingNewDates, setRangePickingNewDates] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const [monthMode, setMonthMode] = useState<'all' | 'current' | 'comparison'>('all')
+  const [monthMode, setMonthMode] = useState<'all' | 'current' | 'comparison'>('current')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [aggregateTotals, setAggregateTotals] = useState({ total_cash: 0, total_chats: 0 })
@@ -78,8 +93,15 @@ export default function ReelsPage() {
     reels_con_cta: 0,
     reels_sin_cta: 0,
   })
+  const [comparisonByMonth, setComparisonByMonth] = useState<{
+    first: ComparisonMonthMetrics
+    second: ComparisonMonthMetrics
+  } | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ total: 0, processed: 0, status: 'idle' })
   const previousSyncStatus = useRef<SyncStatus['status']>('idle')
+  const prevRangeModalStepRef = useRef<1 | 2>(1)
+  const prevDiscoverCountRef = useRef(0)
+  const [discoverCountPulse, setDiscoverCountPulse] = useState(false)
   const [masterLists, setMasterLists] = useState<{ dolores: string[]; angulos: string[]; ctas: string[] }>({
     dolores: [],
     angulos: [],
@@ -168,26 +190,43 @@ export default function ReelsPage() {
 
   const fetchMetrics = useCallback(async () => {
     if (!ready) return
+    if (monthMode !== 'comparison') {
+      setComparisonByMonth(null)
+    }
     try {
+      if (monthMode === 'comparison' && comparisonMonths && comparisonMonths.length === 2) {
+        const [ma, mb] = comparisonMonths
+        const sorted = [...comparisonMonths].sort((a, b) => a.localeCompare(b))
+        const monthsParam = encodeURIComponent(sorted.join(','))
+        const [resA, resB, resCombined] = await Promise.all([
+          apiFetch(`/reels/metrics?month=${encodeURIComponent(ma)}`, { headers: authHeaders() }),
+          apiFetch(`/reels/metrics?month=${encodeURIComponent(mb)}`, { headers: authHeaders() }),
+          apiFetch(`/reels/metrics?months=${monthsParam}`, { headers: authHeaders() }),
+        ])
+        const [dataA, dataB, dataC] = await Promise.all([
+          parseJson<ReelsMetrics>(resA),
+          parseJson<ReelsMetrics>(resB),
+          parseJson<ReelsMetrics>(resCombined),
+        ])
+        setComparisonByMonth({
+          first: { ym: ma, metrics: normalizeReelsMetrics(dataA) },
+          second: { ym: mb, metrics: normalizeReelsMetrics(dataB) },
+        })
+        setMetrics(normalizeReelsMetrics(dataC))
+        return
+      }
+
       let q = ''
       if (monthMode === 'current') {
         const n = new Date()
         const ym = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
         q = `?month=${encodeURIComponent(ym)}`
-      } else if (monthMode === 'comparison' && comparisonMonths && comparisonMonths.length === 2) {
-        const sorted = [...comparisonMonths].sort((a, b) => a.localeCompare(b))
-        q = `?months=${encodeURIComponent(sorted.join(','))}`
       }
       const res = await apiFetch(`/reels/metrics${q}`, {
         headers: authHeaders(),
       })
       const data = await parseJson<ReelsMetrics>(res)
-      setMetrics({
-        chats_del_mes: Number(data.chats_del_mes ?? 0),
-        piezas_publicadas: Number(data.piezas_publicadas ?? 0),
-        reels_con_cta: Number(data.reels_con_cta ?? 0),
-        reels_sin_cta: Number(data.reels_sin_cta ?? 0),
-      })
+      setMetrics(normalizeReelsMetrics(data))
     } catch (e) {
       toast(`Error al cargar métricas de reels: ${(e as Error).message}`)
     }
@@ -202,8 +241,12 @@ export default function ReelsPage() {
         total: Number(data.total || 0),
         processed: Number(data.processed || 0),
         status: ['idle', 'running', 'done', 'error'].includes(String(data.status)) ? data.status : 'idle',
-        phase: ['idle', 'collecting', 'processing', 'done', 'error'].includes(String(data.phase)) ? data.phase : 'idle',
+        phase: ['idle', 'collecting', 'processing', 'done', 'error', 'preview_ready'].includes(String(data.phase))
+          ? data.phase
+          : 'idle',
         discovered: Number(data.discovered || 0),
+        range_preview_count:
+          data.range_preview_count !== undefined ? Number(data.range_preview_count) : undefined,
       })
     } catch {
       setSyncStatus({ total: 0, processed: 0, status: 'idle', phase: 'idle', discovered: 0 })
@@ -259,6 +302,68 @@ export default function ReelsPage() {
   }, [syncStatus.status, fetchSyncStatus])
 
   useEffect(() => {
+    if (!rangeDiscoverLoading || !ready) return
+    void fetchSyncStatus()
+    const id = window.setInterval(() => {
+      fetchSyncStatus()
+    }, 400)
+    return () => window.clearInterval(id)
+  }, [rangeDiscoverLoading, ready, fetchSyncStatus])
+
+  useEffect(() => {
+    if (!rangeDiscoverLoading) {
+      prevDiscoverCountRef.current = 0
+      return
+    }
+    const n = Number(syncStatus.discovered || 0)
+    if (n > prevDiscoverCountRef.current) {
+      prevDiscoverCountRef.current = n
+      setDiscoverCountPulse(true)
+      const t = window.setTimeout(() => setDiscoverCountPulse(false), 280)
+      return () => window.clearTimeout(t)
+    }
+    prevDiscoverCountRef.current = n
+  }, [rangeDiscoverLoading, syncStatus.discovered])
+
+  useEffect(() => {
+    if (!rangeDiscoverLoading) return
+    if (syncStatus.phase === 'preview_ready' && syncStatus.status === 'idle') {
+      setRangeDiscoverLoading(false)
+      setRangePickingNewDates(false)
+      return
+    }
+    if (syncStatus.status === 'error') {
+      setRangeDiscoverLoading(false)
+      toast('Error al contar reels en la cuenta.')
+    }
+  }, [rangeDiscoverLoading, syncStatus, toast])
+
+  useEffect(() => {
+    if (!showRangeSyncModal || !ready) return
+    void fetchSyncStatus()
+  }, [showRangeSyncModal, ready, fetchSyncStatus])
+
+  useEffect(() => {
+    if (!showRangeSyncModal) return
+    const previewDone = syncStatus.phase === 'preview_ready' && syncStatus.status === 'idle'
+    if (previewDone && !rangePickingNewDates) {
+      if (prevRangeModalStepRef.current !== 2) {
+        const n = syncStatus.range_preview_count ?? syncStatus.discovered ?? 0
+        setRangeImportTake(n > 0 ? '1' : '0')
+      }
+      setRangeModalStep(2)
+      prevRangeModalStepRef.current = 2
+    } else if (
+      !rangeDiscoverLoading &&
+      syncStatus.phase !== 'collecting' &&
+      !previewDone
+    ) {
+      setRangeModalStep(1)
+      prevRangeModalStepRef.current = 1
+    }
+  }, [showRangeSyncModal, syncStatus.phase, syncStatus.status, rangeDiscoverLoading, rangePickingNewDates])
+
+  useEffect(() => {
     const previous = previousSyncStatus.current
     const current = syncStatus.status
     if (previous === 'running' && current !== 'running') {
@@ -307,22 +412,44 @@ export default function ReelsPage() {
     }
   }
 
-  const handleSyncRange = async () => {
-    if (!ready || syncStatus.status === 'running') return
-    if (!rangeFrom || !rangeTo) {
-      toast('Seleccioná fecha desde y hasta')
-      return
-    }
-    setSyncing(true)
-    setSyncMessage('Sincronizando por rango...')
-    setSyncStatus((prev) => ({ ...prev, status: 'running', processed: 0 }))
-    setShowRangeSyncModal(false)
+  const handleRangeDiscover = async () => {
+    if (!ready || syncStatus.status === 'running' || rangeDiscoverLoading) return
+    setSyncMessage('Contando reels en tu cuenta de Instagram...')
+    setRangeDiscoverLoading(true)
     fetchSyncStatus()
     try {
-      const res = await apiFetch('/reels/sync-range', {
+      const res = await apiFetch('/reels/sync-range/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ date_from: rangeFrom, date_to: rangeTo }),
+        body: JSON.stringify({}),
+      })
+      await parseJson<{ status: string }>(res)
+      await fetchSyncStatus()
+    } catch (e) {
+      setRangeDiscoverLoading(false)
+      setSyncMessage(`Error: ${(e as Error).message}`)
+    }
+  }
+
+  const handleRangeImport = async () => {
+    if (!ready || syncStatus.status === 'running') return
+    const n = syncStatus.range_preview_count ?? syncStatus.discovered ?? 0
+    const take = Math.trunc(Number(rangeImportTake))
+    if (!Number.isFinite(take) || take < 1 || take > n) {
+      toast(`Indicá un número entre 1 y ${n}`)
+      return
+    }
+    setShowRangeSyncModal(false)
+    setRangePickingNewDates(false)
+    setSyncing(true)
+    setSyncMessage('Importando reels...')
+    setSyncStatus((prev) => ({ ...prev, status: 'running', processed: 0 }))
+    fetchSyncStatus()
+    try {
+      const res = await apiFetch('/reels/sync-range/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ take }),
       })
       await parseJson<{ status: string }>(res)
       await fetchSyncStatus()
@@ -403,27 +530,25 @@ export default function ReelsPage() {
     }
   }
 
-  if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
+  if (!ready) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-lg font-semibold tracking-tight">
-          Reels <span className="text-[var(--text3)] text-sm font-normal">{filterSubtitle}</span>
+          Reels{' '}
+          <span className="text-[var(--text3)] text-sm font-normal">{filterSubtitle}</span>
+          {loading && (
+            <span className="ml-2 text-[11px] font-normal uppercase tracking-wide text-[var(--text3)]">
+              · actualizando…
+            </span>
+          )}
         </h2>
         <div className="inline-flex gap-2 rounded-xl border border-[var(--border2)] bg-[var(--bg2)] p-1">
           <button
             onClick={() => {
-              setMonthMode('all')
-              setPage(1)
-            }}
-            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'all' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
-          >
-            TODOS
-          </button>
-          <button
-            onClick={() => {
               setMonthMode('current')
+              setComparisonByMonth(null)
               setPage(1)
             }}
             className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'current' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
@@ -441,33 +566,89 @@ export default function ReelsPage() {
             }}
             className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'comparison' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
           >
-            MES DE COMPARACION
+            SELECCIONAR MES Y AÑO
+          </button>
+          <button
+            onClick={() => {
+              setMonthMode('all')
+              setComparisonByMonth(null)
+              setPage(1)
+            }}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'all' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+          >
+            TODOS
           </button>
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Chats del mes</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.chats_del_mes}</div>
+      {monthMode === 'comparison' && comparisonMonths ? (
+        <div className="mb-6 space-y-4">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+            Comparación entre meses
+          </div>
+          {comparisonByMonth ? (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              {[comparisonByMonth.first, comparisonByMonth.second].map((side) => (
+                <div
+                  key={side.ym}
+                  className="rounded-xl border border-[var(--border2)] bg-[var(--bg2)] p-5 shadow-sm"
+                >
+                  <div className="mb-4 text-[13px] font-semibold capitalize text-[var(--text)]">
+                    {formatMonthLabel(side.ym)}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg bg-[var(--bg3)] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
+                      <div className="font-mono-num mt-1 text-2xl font-bold">{side.metrics.chats_del_mes}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--bg3)] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Piezas</div>
+                      <div className="font-mono-num mt-1 text-2xl font-bold">{side.metrics.piezas_publicadas}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--bg3)] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Con CTA</div>
+                      <div className="font-mono-num mt-1 text-2xl font-bold">{side.metrics.reels_con_cta}</div>
+                    </div>
+                    <div className="rounded-lg bg-[var(--bg3)] p-3">
+                      <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Sin CTA</div>
+                      <div className="font-mono-num mt-1 text-2xl font-bold">{side.metrics.reels_sin_cta}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-[var(--border2)] bg-[var(--bg2)] py-10 text-center text-[13px] text-[var(--text3)]">
+              Cargando métricas de cada mes…
+            </div>
+          )}
         </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Piezas publicadas</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.piezas_publicadas}</div>
+      ) : (
+        <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="glass-card p-5">
+            <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Chats del mes</div>
+            <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.chats_del_mes}</div>
+          </div>
+          <div className="glass-card p-5">
+            <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Piezas publicadas</div>
+            <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.piezas_publicadas}</div>
+          </div>
+          <div className="glass-card p-5">
+            <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Cash generado</div>
+            <div className="font-mono-num mt-1 text-3xl font-bold text-[var(--green)]">
+              {formatCash(aggregateTotals.total_cash)}
+            </div>
+          </div>
+          <div className="glass-card p-5">
+            <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Reels con CTA</div>
+            <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.reels_con_cta}</div>
+          </div>
+          <div className="glass-card p-5">
+            <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Reels sin CTA</div>
+            <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.reels_sin_cta}</div>
+          </div>
         </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Cash generado</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold text-[var(--green)]">{formatCash(aggregateTotals.total_cash)}</div>
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Reels con CTA</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.reels_con_cta}</div>
-        </div>
-        <div className="glass-card p-5">
-          <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Reels sin CTA</div>
-          <div className="font-mono-num mt-1 text-3xl font-bold">{metrics.reels_sin_cta}</div>
-        </div>
-      </div>
+      )}
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <button
@@ -489,7 +670,7 @@ export default function ReelsPage() {
           disabled={isSyncRunning}
           className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-5 py-2.5 text-[11px] font-semibold uppercase text-[var(--text)] hover:opacity-90 disabled:opacity-30"
         >
-          Sync por rango
+          Sincronizar reels
         </button>
       </div>
       {syncStatus.status === 'running' && (
@@ -561,10 +742,12 @@ export default function ReelsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-5">
             <div className="mb-4 text-[14px] font-semibold">Comparar meses</div>
-            <p className="mb-4 text-[12px] text-[var(--text3)]">Elegí dos meses para ver reels y métricas combinadas de ambos.</p>
+            <p className="mb-4 text-[12px] text-[var(--text3)]">
+              Elegí dos meses distintos. Vas a ver métricas lado a lado y el listado de reels de ambos.
+            </p>
             <div className="space-y-3">
               <div>
-                <label className="mb-1 block text-[11px] text-[var(--text3)]">Primer mes</label>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Primer mes y año</label>
                 <select
                   value={comparisonDraftA}
                   onChange={(e) => setComparisonDraftA(e.target.value)}
@@ -578,7 +761,7 @@ export default function ReelsPage() {
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-[11px] text-[var(--text3)]">Segundo mes</label>
+                <label className="mb-1 block text-[11px] text-[var(--text3)]">Segundo mes y año</label>
                 <select
                   value={comparisonDraftB}
                   onChange={(e) => setComparisonDraftB(e.target.value)}
@@ -607,6 +790,11 @@ export default function ReelsPage() {
                     toast('Elegí los dos meses a comparar.')
                     return
                   }
+                  if (comparisonDraftA === comparisonDraftB) {
+                    toast('Elegí dos meses distintos para comparar.')
+                    return
+                  }
+                  setComparisonByMonth(null)
                   setComparisonMonths([comparisonDraftA, comparisonDraftB])
                   setMonthMode('comparison')
                   setPage(1)
@@ -623,43 +811,143 @@ export default function ReelsPage() {
       {showRangeSyncModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-5">
-            <div className="mb-4 text-[14px] font-semibold">Sincronizar reels por rango</div>
-            <div className="space-y-3">
-              <div>
-                <label className="mb-1 block text-[11px] text-[var(--text3)]">Desde</label>
-                <input
-                  type="date"
-                  value={rangeFrom}
-                  onChange={(e) => setRangeFrom(e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[11px] text-[var(--text3)]">Hasta</label>
-                <input
-                  type="date"
-                  value={rangeTo}
-                  onChange={(e) => setRangeTo(e.target.value)}
-                  className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
-                />
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShowRangeSyncModal(false)}
-                className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleSyncRange}
-                className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
-              >
-                Iniciar sync
-              </button>
-            </div>
+            <div className="mb-4 text-[14px] font-semibold">Sincronizar reels</div>
+            {rangeModalStep === 1 && (
+              <>
+                <p className="mb-3 text-[12px] text-[var(--text3)]">
+                  Primero recorremos tu cuenta de Instagram solo para contar cuántos reels hay (sin bajar métricas ni thumbnails). Instagram los lista del{' '}
+                  <span className="text-[var(--text)]">más reciente al más antiguo</span>; el contador va subiendo a medida que los vamos encontrando. Después elegís cuántos importar: siempre desde el último subido hacia atrás.
+                </p>
+                {rangeDiscoverLoading && (
+                  <div className="mb-4 mt-4 rounded-xl border border-[var(--border2)] bg-[var(--bg3)] px-4 py-6 text-center">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+                      Reels encontrados hasta ahora
+                    </div>
+                    <div
+                      className={`font-mono-num mt-2 text-5xl font-bold tabular-nums text-[var(--text)] transition-transform duration-200 ease-out ${
+                        discoverCountPulse ? 'scale-105' : 'scale-100'
+                      }`}
+                    >
+                      {Number(syncStatus.discovered || 0)}
+                    </div>
+                    <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-[var(--bg4)]">
+                      <div className="h-full w-full origin-left animate-pulse rounded-full bg-[var(--accent)]/70" />
+                    </div>
+                    <p className="mt-3 text-[11px] leading-relaxed text-[var(--text3)]">
+                      Buscando en tu cuenta… el número se actualiza en vivo. La importación posterior respeta el mismo orden:{' '}
+                      <span className="text-[var(--text)]">último publicado primero</span>.
+                    </p>
+                  </div>
+                )}
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRangeSyncModal(false)
+                      setRangeDiscoverLoading(false)
+                      setRangePickingNewDates(false)
+                    }}
+                    className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rangeDiscoverLoading || syncStatus.status === 'running'}
+                    onClick={handleRangeDiscover}
+                    className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-40"
+                  >
+                    Contar reels
+                  </button>
+                </div>
+              </>
+            )}
+            {rangeModalStep === 2 && (
+              <>
+                {(() => {
+                  const n = syncStatus.range_preview_count ?? syncStatus.discovered ?? 0
+                  if (n <= 0) {
+                    return (
+                      <p className="mb-4 text-[12px] text-[var(--text3)]">
+                        No se encontraron reels en la cuenta conectada.
+                      </p>
+                    )
+                  }
+                  return (
+                    <>
+                      <p className="mb-3 text-[12px] text-[var(--text3)]">
+                        Se encontraron <span className="font-semibold text-[var(--text)]">{n}</span> reels en tu cuenta.
+                        ¿Cuántos deseas traer? (máximo {n})
+                      </p>
+                      <p className="mb-3 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] p-3 text-[11px] leading-relaxed text-[var(--text3)]">
+                        <span className="font-semibold text-[var(--text)]">Orden de importación:</span> siempre del{' '}
+                        <span className="text-[var(--text)]">último reel subido hacia atrás</span> (más nuevo → más
+                        antiguo). Ejemplo: si hay {n} en total y pedís 100, se traen los{' '}
+                        <span className="text-[var(--text)]">100 más recientes</span>, no los primeros del historial.
+                      </p>
+                      <div>
+                        <label className="mb-1 block text-[11px] text-[var(--text3)]">Cantidad a importar</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={n}
+                          value={rangeImportTake}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            if (raw === '') {
+                              setRangeImportTake('')
+                              return
+                            }
+                            const v = Math.trunc(Number(raw))
+                            if (!Number.isFinite(v)) {
+                              setRangeImportTake(raw)
+                              return
+                            }
+                            setRangeImportTake(String(Math.min(n, Math.max(1, v))))
+                          }}
+                          className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] text-[var(--text)] outline-none"
+                        />
+                      </div>
+                    </>
+                  )
+                })()}
+                <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      prevRangeModalStepRef.current = 1
+                      setRangePickingNewDates(true)
+                      setRangeModalStep(1)
+                      setRangeDiscoverLoading(false)
+                    }}
+                    className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+                  >
+                    Buscar de nuevo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowRangeSyncModal(false)
+                      setRangeDiscoverLoading(false)
+                      setRangePickingNewDates(false)
+                    }}
+                    className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+                  >
+                    Cerrar
+                  </button>
+                  {(syncStatus.range_preview_count ?? syncStatus.discovered ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleRangeImport}
+                      disabled={syncStatus.status === 'running'}
+                      className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white disabled:opacity-40"
+                    >
+                      Importar
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -735,6 +1023,8 @@ function ReelCard({
   const comments = Number(reel.metrics?.comments_count ?? reel.metrics?.comments) || 0
   const shares = Number(reel.metrics?.shares) || 0
   const reach = Number(reel.metrics?.reach) || 0
+  const agendasDisplay =
+    reel.agendas != null && !Number.isNaN(Number(reel.agendas)) ? formatInt(Number(reel.agendas)) : '—'
   const cpc = reel.chats > 0 ? reel.cash / reel.chats : 0
   const title = reel.title || reel.notes?.substring(0, 60) || 'Sin titulo'
   const [editingCash, setEditingCash] = useState(false)
@@ -812,7 +1102,7 @@ function ReelCard({
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
             <div className="group relative rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cash</div>
               {editingCash ? (
@@ -906,6 +1196,10 @@ function ReelCard({
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">CPC</div>
               <div className="font-mono-num text-[16px] font-bold">{formatCash(cpc)}</div>
+            </div>
+            <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Agendas</div>
+              <div className="font-mono-num text-[16px] font-bold">{agendasDisplay}</div>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
               <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Plays</div>

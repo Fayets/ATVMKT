@@ -213,6 +213,12 @@ class StoriesService:
             raise
 
     @db_session
+    def get_all_sequences(self, user_id: str) -> list[dict[str, Any]]:
+        rows = [s for s in list(StorySequence.select()) if s.user_id == int(user_id)]
+        rows.sort(key=lambda s: (s.sequence_date, s.id), reverse=True)
+        return [_serialize_sequence(row) for row in rows]
+
+    @db_session
     def create_sequence(self, user_id: str, data: StorySequenceIn) -> dict[str, Any]:
         uid = int(user_id)
         sequence = StorySequence(

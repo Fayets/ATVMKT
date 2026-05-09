@@ -2,7 +2,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from src.schemas import ReelKeywordPatchRequest, ReelPatchRequest, ReelResponse, ReelsListResponse, ReelsMetricsOut, ReelsSyncRangeRequest
+from src.schemas import (
+    ReelKeywordPatchRequest,
+    ReelPatchRequest,
+    ReelResponse,
+    ReelsListResponse,
+    ReelsMetricsOut,
+    ReelsSyncRangeDiscoverRequest,
+    ReelsSyncRangeImportRequest,
+)
 from src.services.reels_services import ReelsServices
 
 router = APIRouter(prefix="/api/reels", tags=["reels"], redirect_slashes=False)
@@ -27,9 +35,13 @@ def list_reels(
     months: str | None = Query(default=None, description="Varios meses YYYY-MM separados por coma (p. ej. comparación)"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=50),
+    skip_agg: bool = Query(
+        default=False,
+        description="Si true, no calcula total_cash/total_chats sobre todos los reels (más rápido; solo la página trae métricas finales).",
+    ),
 ) -> ReelsListResponse:
     try:
-        return service.list_reels(user_id, month, page, page_size, months_csv=months)
+        return service.list_reels(user_id, month, page, page_size, months_csv=months, skip_agg=skip_agg)
     except HTTPException as e:
         raise e
     except Exception:
@@ -117,20 +129,32 @@ async def sync_instagram(
         raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels con Instagram.")
 
 
-@router.post("/sync-range")
-async def sync_instagram_range(
-    body: ReelsSyncRangeRequest,
+@router.post("/sync-range/discover")
+async def reels_sync_range_discover(
+    body: ReelsSyncRangeDiscoverRequest,
     user_id: Annotated[str, Depends(require_user_id)],
 ) -> dict[str, str]:
-    if body.date_from > body.date_to:
-        raise HTTPException(status_code=400, detail="date_from no puede ser mayor que date_to.")
     try:
-        service.trigger_sync_range(user_id, body.date_from, body.date_to)
+        service.trigger_discover_range(user_id)
         return {"status": "started"}
     except HTTPException as e:
         raise e
     except Exception:
-        raise HTTPException(status_code=500, detail="Error inesperado al sincronizar reels por rango.")
+        raise HTTPException(status_code=500, detail="Error inesperado al buscar reels en la cuenta.")
+
+
+@router.post("/sync-range/import")
+async def reels_sync_range_import(
+    body: ReelsSyncRangeImportRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> dict[str, str]:
+    try:
+        service.trigger_import_range(user_id, body.take)
+        return {"status": "started"}
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al importar reels del rango.")
 
 
 @router.post("/refresh-metrics")

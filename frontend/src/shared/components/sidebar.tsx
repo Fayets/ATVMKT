@@ -7,7 +7,9 @@ import { useState } from 'react'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { BrandLogo } from '@/shared/components/brand-logo'
 
-type NavItem = { label: string; href: string }
+type NavLeaf = { label: string; href: string }
+/** `children` = subítems (ej. Métricas reels bajo Reels). */
+type NavItem = NavLeaf & { children?: NavLeaf[] }
 type NavGroup = {
   title: string
   icon: string
@@ -20,15 +22,14 @@ const navigation: NavGroup[] = [
   {
     title: 'Dashboard marketing',
     icon: '◆',
-    defaultOpen: true,
-    items: [
-      { label: 'Dashboard', href: '/dashboard' },
-      { label: 'Métricas reels', href: '/metrica-reels' },
-    ],
+    href: '/dashboard',
+    items: [],
   },
   {
-    title: 'Dashboard ventas', icon: '◆', defaultOpen: true,
-    items: [{ label: 'Panel', href: '/sales-dashboard' }],
+    title: 'Dashboard ventas',
+    icon: '◆',
+    href: '/sales-dashboard',
+    items: [],
   },
 ]
 
@@ -36,11 +37,11 @@ const dataGroups: NavGroup[] = [
   {
     title: 'Trackeo de contenido', icon: '📊',
     items: [
-      { label: 'Reels', href: '/reels' },
+      { label: 'Reels', href: '/reels', children: [{ label: 'Métricas', href: '/metrica-reels' }] },
       { label: 'Historias', href: '/historias' },
       { label: 'YouTube', href: '/youtube' },
       { label: 'BIO', href: '/bio' },
-      { label: 'Keyword', href: '/keywords' },
+      { label: 'Keyword', href: '/keywords', children: [{ label: 'Métricas', href: '/metrica-keywords' }] },
     ],
   },
   {
@@ -147,8 +148,10 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
       <div className="mb-0">
         <Link
           href={group.href}
-          className={`mx-1 flex w-[calc(100%-8px)] items-center rounded-md px-3 py-1.5 text-[13px] font-medium transition-all text-left ${
-            directActive ? 'bg-[var(--accent-faint)] text-[var(--text)]' : 'text-[var(--text2)] hover:bg-[var(--nav-hover)]'
+          className={`flex min-h-8 w-full items-center rounded-md px-3 py-1.5 text-[13px] font-medium transition-all text-left ${
+            directActive
+              ? 'bg-[var(--accent-faint)] text-[var(--text)]'
+              : 'text-[var(--text2)] hover:bg-[var(--nav-hover)]'
           }`}
         >
           <span className="flex-1">{group.title}</span>
@@ -164,7 +167,7 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         aria-label={open ? `Contraer menú: ${group.title}` : `Expandir menú: ${group.title}`}
-        className="mx-1 flex min-h-8 w-[calc(100%-8px)] items-center gap-2 rounded-md px-2 py-1.5 text-[13px] font-medium text-left text-[var(--text2)] transition-all hover:bg-[var(--nav-hover)]"
+        className="flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium text-left text-[var(--text2)] transition-all hover:bg-[var(--nav-hover)]"
       >
         <span className="min-w-0 flex-1 truncate">{group.title}</span>
         {showBadge && group.items.length > 0 && (
@@ -174,21 +177,48 @@ function CollapsibleGroup({ group, pathname, showBadge }: { group: NavGroup; pat
         )}
       </button>
       {open && (
-        <div className="mx-1 mt-0.5 flex flex-col gap-0.5 pr-1">
+        <div className="mt-0.5 flex flex-col gap-0.5 px-3 pr-2">
           {group.items.map((item) => {
-            const isActive = pathname === item.href
+            const childActive = item.children?.some((c) => pathname === c.href) ?? false
+            const isActive = pathname === item.href || childActive
+            const hasChildren = Boolean(item.children?.length)
+            const parentActive = isActive && !childActive
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block min-h-7 truncate rounded-md border-l-2 py-1 pl-[calc(2.5rem-2px)] pr-2 text-[12px] transition-all ${
-                  isActive
-                    ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--text)] font-medium'
-                    : 'border-transparent text-[var(--text2)] hover:bg-[var(--nav-hover)] hover:text-[var(--text)]'
-                }`}
-              >
-                {item.label}
-              </Link>
+              <div key={item.href} className="flex flex-col gap-0.5">
+                <Link
+                  href={item.href}
+                  className={`block min-h-7 truncate rounded-md py-1 pr-2 text-[12px] transition-all ${
+                    parentActive
+                      ? 'border-l-2 border-[var(--accent)] bg-[var(--accent-faint)] pl-2 text-[var(--text)] font-medium'
+                      : childActive
+                        ? 'border-l-0 pl-0 text-[var(--text2)] hover:bg-[var(--nav-hover)] hover:text-[var(--text)]'
+                        : 'border-l-0 pl-0 text-[var(--text2)] hover:bg-[var(--nav-hover)] hover:text-[var(--text)]'
+                  }`}
+                >
+                  {item.label}
+                </Link>
+                {hasChildren && (
+                  <div className="ml-2 flex flex-col gap-0.5 border-l border-[var(--border2)] pl-2">
+                    {item.children!.map((sub) => {
+                      const subActive = pathname === sub.href
+                      return (
+                        <Link
+                          key={sub.href}
+                          href={sub.href}
+                          className={`block min-h-7 truncate rounded-md py-1 pr-2 text-[11px] transition-all ${
+                            subActive
+                              ? 'border-l-2 border-[var(--accent)] bg-[var(--accent-faint)] pl-3 text-[var(--text)] font-medium'
+                              : 'border-l-0 pl-3 text-[var(--text3)] hover:bg-[var(--nav-hover)] hover:text-[var(--text)]'
+                          }`}
+                        >
+                          <span className="mr-1.5 text-[10px] text-[var(--text3)]">↳</span>
+                          {sub.label}
+                        </Link>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
             )
           })}
         </div>

@@ -75,6 +75,7 @@ class ReelResponse(BaseModel):
     manual_chats: int | None = None
     cash_total: float = 0
     cpc: float = 0
+    agendas: int = 0
 
 
 class ReelsListResponse(BaseModel):
@@ -106,9 +107,12 @@ class ReelsSyncRequest(BaseModel):
     limit: int | None = None
 
 
-class ReelsSyncRangeRequest(BaseModel):
-    date_from: date
-    date_to: date
+class ReelsSyncRangeDiscoverRequest(BaseModel):
+    """Sin parámetros: cuenta todos los reels de la cuenta de Instagram conectada (vista previa rápida)."""
+
+
+class ReelsSyncRangeImportRequest(BaseModel):
+    take: int = Field(ge=1, description="Cantidad de reels a importar (≤ total hallado en discover).")
 
 
 class ReelsSyncResponse(BaseModel):
@@ -468,6 +472,8 @@ class LeadPatchRequest(BaseModel):
     dolores_setting: str | None = None
     dolores_llamada: str | None = None
     razon_compra: str | None = None
+    setter: str | None = None
+    closer: str | None = None
 
 
 class KeywordClientRow(BaseModel):
@@ -476,6 +482,7 @@ class KeywordClientRow(BaseModel):
     lead_id: str
     nombre: str = ""
     instagram: str = ""
+    reel_id: str | None = Field(default=None, description="ID interno del reel (BD), si existe match por keyword.")
     reel_permalink: str | None = None
     reel_published_at: str | None = Field(
         default=None,
@@ -484,6 +491,50 @@ class KeywordClientRow(BaseModel):
     keyword: str
 
 
+class KeywordsReelOption(BaseModel):
+    id: str
+    label: str
+
+
+class KeywordsMetrics(BaseModel):
+    total_rows: int = 0
+    unique_leads: int = 0
+    unique_keywords: int = 0
+    rows_with_reel: int = 0
+    unique_reels: int = 0
+
+
+class KeywordsSeriesDay(BaseModel):
+    day: str = Field(description="YYYY-MM-DD")
+    rows: int = 0
+    leads: int = 0
+
+
+class KeywordsTopKeyword(BaseModel):
+    keyword: str
+    rows: int = 0
+    leads: int = 0
+
+
+class KeywordsTopReel(BaseModel):
+    reel_id: str
+    label: str
+    rows: int = 0
+
+
+class KeywordsMetricsResponse(BaseModel):
+    metrics: KeywordsMetrics = Field(default_factory=KeywordsMetrics)
+    series_days: list[KeywordsSeriesDay] = Field(default_factory=list)
+    top_keywords: list[KeywordsTopKeyword] = Field(default_factory=list)
+    top_reels: list[KeywordsTopReel] = Field(default_factory=list)
+    reels: list[KeywordsReelOption] = Field(default_factory=list)
+
+
 class KeywordsListResponse(BaseModel):
     rows: list[KeywordClientRow] = Field(default_factory=list)
     total: int = 0
+    reels: list[KeywordsReelOption] = Field(
+        default_factory=list,
+        description="Opciones de reels con keyword para filtro en frontend.",
+    )
+    metrics: KeywordsMetrics = Field(default_factory=KeywordsMetrics)
