@@ -48,8 +48,22 @@ function formatAgendaPointBadgeText(
   if (k.toLowerCase() === 'bio') return '[BIO]'
   const reel = lookups.reels[k]
   if (reel) return `[REEL] · ${formatAgendaPointDate(reel.publishedAt)}`
-  const seq = lookups.sequences[k]
+
+  let seq = lookups.sequences[k]
+  if (!seq) {
+    const m = /^story:(\d+)$/i.exec(k)
+    if (m) {
+      const sid = m[1]
+      seq = lookups.sequences[`story:${sid}`] ?? lookups.sequences[sid]
+    }
+  }
+  if (!seq && /^\d+$/.test(k)) {
+    seq = lookups.sequences[k] ?? lookups.sequences[`story:${k}`]
+  }
   if (seq) return `[HISTORIA] · ${formatAgendaPointDate(seq.sequenceDate)}`
+
+  if (/^story:\d+$/i.test(k)) return `[HISTORIA] · —`
+
   if (k.length > LEGACY_AGENDA_SNIPPET_LEN) return `${k.slice(0, LEGACY_AGENDA_SNIPPET_LEN)}…`
   return k
 }
@@ -308,12 +322,14 @@ export function LeadsPage() {
       }[]
       if (sr.ok && Array.isArray(seqData)) {
         for (const s of seqData) {
-          sequences[String(s.id)] = {
+          const meta = {
             title:
               (s.title && s.title.trim()) ||
               (s.sequence_date ? `Historia ${s.sequence_date}` : `Historia #${s.id}`),
             sequenceDate: s.sequence_date ?? null,
           }
+          sequences[String(s.id)] = meta
+          sequences[`story:${s.id}`] = meta
         }
       }
       setAgendaLookups({ reels, sequences })

@@ -14,7 +14,8 @@ import httpx
 from fastapi import HTTPException
 from pony.orm import db_session, flush
 
-from src.models import ApiConnection, StorySequence, StorySlide
+from src.db import db
+from src.models import ApiConnection, Lead, StorySequence, StorySlide
 from src.schemas import StorySequenceIn
 from src.story_sync_scheduler_ref import next_auto_sync_stories_run_time
 
@@ -79,8 +80,43 @@ def _serialize_slide(slide: StorySlide) -> dict[str, Any]:
     }
 
 
-def _serialize_sequence(sequence: StorySequence) -> dict[str, Any]:
+def _count_agendas_for_sequence(user_id: int, sequence_db_id: int) -> int:
+    """Leads con punto_agenda = story:<id de secuencia> (mismo criterio que reels)."""
+    tid = f"story:{sequence_db_id}"
+    tbl = Lead._table_ or "lead"
+    sql = f"""COUNT(*) FROM {tbl} l
+WHERE l.user_id = $user_id
+AND trim(both from coalesce(l.punto_agenda, '')) = $tid"""
+    with db_session:
+        rows = db.select(sql, globals(), {"user_id": user_id, "tid": tid})
+    return int(rows[0]) if rows else 0
+
+
+def _sum_pago_agenda_for_sequence(user_id: int, sequence_db_id: int) -> float:
+    tid = f"story:{sequence_db_id}"
+    tbl = Lead._table_ or "lead"
+    sql = f"""coalesce(sum(coalesce(l.pago, 0)), 0) FROM {tbl} l
+WHERE l.user_id = $user_id
+AND trim(both from coalesce(l.punto_agenda, '')) = $tid"""
+    with db_session:
+        rows = db.select(sql, globals(), {"user_id": user_id, "tid": tid})
+    if not rows:
+        return 0.0
+    v = rows[0]
+    return float(v) if v is not None else 0.0
+
+
+def _serialize_sequence(sequence: StorySequence, user_id: str) -> dict[str, Any]:
     slides = sorted(list(sequence.slides), key=lambda s: (s.order_index, s.id))
+    uid = int(user_id)
+    sid = int(sequence.id)
+    agendas_n = _count_agendas_for_sequence(uid, sid)
+    cash_leads_f = _sum_pago_agenda_for_sequence(uid, sid)
+    cash_manual_f = float(sequence.cash or 0)
+    cash_total_f = cash_manual_f + cash_leads_f
+    cash_manual_i = int(round(cash_manual_f))
+    cash_leads_i = int(round(cash_leads_f))
+    cash_generado_i = int(round(cash_total_f))
     return {
         "id": sequence.id,
         "sequence_date": sequence.sequence_date.isoformat(),
@@ -88,7 +124,10 @@ def _serialize_sequence(sequence: StorySequence) -> dict[str, Any]:
         "dolor": sequence.dolor,
         "angulo": sequence.angulo,
         "cta_text": sequence.cta,
-        "cash_generado": int(sequence.cash or 0),
+        "cash_generado": cash_generado_i,
+        "cash_manual": cash_manual_i,
+        "cash_leads": cash_leads_i,
+        "agendas": agendas_n,
         "has_cta": bool(sequence.has_cta),
         "chats": int(sequence.chats or 0),
         "slides": [_serialize_slide(s) for s in slides],
@@ -205,7 +244,7 @@ class StoriesService:
                 for slide in slides:
                     print(f"[stories] slide {slide.id}: reach={slide.reach}, replies={slide.replies}")
             rows.sort(key=lambda s: (s.sequence_date, s.id), reverse=True)
-            return [_serialize_sequence(row) for row in rows]
+            return [_serialize_sequence(row, user_id) for row in rows]
         except Exception as e:
             print("[stories] ERROR:", str(e))
             import traceback
@@ -216,7 +255,7 @@ class StoriesService:
     def get_all_sequences(self, user_id: str) -> list[dict[str, Any]]:
         rows = [s for s in list(StorySequence.select()) if s.user_id == int(user_id)]
         rows.sort(key=lambda s: (s.sequence_date, s.id), reverse=True)
-        return [_serialize_sequence(row) for row in rows]
+        return [_serialize_sequence(row, user_id) for row in rows]
 
     @db_session
     def create_sequence(self, user_id: str, data: StorySequenceIn) -> dict[str, Any]:
@@ -239,7 +278,7 @@ class StoriesService:
                 image_url=slide.image_url,
             )
         flush()
-        return _serialize_sequence(sequence)
+        return _serialize_sequence(sequence, user_id)
 
     @db_session
     def update_sequence(self, sequence_id: int, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -276,7 +315,7 @@ class StoriesService:
 
         sequence.updated_at = datetime.utcnow()
         flush()
-        return _serialize_sequence(sequence)
+        return _serialize_sequence(sequence, user_id)
 
     @db_session
     def delete_sequence(self, sequence_id: int, user_id: str) -> bool:

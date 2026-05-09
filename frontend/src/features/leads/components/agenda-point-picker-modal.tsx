@@ -185,7 +185,7 @@ export function AgendaPointPickerModal({
   }
 
   const pickSequence = async (s: SeqItem) => {
-    const id = String(s.id)
+    const id = `story:${s.id}`
     setSaving(true)
     try {
       await onSavePuntoAgenda(id)

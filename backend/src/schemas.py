@@ -342,6 +342,9 @@ class StorySequenceOut(BaseModel):
     angulo: str | None = None
     cta_text: str | None = None
     cash_generado: int = 0
+    cash_manual: int = 0
+    cash_leads: int = 0
+    agendas: int = 0
     has_cta: bool
     chats: int
     slides: list[StorySlideOut] = Field(default_factory=list)

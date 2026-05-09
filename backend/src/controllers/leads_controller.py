@@ -7,21 +7,43 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
-from src.models import Lead as LeadEntity, ReelContent
+from src.models import Lead as LeadEntity, ReelContent, StorySequence
 from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse, LeadsMetricsOut
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
 
 _AR = ZoneInfo("America/Argentina/Buenos_Aires")
 
+_STORY_AGENDA_PREFIX = "story:"
+
 
 def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
-    """Persistir id interno del reel cuando corresponde; `bio` literal; resto (p. ej. id de historia) sin cambiar."""
+    """Normaliza `punto_agenda`: reel (id interno o instagram_id), historia (`story:<id>`), `bio`, u otro texto."""
     s = (str(raw) if raw is not None else "").strip()
     if not s:
         return ""
-    if s.lower() == "bio":
+    low = s.casefold()
+    if low == "bio":
         return "bio"
+    if low.startswith(_STORY_AGENDA_PREFIX):
+        rest = s[len(_STORY_AGENDA_PREFIX) :].strip()
+        try:
+            sid = int(rest)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="punto_agenda de historia inválido.",
+            ) from None
+        try:
+            seq = StorySequence.get(id=sid)
+        except ObjectNotFound as e:
+            raise HTTPException(
+                status_code=400,
+                detail="Secuencia de historia no encontrada.",
+            ) from e
+        if int(seq.user_id) != user_id_int:
+            raise HTTPException(status_code=400, detail="Secuencia de historia no encontrada.")
+        return f"{_STORY_AGENDA_PREFIX}{sid}"
     try:
         rid = int(s)
     except ValueError:
@@ -32,6 +54,12 @@ def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
             return str(row.id)
         except ObjectNotFound:
             pass
+        try:
+            seq = StorySequence.get(id=rid)
+        except ObjectNotFound:
+            seq = None
+        if seq is not None and int(seq.user_id) == user_id_int:
+            return f"{_STORY_AGENDA_PREFIX}{rid}"
     try:
         insta_row = ReelContent.get(instagram_id=s)
         if int(insta_row.user_id) == user_id_int:

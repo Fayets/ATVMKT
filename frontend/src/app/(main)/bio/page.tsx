@@ -23,6 +23,8 @@ type BioLead = {
   status: string | null
   setter: string | null
   programa: string | null
+  /** True si completó formulario Calendly / tiene `agendo` en BD. */
+  agendo?: boolean
   pago: number | null
   fecha_agendo: string | null
   llamada_url: string | null
@@ -277,22 +279,52 @@ export default function BioPage() {
         <div className="py-12 text-center text-[13px] text-[var(--text3)]">Sin leads de ManyChat para este período/filtro</div>
       ) : (
         <div className="space-y-2">
-          <div className="grid grid-cols-[1.4fr_0.9fr_0.9fr_0.9fr_0.8fr_70px] gap-3 px-4 py-2">
-            {['Instagram', 'Keyword', 'Setter', 'Programa', 'Fecha', ''].map((h) => (
-              <div key={h} className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{h}</div>
+          <div className="grid grid-cols-[minmax(11rem,2fr)_minmax(5rem,1fr)_minmax(5rem,1fr)_8rem_4.5rem_8rem_72px] gap-x-5 gap-y-2 px-4 py-2">
+            {(['Instagram', 'Keyword', 'Setter', 'Programa'] as const).map((h) => (
+              <div
+                key={h}
+                className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]"
+              >
+                {h}
+              </div>
             ))}
+            <div className="text-center text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+              Agendo
+            </div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+              Fecha
+            </div>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]" />
           </div>
 
           {visibleRows.map((lead) => (
             <div key={lead.id} className="glass-card">
-              <div className="grid grid-cols-[1.4fr_0.9fr_0.9fr_0.9fr_0.8fr_70px] gap-3 px-4 py-3 items-center">
+              <div className="grid grid-cols-[minmax(11rem,2fr)_minmax(5rem,1fr)_minmax(5rem,1fr)_8rem_4.5rem_8rem_72px] gap-x-5 gap-y-2 px-4 py-3 items-center">
                 <div className="min-w-0">
                   <span className="truncate text-[13px]">{lead.handle}</span>
                 </div>
 
                 <div className="text-[12px] text-[var(--text2)] truncate">{lead.keyword || '—'}</div>
                 <div className="text-[12px] text-[var(--text2)] truncate">{lead.setter || '—'}</div>
-                <div className="text-[12px] text-[var(--text2)] truncate">{lead.programa || '—'}</div>
+                <div className="min-w-0 text-[12px] text-[var(--text2)] truncate">{lead.programa || '—'}</div>
+                <div
+                  className="flex min-h-[1.25rem] items-center justify-center"
+                  title={lead.agendo ? 'Completó agendamiento (Calendly)' : 'Aún sin agendar'}
+                >
+                  {lead.agendo ? (
+                    <span
+                      className="text-lg font-semibold leading-none text-[var(--green)]"
+                      aria-hidden
+                    >
+                      ✓
+                    </span>
+                  ) : (
+                    <span className="select-none text-[var(--text3)] opacity-40" aria-hidden>
+                      ·
+                    </span>
+                  )}
+                  <span className="sr-only">{lead.agendo ? 'Agendó' : 'No agendó'}</span>
+                </div>
                 <div className="text-[12px] text-[var(--text3)]">
                   {lead.subscribed_at ? new Date(lead.subscribed_at).toLocaleDateString('es-AR', { timeZone: AR_TZ, day: '2-digit', month: '2-digit' }) : '—'}
                 </div>

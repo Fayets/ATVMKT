@@ -35,6 +35,9 @@ type StorySequence = {
   angulo: string | null
   cta_text: string | null
   cash_generado: number
+  cash_manual?: number
+  cash_leads?: number
+  agendas?: number
   has_cta: boolean
   chats: number
   slides: StorySlide[]
@@ -59,6 +62,11 @@ type Secuencia = {
   cta_text?: string
   chats: number
   cash_generado: number
+  cash_manual: number
+  /** Suma de pagos de leads con esta historia como punto de agenda. */
+  cash_leads: number
+  /** Leads con punto de agenda = historia (viene del backend). */
+  agendas: number
   notes: string
   secuenciaDesc: string
   hasSync: boolean
@@ -272,7 +280,10 @@ export default function HistoriasPage() {
         angulo: seq.angulo || angulos[0] || '',
         cta_text: ctaText,
         chats: toNumber(seq.chats),
+        cash_manual: toNumber(seq.cash_manual ?? seq.cash_generado),
         cash_generado: toNumber(seq.cash_generado),
+        cash_leads: toNumber(seq.cash_leads),
+        agendas: toNumber(seq.agendas),
         notes: seq.title || '',
         secuenciaDesc: (seq.title || '').trim(),
         hasSync: seq.slides.some((s) => Boolean(s.instagram_media_id)),
@@ -441,7 +452,8 @@ export default function HistoriasPage() {
     const dolor = overrides?.dolor ?? form.dolor ?? sec.dolor ?? ''
     const angulo = overrides?.angulo ?? formAngulos[0] ?? sec.angulo ?? ''
     const ctaText = overrides?.cta_text ?? form.cta ?? sec.cta_text ?? ''
-    const cashGenerado = overrides?.cash_generado ?? (Number(form.cash) || sec.cash_generado || 0)
+    const cashGenerado =
+      overrides?.cash_generado ?? (Number(form.cash) || sec.cash_manual || 0)
     const chats = overrides?.chats ?? (Number(form.chats) || sec.chats || 0)
     const res = await apiFetch(`/stories/sequences/${sec.id}`, {
       method: 'PUT',
@@ -476,7 +488,14 @@ export default function HistoriasPage() {
 
   const startEdit = (sec: Secuencia) => {
     setExpanded(sec.id)
-    setForm({ dolor: sec.dolor || '', cta: sec.cta_text || '', chats: String(sec.chats), cash: String(sec.cash_generado), notes: sec.notes, secuenciaDesc: sec.secuenciaDesc })
+    setForm({
+      dolor: sec.dolor || '',
+      cta: sec.cta_text || '',
+      chats: String(sec.chats),
+      cash: String(sec.cash_manual),
+      notes: sec.notes,
+      secuenciaDesc: sec.secuenciaDesc,
+    })
     setFormAngulos(sec.angulo ? [sec.angulo] : [])
   }
 
@@ -712,6 +731,7 @@ export default function HistoriasPage() {
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">ALCANCE: {sec.totalReach.toLocaleString('es-AR')}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash_generado)}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CHATS: {sec.chats}</span>
+                    <span className="font-mono-num text-[12px] text-[var(--text2)]">AGENDAS: {sec.agendas}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CPC: {formatCash(cpc)}</span>
                     {sec.hasSync
                       ? <span className="rounded bg-[rgba(34,197,94,0.15)] px-2 py-1 text-[10px] text-[var(--green)] font-medium">SINCRONIZADO</span>
@@ -780,11 +800,12 @@ export default function HistoriasPage() {
                   return (
                   <div className="mt-4 pt-4 border-t border-[var(--border)]" onClick={e => e.stopPropagation()}>
                     {/* KPIs */}
-                    <div className="grid grid-cols-3 gap-3 mb-5">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                       <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
-                        <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash Generado</div>
-                        <input type="number" value={form.cash || '0'} onChange={e => setForm(p => ({ ...p, cash: e.target.value }))}
-                          className="w-full bg-transparent text-center font-mono-num text-2xl font-bold text-[var(--green)] outline-none" />
+                        <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash generado</div>
+                        <div className="font-mono-num text-2xl font-bold text-[var(--green)]">
+                          {formatCash(sec.cash_generado)}
+                        </div>
                       </div>
                       <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
                         <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
@@ -794,8 +815,12 @@ export default function HistoriasPage() {
                       <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
                         <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash por Chat</div>
                         <div className="font-mono-num text-2xl font-bold">
-                          {Number(form.chats) > 0 ? formatCash(Number(form.cash) / Number(form.chats)) : '$0'}
+                          {sec.chats > 0 ? formatCash(sec.cash_generado / sec.chats) : '$0'}
                         </div>
+                      </div>
+                      <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
+                        <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Agendas</div>
+                        <div className="font-mono-num text-2xl font-bold text-[var(--text)]">{sec.agendas}</div>
                       </div>
                     </div>
 
@@ -960,12 +985,13 @@ function StorySequenceDetail({
   onClose: () => void
   onSave: (payload: { dolor: string; angulo: string; cta_text: string; cash_generado: number; chats: number }) => Promise<void>
 }) {
-  const [cash, setCash] = useState<number>(sequence.cash_generado || 0)
+  const [cash, setCash] = useState<number>(sequence.cash_manual || 0)
   const [chats, setChats] = useState<number>(sequence.chats || 0)
   const [dolor, setDolor] = useState<string>(sequence.dolor || '')
   const [angulo, setAngulo] = useState<string>(sequence.angulo || '')
   const [ctaText, setCtaText] = useState<string>(sequence.cta_text || '')
-  const cashPorChat = chats > 0 ? cash / chats : 0
+  const cashPorChatTotal =
+    sequence.chats > 0 ? sequence.cash_generado / sequence.chats : 0
   const firstReach = slideReachCount(sequence.slides[0] ?? { reach: null })
   const retentionData = sequence.slides
     .map((s, i) => {
@@ -983,10 +1009,29 @@ function StorySequenceDetail({
           <button className="text-[var(--text3)]" onClick={onClose}>✕</button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-[var(--text2)]">
+          <span className="font-mono-num">ALCANCE: {sequence.totalReach.toLocaleString('es-AR')}</span>
+          <span className="font-mono-num">CASH: {formatCash(sequence.cash_generado)}</span>
+          <span className="font-mono-num">CHATS: {sequence.chats}</span>
+          <span className="font-mono-num">AGENDAS: {sequence.agendas}</span>
+          <span className="font-mono-num">
+            CPC: {formatCash(sequence.chats > 0 ? sequence.cash_generado / sequence.chats : 0)}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
             <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash generado</div>
-            <input type="number" value={cash} onChange={(e) => setCash(Number(e.target.value) || 0)} className="w-full bg-transparent text-center font-mono-num text-2xl font-bold text-[var(--green)] outline-none" />
+            <div className="font-mono-num text-2xl font-bold text-[var(--green)]">
+              {formatCash(sequence.cash_generado)}
+            </div>
+            <input
+              type="number"
+              value={cash}
+              onChange={(e) => setCash(Number(e.target.value) || 0)}
+              className="mt-2 w-full rounded-md border border-[var(--border2)] bg-[var(--bg3)] px-2 py-1.5 text-center font-mono-num text-[13px] text-[var(--text)] outline-none"
+              aria-label="Ajuste opcional de cash en base de datos"
+            />
           </div>
           <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
             <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Chats</div>
@@ -994,7 +1039,11 @@ function StorySequenceDetail({
           </div>
           <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
             <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash por chat</div>
-            <div className="font-mono-num text-2xl font-bold">{formatCash(cashPorChat)}</div>
+            <div className="font-mono-num text-2xl font-bold">{formatCash(cashPorChatTotal)}</div>
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Agendas</div>
+            <div className="font-mono-num text-2xl font-bold text-[var(--text)]">{sequence.agendas}</div>
           </div>
         </div>
 
