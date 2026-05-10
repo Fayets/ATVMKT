@@ -500,6 +500,7 @@ class LeadPatchRequest(BaseModel):
     notes: str | None = None
     dolores_setting: str | None = None
     dolores_llamada: str | None = None
+    closer_report: str | None = None
     razon_compra: str | None = None
     setter: str | None = None
     closer: str | None = None

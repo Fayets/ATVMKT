@@ -1160,8 +1160,9 @@ function LeadsTable({
                   ? 'leads-table__sticky-frozen leads-table__sticky-name'
                   : ''
               }`}
-              style={{ width: col.width, minWidth: col.width }}>
-              <div className="flex items-center gap-1 min-w-0">
+              style={{ width: col.width, minWidth: col.width, maxWidth: col.width }}
+            >
+              <div className="flex min-w-0 items-center gap-1">
                 <span className="truncate">{col.label}</span>
                 {sort.field === col.key && (
                   <span className="text-[var(--accent)] text-[9px] shrink-0">{sort.dir === 'asc' ? '↑' : '↓'}</span>
@@ -1204,14 +1205,15 @@ function LeadsTable({
             {columns.map(col => (
               <td
                 key={col.key}
-                className={`border-b border-[var(--border)] px-3 py-1.5 ${
+                className={`border-b border-[var(--border)] px-3 py-1.5 align-top ${
                   stickyName && col.key === 'client_name'
                     ? 'leads-table__sticky-frozen leads-table__sticky-name'
                     : ''
                 }`}
-                style={{ width: col.width, minWidth: col.width }}
+                style={{ width: col.width, minWidth: col.width, maxWidth: col.width }}
               >
-                <LeadsTableCell
+                <div className="min-w-0 max-w-full">
+                  <LeadsTableCell
                   lead={lead}
                   col={col}
                   editing={editingCell?.id === lead.id && editingCell?.field === col.key}
@@ -1226,7 +1228,8 @@ function LeadsTable({
                   resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
                   onOpenAgendaPicker={onOpenAgendaPicker}
                   onOpenFunnelPicker={onOpenFunnelPicker}
-                />
+                  />
+                </div>
               </td>
             ))}
             {/* Delete */}
@@ -1295,6 +1298,12 @@ function LeadsTableCell({
   onOpenAgendaPicker: (lead: Lead) => void
   onOpenFunnelPicker: (lead: Lead) => void
 }) {
+  /** Textos largos: mismo tratamiento en vista / edición (incluye reporte closer y similares). */
+  const longTextCellKeys = ['dolores_setting', 'notes', 'closer_report', 'dolores_llamada', 'razon_compra']
+  /** Caracteres máximos mostrados en la grilla (texto completo en `title` / edición). */
+  const LONG_TEXT_PREVIEW_CHARS = 44
+  const skipBlurSaveRef = useRef(false)
+
   const raw = (lead as Record<string, unknown>)[col.key]
   const value =
     col.key === 'origin'
@@ -1403,23 +1412,10 @@ function LeadsTableCell({
         </span>
       )
     }
-    const reportKeys = ['closer_report', 'dolores_llamada', 'razon_compra']
-    if (reportKeys.includes(col.key) && value) {
+    if (longTextCellKeys.includes(col.key) && value) {
       const text = String(value)
-      const preview = text.length > 50 ? `${text.substring(0, 50)}...` : text
-      const labelMap: Record<string, string> = {
-        closer_report: 'Reporte Closer', dolores_llamada: 'Dolores de la Llamada', razon_compra: 'Razón de Compra',
-      }
-      return (
-        <span onClick={() => onPreviewText(labelMap[col.key] || col.key, text)} className="text-[12px] text-[var(--text2)] cursor-pointer hover:text-[var(--accent)] truncate block">
-          {preview}
-        </span>
-      )
-    }
-    const longTextKeys = ['dolores_setting', 'notes']
-    if (longTextKeys.includes(col.key) && value) {
-      const text = String(value)
-      const preview = text.length > 60 ? `${text.substring(0, 60)}...` : text
+      const preview =
+        text.length > LONG_TEXT_PREVIEW_CHARS ? `${text.slice(0, LONG_TEXT_PREVIEW_CHARS)}…` : text
       return (
         <span onClick={() => onPreviewText(col.label, text)} className="text-[12px] text-[var(--text2)] cursor-pointer truncate block" title={text}>
           {preview}
@@ -1463,6 +1459,31 @@ function LeadsTableCell({
         </select>
       )
     }
+    if (longTextCellKeys.includes(col.key)) {
+      return (
+        <textarea
+          autoFocus
+          rows={5}
+          defaultValue={String(value ?? '')}
+          onBlur={(e) => {
+            if (skipBlurSaveRef.current) {
+              skipBlurSaveRef.current = false
+              return
+            }
+            const v = e.target.value
+            onSave(v.trim() === '' ? null : v)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              skipBlurSaveRef.current = true
+              onCancelEdit()
+            }
+          }}
+          className="box-border min-h-[100px] w-full resize-y rounded border border-[var(--accent)] bg-[var(--bg3)] px-2 py-1.5 text-[12px] leading-snug text-[var(--text)] outline-none"
+        />
+      )
+    }
     return (
       <input
         autoFocus
@@ -1471,7 +1492,7 @@ function LeadsTableCell({
         onBlur={(e) => {
           const v = e.target.value
           if (col.type === 'number' || col.type === 'currency') onSave(Number(v) || 0)
-          else onSave(v || null)
+          else onSave(v.trim() === '' ? null : v)
         }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -1636,30 +1657,10 @@ function LeadsTableCell({
     )
   }
 
-  // Fathom report fields — click to open formatted preview modal
-  const reportKeys = ['closer_report', 'dolores_llamada', 'razon_compra']
-  if (reportKeys.includes(col.key) && value) {
+  if (longTextCellKeys.includes(col.key) && value) {
     const text = String(value)
-    const preview = text.length > 50 ? text.substring(0, 50) + '...' : text
-    const labelMap: Record<string, string> = {
-      closer_report: 'Reporte Closer', dolores_llamada: 'Dolores de la Llamada',
-      razon_compra: 'Razón de Compra',
-    }
-    return (
-      <span
-        onClick={() => onPreviewText(labelMap[col.key] || col.key, text)}
-        className={`${cellClass} text-[var(--text2)] cursor-pointer hover:text-[var(--accent)] transition-colors`}
-      >
-        {preview}
-      </span>
-    )
-  }
-
-  // Other long text fields — normal truncated display
-  const longTextKeys = ['dolores_setting', 'notes']
-  if (longTextKeys.includes(col.key) && value) {
-    const text = String(value)
-    const preview = text.length > 60 ? text.substring(0, 60) + '...' : text
+    const preview =
+      text.length > LONG_TEXT_PREVIEW_CHARS ? `${text.slice(0, LONG_TEXT_PREVIEW_CHARS)}…` : text
     return (
       <span onClick={onStartEdit} className={`${cellClass} text-[var(--text2)] cursor-pointer`} title={text}>
         {preview}

@@ -170,6 +170,7 @@ class Lead(db.Entity):
     dolores_setting = Optional(str, default="")
     ingresos_lead = Optional(float, default=0)
     dolores_llamada = Optional(str, default="")
+    closer_report = Optional(str, default="")
     razon_compra = Optional(str, default="")
     programa_ofrecido = Optional(str, default="")
     # Ventas

@@ -243,7 +243,7 @@ def _to_lead_out(row: LeadEntity, norm_prices: dict[str, float] | None = None) -
         call_at=None,
         call=_dt_iso(row.call),
         call_link=row.link_llamada,
-        closer_report=None,
+        closer_report=(row.closer_report or "").strip() or None,
         program_offered=row.programa_ofrecido,
         program_price_usd=price_catalog,
         revenue=ing,
@@ -516,6 +516,8 @@ def patch_lead(
             row.dolores_setting = data["dolores_setting"] or ""
         if "dolores_llamada" in data:
             row.dolores_llamada = data["dolores_llamada"] or ""
+        if "closer_report" in data:
+            row.closer_report = data["closer_report"] or ""
         if "razon_compra" in data:
             row.razon_compra = data["razon_compra"] or ""
         if "setter" in data:
