@@ -64,7 +64,11 @@ export function SalesDashboardPage() {
       void fetchData()
     }
     window.addEventListener('atvmkt-team-reports-changed', refresh)
-    return () => window.removeEventListener('atvmkt-team-reports-changed', refresh)
+    window.addEventListener('offered-programs-updated', refresh)
+    return () => {
+      window.removeEventListener('atvmkt-team-reports-changed', refresh)
+      window.removeEventListener('offered-programs-updated', refresh)
+    }
   }, [fetchData])
 
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
@@ -185,15 +189,33 @@ function MensualView({ curr, prev, delta }: { curr: VDData; prev: VDData; delta:
   return (
     <div className="space-y-6">
       {/* Hero revenue */}
-      <div className="glass-card p-6 flex items-center justify-between relative accent-top">
-        <div className="flex gap-12">
+      <div className="glass-card p-6 flex flex-wrap items-center justify-between gap-6 relative accent-top">
+        <div className="flex flex-wrap items-start gap-8 lg:gap-12">
           <div>
             <div className="text-[11px] text-[var(--text3)]">Facturacion</div>
-            <div className="font-mono-num text-3xl font-bold mt-1">{formatCash(curr.facturacion)}</div>
+            <div className="font-mono-num mt-1 text-3xl font-bold leading-none">{formatCash(curr.facturacion)}</div>
           </div>
           <div>
             <div className="text-[11px] text-[var(--text3)]">Cash Collected</div>
-            <div className="font-mono-num text-3xl font-bold text-[var(--green)] mt-1">{formatCash(curr.ingresos)}</div>
+            <div className="mt-1 flex items-stretch gap-2 sm:gap-3">
+              <div className="font-mono-num shrink-0 text-3xl font-bold leading-none text-[var(--green)] tabular-nums">
+                {formatCash(curr.ingresos)}
+              </div>
+              <div className="flex min-h-0 min-w-[11rem] flex-1 flex-col justify-between border-l border-[var(--border)] pl-2.5 sm:min-w-[12rem] sm:pl-3">
+                <div className="flex items-center justify-between gap-6 sm:gap-8">
+                  <span className="text-[11px] text-[var(--text3)]">Pago</span>
+                  <span className="font-mono-num text-[11px] font-semibold tabular-nums leading-none text-[var(--text2)]">
+                    {formatCash(curr.cashCollectedComposition.pago)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-6 sm:gap-8">
+                  <span className="text-[11px] text-[var(--text3)]">Seguimiento</span>
+                  <span className="font-mono-num text-[11px] font-semibold tabular-nums leading-none text-[var(--text2)]">
+                    {formatCash(curr.cashCollectedComposition.seguimiento)}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div className="text-right">

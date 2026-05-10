@@ -732,7 +732,7 @@ export default function HistoriasPage() {
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash_generado)}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CHATS: {sec.chats}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">AGENDAS: {sec.agendas}</span>
-                    <span className="font-mono-num text-[12px] text-[var(--text2)]">CPC: {formatCash(cpc)}</span>
+                    <span className="font-mono-num text-[12px] text-[var(--text2)]">Cash por chat: {formatCash(cpc)}</span>
                     {sec.hasSync
                       ? <span className="rounded bg-[rgba(34,197,94,0.15)] px-2 py-1 text-[10px] text-[var(--green)] font-medium">SINCRONIZADO</span>
                       : <span className="rounded bg-[rgba(161,161,170,0.15)] px-2 py-1 text-[10px] text-[var(--text3)] font-medium">Sin sincronizar</span>}
@@ -1015,7 +1015,7 @@ function StorySequenceDetail({
           <span className="font-mono-num">CHATS: {sequence.chats}</span>
           <span className="font-mono-num">AGENDAS: {sequence.agendas}</span>
           <span className="font-mono-num">
-            CPC: {formatCash(sequence.chats > 0 ? sequence.cash_generado / sequence.chats : 0)}
+            Cash por chat: {formatCash(sequence.chats > 0 ? sequence.cash_generado / sequence.chats : 0)}
           </span>
         </div>
 

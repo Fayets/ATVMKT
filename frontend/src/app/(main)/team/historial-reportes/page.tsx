@@ -7,7 +7,9 @@ import { Modal } from '@/shared/components/modal'
 import { formatCash, formatIsoDateDdMmYyyy } from '@/shared/lib/format-utils'
 import { apiFetch } from '@/lib/api'
 
-type ReporteFiltro = 'todos' | 'setter' | 'closer_marketing' | 'closer_ventas'
+const REPORTES_PAGE_SIZE = 20
+
+type ReporteFiltro = 'todos' | 'setter' | 'closer_marketing' | 'closer_ventas' | 'seguimiento'
 
 type ReportRow =
   | {
@@ -22,6 +24,15 @@ type ReportRow =
       sentimiento_trafico: string
       avatar_tipo_agendas: string
       insights_marketing: string
+    }
+  | {
+      kind: 'seguimiento'
+      id: number
+      fecha: string
+      member_id: number
+      member_nombre: string
+      nombre_lead: string
+      monto: number
     }
   | {
       kind: 'closer'
@@ -110,6 +121,9 @@ function reportListTitle(r: ReportRow): string {
   if (r.kind === 'setter') {
     return `REPORTE SETTER - ${fd} - ${r.member_nombre}`
   }
+  if (r.kind === 'seguimiento') {
+    return `REPORTE SEGUIMIENTO - ${fd} - ${r.member_nombre}`
+  }
   const tipo = r.reporte_tipo === 'marketing' ? 'MARKETING' : 'VENTAS'
   return `REPORTE CLOSER ${tipo} - ${fd} - ${r.member_nombre}`
 }
@@ -151,7 +165,25 @@ function ReportDetail({ r }: { r: ReportRow }) {
       </dl>
     )
   }
-  if (r.reporte_tipo === 'marketing') {
+  if (r.kind === 'seguimiento') {
+    return (
+      <dl className="grid gap-2 text-[12px] text-[var(--text)] sm:grid-cols-2">
+        <div>
+          <dt className="font-bold text-[var(--text)]">Nombre del lead</dt>
+          <dd className="text-[var(--text)]">{r.nombre_lead || '—'}</dd>
+        </div>
+        <div>
+          <dt className="font-bold text-[var(--text)]">Monto</dt>
+          <dd className="font-mono-num text-[var(--text)]">{formatCash(r.monto)}</dd>
+        </div>
+        <div className="sm:col-span-2">
+          <dt className="font-bold text-[var(--text)]">Quién completó el reporte</dt>
+          <dd className="text-[var(--text)]">{r.member_nombre}</dd>
+        </div>
+      </dl>
+    )
+  }
+  if (r.kind === 'closer' && r.reporte_tipo === 'marketing') {
     return (
       <dl className="grid gap-2 text-[12px] text-[var(--text)] sm:grid-cols-2">
         <div>
@@ -234,6 +266,7 @@ export default function TeamHistorialReportesPage() {
   const [hasta, setHasta] = useState(() => new Date().toISOString().split('T')[0])
   const [roleFilter, setRoleFilter] = useState<ReporteFiltro>('todos')
   const [diaFiltro, setDiaFiltro] = useState('')
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
   const [reports, setReports] = useState<ReportRow[]>([])
   const [downloading, setDownloading] = useState(false)
@@ -272,6 +305,14 @@ export default function TeamHistorialReportesPage() {
     void fetchReports()
   }, [fetchReports])
 
+  useEffect(() => {
+    const refresh = () => {
+      void fetchReports()
+    }
+    window.addEventListener('atvmkt-team-reports-changed', refresh)
+    return () => window.removeEventListener('atvmkt-team-reports-changed', refresh)
+  }, [fetchReports])
+
   const filteredReports = useMemo(() => {
     let rows = reports
     if (roleFilter === 'setter') rows = rows.filter((x) => x.kind === 'setter')
@@ -279,6 +320,8 @@ export default function TeamHistorialReportesPage() {
       rows = rows.filter((x) => x.kind === 'closer' && x.reporte_tipo === 'marketing')
     } else if (roleFilter === 'closer_ventas') {
       rows = rows.filter((x) => x.kind === 'closer' && x.reporte_tipo !== 'marketing')
+    } else if (roleFilter === 'seguimiento') {
+      rows = rows.filter((x) => x.kind === 'seguimiento')
     }
     if (diaFiltro.trim()) {
       rows = rows.filter((x) => x.fecha === diaFiltro.trim())
@@ -288,6 +331,21 @@ export default function TeamHistorialReportesPage() {
       return b.id - a.id
     })
   }, [reports, roleFilter, diaFiltro])
+
+  const totalPages = Math.max(1, Math.ceil(filteredReports.length / REPORTES_PAGE_SIZE))
+
+  const paginatedReports = useMemo(() => {
+    const start = (page - 1) * REPORTES_PAGE_SIZE
+    return filteredReports.slice(start, start + REPORTES_PAGE_SIZE)
+  }, [filteredReports, page])
+
+  useEffect(() => {
+    setPage(1)
+  }, [roleFilter, diaFiltro, desde, hasta])
+
+  useEffect(() => {
+    setPage((p) => Math.min(p, totalPages))
+  }, [totalPages])
 
   const openPdfModal = useCallback(() => {
     setPdfMode('mes')
@@ -402,6 +460,7 @@ export default function TeamHistorialReportesPage() {
               <option value="setter">Setter</option>
               <option value="closer_marketing">Closer marketing</option>
               <option value="closer_ventas">Closer ventas</option>
+              <option value="seguimiento">Seguimiento</option>
             </select>
           </div>
           <div className="flex flex-col gap-2">
@@ -519,6 +578,7 @@ export default function TeamHistorialReportesPage() {
             <option value="setter">Setter</option>
             <option value="closer_marketing">Closer marketing</option>
             <option value="closer_ventas">Closer ventas</option>
+            <option value="seguimiento">Seguimiento</option>
           </select>
         </div>
         <div>
@@ -574,18 +634,53 @@ export default function TeamHistorialReportesPage() {
       ) : filteredReports.length === 0 ? (
         <p className="text-[13px] text-[var(--text2)]">No hay reportes con estos filtros.</p>
       ) : (
-        <div className="glass-card glass-card--performant divide-y divide-[var(--border2)] overflow-hidden rounded-lg border border-[var(--border)]">
-          {filteredReports.map((r) => (
-            <details key={`${r.kind}-${r.id}`} className="group bg-[var(--bg2)]/30 open:bg-[var(--bg3)]/40">
-              <summary className="cursor-pointer list-none px-4 py-2.5 text-[11px] font-extrabold uppercase leading-snug tracking-wide text-[var(--text)] transition-colors hover:bg-[var(--nav-hover)] marker:content-none [&::-webkit-details-marker]:hidden">
-                <span className="select-none">{reportListTitle(r)}</span>
-              </summary>
-              <div className="border-t border-[var(--border2)] px-4 pb-3 pt-2">
-                <ReportDetail r={r} />
+        <>
+          <div className="glass-card glass-card--performant divide-y divide-[var(--border2)] overflow-hidden rounded-lg border border-[var(--border)]">
+            {paginatedReports.map((r) => (
+              <details key={`${r.kind}-${r.id}`} className="group bg-[var(--bg2)]/30 open:bg-[var(--bg3)]/40">
+                <summary className="cursor-pointer list-none px-4 py-2.5 text-[11px] font-extrabold uppercase leading-snug tracking-wide text-[var(--text)] transition-colors hover:bg-[var(--nav-hover)] marker:content-none [&::-webkit-details-marker]:hidden">
+                  <span className="select-none">{reportListTitle(r)}</span>
+                </summary>
+                <div className="border-t border-[var(--border2)] px-4 pb-3 pt-2">
+                  <ReportDetail r={r} />
+                </div>
+              </details>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-transparent pt-3">
+            <p className="text-[12px] text-[var(--text3)]">
+              Mostrando{' '}
+              <span className="font-medium text-[var(--text2)]">
+                {(page - 1) * REPORTES_PAGE_SIZE + 1}–{Math.min(page * REPORTES_PAGE_SIZE, filteredReports.length)}
+              </span>{' '}
+              de <span className="font-medium text-[var(--text2)]">{filteredReports.length}</span>
+            </p>
+            {totalPages > 1 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="rounded-lg border border-[var(--border2)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text2)] transition-all hover:border-[var(--text3)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Anterior
+                </button>
+                <span className="min-w-[8rem] text-center text-[12px] text-[var(--text3)]">
+                  Página <span className="font-semibold text-[var(--text)]">{page}</span> de{' '}
+                  <span className="font-semibold text-[var(--text)]">{totalPages}</span>
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="rounded-lg border border-[var(--border2)] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text2)] transition-all hover:border-[var(--text3)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Siguiente
+                </button>
               </div>
-            </details>
-          ))}
-        </div>
+            ) : null}
+          </div>
+        </>
       )}
     </div>
   )

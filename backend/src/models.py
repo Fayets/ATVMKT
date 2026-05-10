@@ -125,6 +125,19 @@ class MasterList(db.Entity):
     composite_key(user_id, category)
 
 
+class OfferedProgram(db.Entity):
+    """Programas ofrecibles en leads (nombre + precio USD para facturación)."""
+
+    _table_ = "offered_program"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    name = Required(str)
+    price_usd = Required(float, default=0)
+    sort_order = Required(int, default=0)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
 class Lead(db.Entity):
     id = PrimaryKey(int, auto=True)
     user_id = Required(int, index=True)
@@ -173,7 +186,7 @@ class TeamMember(db.Entity):
     id = PrimaryKey(int, auto=True)
     user_id = Required(int, index=True)
     nombre = Required(str)
-    rol = Required(str)  # 'setter' o 'closer'
+    rol = Required(str)  # 'setter' | 'closer' | 'cash'
     activo = Required(bool, default=True)
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
@@ -217,4 +230,18 @@ class CloserReport(db.Entity):
     dolores_llamada = Optional(str, default="")
     razon_compra_final = Optional(str, default="")
     insights_marketing_llamada = Optional(str, default="")
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class SeguimientoReport(db.Entity):
+    """Cobranzas / seguimiento declaradas por setter, closer o cash; suman a cash collected del mes."""
+
+    _table_ = "seguimiento_report"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    member_id = Required(int)
+    fecha = Required(date)
+    nombre_lead = Required(str)
+    monto = Required(float, default=0)
     created_at = Required(datetime, default=lambda: datetime.utcnow())

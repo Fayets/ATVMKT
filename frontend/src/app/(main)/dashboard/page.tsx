@@ -775,6 +775,7 @@ export default function DashboardPage() {
     const url = String(l.content_url || '').toLowerCase()
     if (url.includes('/reel/') || url.includes('instagram.com/reel')) return 'Reels'
     const chEarly = String(l.entry_channel || '').toLowerCase()
+    if (chEarly.startsWith('youtube:')) return 'YouTube'
     if (chEarly.includes('reel') || chEarly.includes('reels')) return 'Reels'
     if (chEarly.includes('historia') || chEarly.includes('story')) return 'Historias'
     if (chEarly.includes('perfil') || chEarly.includes('bio')) return 'Perfil'
@@ -784,12 +785,16 @@ export default function DashboardPage() {
     const origin = String(l.origin || '').toLowerCase()
     const kwField = String(l.keyword || '').toLowerCase()
     // Check agenda_point first (last touchpoint before booking)
+    if (ap.startsWith('youtube:')) return 'YouTube'
+    if (ap.startsWith('story:')) return 'Historias'
     if (ap.startsWith('historia')) return 'Historias'
     if (ap.startsWith('reel')) return 'Reels'
     if (textLooksLikeBioTraffic(ap)) return 'Perfil'
     if (ap === 'perfil') return 'Perfil'
     if (ap === 'referido' || ap.startsWith('referido')) return 'Referidos'
     // Fallback to entry_funnel
+    if (ef.startsWith('youtube:')) return 'YouTube'
+    if (ef.startsWith('story:')) return 'Historias'
     if (ef.startsWith('historia')) return 'Historias'
     if (ef.startsWith('reel')) return 'Reels'
     if (textLooksLikeBioTraffic(ef)) return 'Perfil'
@@ -800,7 +805,7 @@ export default function DashboardPage() {
     if (origin === 'referido') return 'Referidos'
     if (textLooksLikeBioTraffic(origin)) return 'Perfil'
     const ch = String(l.entry_channel || '').toLowerCase()
-    if (ch === 'youtube') return 'YouTube'
+    if (ch === 'youtube' || ch.startsWith('youtube:')) return 'YouTube'
     if (ch === 'referido') return 'Referidos'
     return 'Otros'
   }
@@ -851,7 +856,7 @@ export default function DashboardPage() {
     weightBioChats,
   )
 
-  /** Misma base que las barras “Conversaciones” (setter / equipo) y que la tabla CHATS & CPC. */
+  /** Misma base que las barras “Conversaciones” (setter / equipo) y que la tabla chats / cash por chat. */
   const viewTotalChats = viewSetterConversacionesSum
 
   const viewReelsCash = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.cash, 0)
@@ -908,7 +913,7 @@ export default function DashboardPage() {
       viewLeads.filter(l => dashboardChatBucket(l) === bucket).reduce((s, l) => s + (Number(l.payment) || 0), 0),
     )
 
-  // CPC per channel — mismo bucket que CHATS; fallback a atribución fina / piezas
+  // Cash por chat por canal — mismo bucket que CHATS; fallback a atribución fina / piezas
   const viewBioCashReal =
     asFiniteNumber(cashByChatBucket('Perfil') || viewPerfilCash) + asFiniteNumber(viewBioCash)
   const reelCashForCpc = cashByChatBucket('Reels') || viewReelsCashFromLeads || viewReelsCash
@@ -1241,13 +1246,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Row 2: Unified Chats + CPC Panel */}
+      {/* Row 2: Unified Chats + cash por chat panel */}
       <div className="glass-card p-6 mb-4">
         {/* Top: Hero metrics */}
         <div className="flex items-start justify-between mb-5">
           <div>
             <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Conversaciones {viewLabel}</div>
-            <div className="text-[12px] font-semibold text-[var(--text)] mb-1">CHATS & CPC</div>
+            <div className="text-[12px] font-semibold text-[var(--text)] mb-1">CHATS Y CASH POR CHAT</div>
           </div>
           <div className="flex items-center gap-8">
             <div className="text-right">
@@ -1260,7 +1265,7 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="text-right">
-              <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">CPC promedio</div>
+              <div className="text-[10px] text-[var(--text3)] uppercase tracking-wider">Cash por chat promedio</div>
               <div className="font-mono-num text-4xl font-bold text-[var(--green)]">{formatCash(cpcTotal)}</div>
             </div>
           </div>
@@ -1283,7 +1288,7 @@ export default function DashboardPage() {
               <div className="text-right">Chats</div>
               <div className="text-right">%</div>
               <div className="text-right">Cash</div>
-              <div className="text-right">CPC</div>
+              <div className="text-right">Cash por chat</div>
             </div>
             <div className="space-y-2.5">
               {[

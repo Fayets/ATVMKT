@@ -6,7 +6,7 @@ import { ThemeToggle } from '@/shared/components/theme-toggle'
 const titles: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/reels': 'Reels',
-  '/keywords': 'Keyword',
+  '/keywords': 'Lead por reel',
   '/historias': 'Historias',
   '/youtube': 'YouTube',
   '/leads': 'Leads',
@@ -17,6 +17,7 @@ const titles: Record<string, string> = {
   '/diferidos': 'Diferidos',
   '/objetivos': 'Objetivos',
   '/listas': 'Listas Maestras',
+  '/programas': 'Programas',
   '/conexiones': 'Conexiones API',
 }
 
@@ -28,6 +29,7 @@ const subtitles: Record<string, string> = {
   '/referidos': 'Canal directo',
   '/diferidos': 'Atribucion cruzada',
   '/listas': 'Configuracion',
+  '/programas': 'Configuracion',
   '/conexiones': 'Configuracion',
 }
 
@@ -40,7 +42,10 @@ export function Topbar() {
     '/youtube',
     '/bio',
     '/listas',
+    '/programas',
     '/conexiones',
+    '/team/reportes',
+    '/team/historial-reportes',
   ].includes(pathname)
   const title = titles[pathname] || 'Dashboard'
   const subtitle = subtitles[pathname]

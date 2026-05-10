@@ -18,6 +18,7 @@ from src.controllers.bio_controller import router as bio_router
 from src.controllers.conexiones_controller import router as conexiones_router
 # from src.controllers.health_controller import router as health_router
 from src.controllers.master_lists_controller import router as master_lists_router
+from src.controllers.programs_controller import router as programs_router
 from src.controllers.keywords_controller import router as keywords_router
 from src.controllers.leads_controller import router as leads_router
 from src.controllers.reels_controller import router as reels_router
@@ -121,6 +122,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(conexiones_router)
 app.include_router(master_lists_router)
+app.include_router(programs_router)
 app.include_router(leads_router)
 app.include_router(keywords_router)
 app.include_router(reels_router)

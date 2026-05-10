@@ -371,10 +371,21 @@ export function DailyReportSection({ role }: Props) {
     }
   }
 
-  if (!ready || loading) return <div className="text-[13px] text-[var(--text3)]">Cargando…</div>
+  if (!ready || loading) {
+    return (
+      <div className="flex min-h-[100px] flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border)] bg-[var(--bg3)] px-4 py-8 text-[13px] text-[var(--text3)]">
+        <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" aria-hidden />
+        <span className="mt-3">Cargando equipo…</span>
+      </div>
+    )
+  }
 
   if (!userId) {
-    return <div className="text-[13px] text-[var(--text3)]">Iniciá sesión para cargar reportes.</div>
+    return (
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--bg3)] px-4 py-8 text-center text-[13px] text-[var(--text3)]">
+        Iniciá sesión para cargar reportes.
+      </div>
+    )
   }
 
   const closerBtnLabel = (kind: CloserKind) => {
@@ -397,7 +408,7 @@ export function DailyReportSection({ role }: Props) {
           <button
             type="button"
             onClick={() => setShowForm(!showForm)}
-            className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white transition-all hover:brightness-110"
+            className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             {showForm
               ? 'Cerrar'
@@ -417,7 +428,7 @@ export function DailyReportSection({ role }: Props) {
             <button
               type="button"
               onClick={() => handleCloserOpen('ventas')}
-              className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white transition-all hover:brightness-110"
+              className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             >
               {closerBtnLabel('ventas')}
             </button>
@@ -429,7 +440,7 @@ export function DailyReportSection({ role }: Props) {
             <button
               type="button"
               onClick={() => handleCloserOpen('marketing')}
-              className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white transition-all hover:brightness-110"
+              className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             >
               {closerBtnLabel('marketing')}
             </button>
@@ -680,7 +691,7 @@ export function DailyReportSection({ role }: Props) {
             type="button"
             onClick={() => void handleSave()}
             disabled={saving}
-            className="rounded-lg bg-[var(--accent)] px-6 py-2.5 text-[11px] font-semibold uppercase text-white transition-all hover:brightness-110 disabled:opacity-50"
+            className="rounded-xl bg-[var(--accent)] px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 disabled:opacity-50 disabled:shadow-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             {saving ? 'Guardando...' : 'Guardar reporte'}
           </button>

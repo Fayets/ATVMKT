@@ -9,13 +9,14 @@ from pony.orm import db_session
 from pydantic import BaseModel, Field
 from starlette.responses import Response
 
-from src.models import CloserReport, SetterReport, TeamMember
+from src.models import CloserReport, SeguimientoReport, SetterReport, TeamMember
 from src.team_reports_pdf import build_team_reports_pdf, fecha_iso_a_dd_mm_yyyy
 
 router = APIRouter(prefix="/api/team", tags=["team"], redirect_slashes=False)
 
 DEFAULT_COMMISSION_PCT = 5.0
-VALID_ROLES = frozenset({"setter", "closer"})
+VALID_ROLES = frozenset({"setter", "closer", "cash"})
+SEGUIMIENTO_MEMBER_ROLES = frozenset({"setter", "closer", "cash"})
 CLOSER_REPORTE_TIPOS = frozenset({"ventas", "marketing"})
 CLOSER_ESTADOS_FINAL = frozenset(
     {"Re-agendado", "Cerrado", "No cerrado", "Señado", "Descalificado"}
@@ -65,6 +66,16 @@ def _get_active_member(uid: int, member_id: int, rol: str) -> TeamMember:
     raise HTTPException(
         status_code=404,
         detail="Miembro no encontrado, inactivo o el rol no coincide con el reporte.",
+    )
+
+
+def _get_member_for_seguimiento(uid: int, member_id: int) -> TeamMember:
+    for m in _members_for_user(uid):
+        if m.id == member_id and m.activo and m.rol in SEGUIMIENTO_MEMBER_ROLES:
+            return m
+    raise HTTPException(
+        status_code=404,
+        detail="Miembro no encontrado, inactivo o rol no válido para seguimiento (setter, closer o cash).",
     )
 
 
@@ -140,11 +151,25 @@ def _collect_team_reports(uid: int, desde: date, hasta: date) -> list[dict[str, 
                     "insights_marketing_llamada": getattr(r, "insights_marketing_llamada", None) or "",
                 }
             )
+        for r in list(SeguimientoReport.select()):
+            if r.user_id != uid or not (desde <= r.fecha <= hasta):
+                continue
+            rows.append(
+                {
+                    "kind": "seguimiento",
+                    "id": r.id,
+                    "fecha": r.fecha.isoformat(),
+                    "member_id": r.member_id,
+                    "member_nombre": _mn(members, r.member_id),
+                    "nombre_lead": (r.nombre_lead or "").strip(),
+                    "monto": float(r.monto),
+                }
+            )
     rows.sort(key=lambda x: (x["fecha"], x["id"]), reverse=True)
     return rows
 
 
-TEAM_REPORT_FILTROS = frozenset({"todos", "setter", "closer_marketing", "closer_ventas"})
+TEAM_REPORT_FILTROS = frozenset({"todos", "setter", "closer_marketing", "closer_ventas", "seguimiento"})
 
 
 def _parse_team_report_filtro(raw: str | None) -> str:
@@ -152,7 +177,7 @@ def _parse_team_report_filtro(raw: str | None) -> str:
     if v not in TEAM_REPORT_FILTROS:
         raise HTTPException(
             status_code=400,
-            detail="filtro debe ser todos, setter, closer_marketing o closer_ventas.",
+            detail="filtro debe ser todos, setter, closer_marketing, closer_ventas o seguimiento.",
         )
     return v
 
@@ -174,6 +199,8 @@ def _filter_team_reports(rows: list[dict[str, Any]], filtro: str) -> list[dict[s
             for r in rows
             if r.get("kind") == "closer" and str(r.get("reporte_tipo") or "ventas") != "marketing"
         ]
+    if filtro == "seguimiento":
+        return [r for r in rows if r.get("kind") == "seguimiento"]
     return rows
 
 
@@ -224,6 +251,13 @@ class CloserReportBody(BaseModel):
     dolores_llamada: str | None = None
     razon_compra_final: str | None = None
     insights_marketing_llamada: str | None = None
+
+
+class SeguimientoReportBody(BaseModel):
+    member_id: int
+    fecha: date
+    nombre_lead: str = Field(min_length=1, max_length=500)
+    monto: float = Field(ge=0)
 
 
 class ReportSavedOut(BaseModel):
@@ -292,7 +326,16 @@ def list_members(
             for m in pool
             if m.rol == "closer"
         ]
-        return {"setters": [s.model_dump() for s in setters], "closers": [c.model_dump() for c in closers]}
+        cash_members = [
+            TeamMemberOut(id=m.id, nombre=m.nombre, rol=m.rol, activo=m.activo)
+            for m in pool
+            if m.rol == "cash"
+        ]
+        return {
+            "setters": [s.model_dump() for s in setters],
+            "closers": [c.model_dump() for c in closers],
+            "cash": [x.model_dump() for x in cash_members],
+        }
 
 
 @router.post("/members")
@@ -300,7 +343,10 @@ def create_member(body: CreateTeamMemberBody, user_id: str = Depends(require_use
     uid = _parse_uid(user_id)
     rol = body.rol.strip().lower()
     if rol not in VALID_ROLES:
-        raise HTTPException(status_code=400, detail="rol debe ser 'setter' o 'closer'.")
+        raise HTTPException(
+            status_code=400,
+            detail="rol debe ser 'setter', 'closer' o 'cash'.",
+        )
     nombre = body.nombre.strip()
     if not nombre:
         raise HTTPException(status_code=400, detail="nombre es obligatorio.")
@@ -312,7 +358,7 @@ def create_member(body: CreateTeamMemberBody, user_id: str = Depends(require_use
 
 @router.delete("/members/{member_id}")
 def delete_member(member_id: int, user_id: str = Depends(require_user_id)) -> dict[str, str]:
-    """Elimina el miembro y todos sus reportes (setter y closer) del mismo usuario."""
+    """Elimina el miembro y todos sus reportes (setter, closer y seguimiento) del mismo usuario."""
     uid = _parse_uid(user_id)
     with db_session:
         found: TeamMember | None = None
@@ -326,6 +372,9 @@ def delete_member(member_id: int, user_id: str = Depends(require_user_id)) -> di
             if r.user_id == uid and r.member_id == member_id:
                 r.delete()
         for r in list(CloserReport.select()):
+            if r.user_id == uid and r.member_id == member_id:
+                r.delete()
+        for r in list(SeguimientoReport.select()):
             if r.user_id == uid and r.member_id == member_id:
                 r.delete()
         found.delete()
@@ -376,7 +425,7 @@ def team_reports_pdf(
     hasta: date = Query(...),
     filtro: str = Query(
         "todos",
-        description="todos | setter | closer_marketing | closer_ventas",
+        description="todos | setter | closer_marketing | closer_ventas | seguimiento",
     ),
     user_id: str = Depends(require_user_id),
 ) -> Response:
@@ -539,6 +588,46 @@ def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_us
         )
         r.flush()
         return ReportSavedOut(id=r.id, updated=False)
+
+
+@router.post("/seguimiento-reports")
+def save_seguimiento_report(
+    body: SeguimientoReportBody,
+    user_id: str = Depends(require_user_id),
+) -> ReportSavedOut:
+    uid = _parse_uid(user_id)
+    nl = body.nombre_lead.strip()
+    if not nl:
+        raise HTTPException(status_code=400, detail="Indicá el nombre del lead.")
+    with db_session:
+        _get_member_for_seguimiento(uid, body.member_id)
+        r = SeguimientoReport(
+            user_id=uid,
+            member_id=body.member_id,
+            fecha=body.fecha,
+            nombre_lead=nl,
+            monto=float(body.monto),
+        )
+        r.flush()
+        return ReportSavedOut(id=r.id, updated=False)
+
+
+@router.get("/seguimiento-reports/month")
+def seguimiento_reports_month(
+    month: str = Query(..., description="YYYY-MM"),
+    user_id: str = Depends(require_user_id),
+) -> dict[str, Any]:
+    """Totales y filas del mes para sumar a cash collected en el dashboard de ventas."""
+    uid = _parse_uid(user_id)
+    start, end = _month_range(month)
+    with db_session:
+        entries = [
+            {"fecha": r.fecha.isoformat(), "monto": float(r.monto)}
+            for r in list(SeguimientoReport.select())
+            if r.user_id == uid and start <= r.fecha <= end
+        ]
+    total = sum(e["monto"] for e in entries)
+    return {"total": total, "entries": entries}
 
 
 class CloserMarketingCountOut(BaseModel):

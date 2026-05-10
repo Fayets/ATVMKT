@@ -406,7 +406,7 @@ export function ReelsMetricsPanel() {
     [filteredRows]
   )
 
-  /** Reels sin CTA: solo métricas de Instagram (sin cash, chats, CPC ni tortas de negocio). */
+  /** Reels sin CTA: solo métricas de Instagram (sin cash, chats, cash por chat ni tortas de negocio). */
   const showBusinessMetrics = selectedCtaScope !== 'sin_cta'
 
   const filterSelectClass =
@@ -761,11 +761,11 @@ export function ReelsMetricsPanel() {
               </div>
             </div>
             <div className="glass-card p-5">
-              <div className="mb-3 text-[12px] font-semibold">Top CPC</div>
+              <div className="mb-3 text-[12px] font-semibold">Top cash por chat</div>
               <div className="flex w-full max-w-sm flex-col mx-auto">
                 {pieCpcSource.length === 0 ? (
                   <div className="flex h-48 items-center justify-center text-[12px] text-[var(--text3)]">
-                    Sin CPC (necesitá chats y cash)
+                    Sin cash por chat (necesitá chats y cash)
                   </div>
                 ) : (
                   <>
@@ -863,7 +863,7 @@ export function ReelsMetricsPanel() {
                     </div>
                   </div>
                   <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-                    <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">CPC</div>
+                    <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash por chat</div>
                     <div className="font-mono-num mt-1 text-[18px] font-bold text-[var(--text)]">
                       {formatCash(selectedReel.cpc)}
                     </div>

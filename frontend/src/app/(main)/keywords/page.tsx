@@ -121,7 +121,7 @@ export default function KeywordsPage() {
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">Keyword</h2>
+        <h2 className="text-lg font-semibold tracking-tight">Lead por reel</h2>
         <div className="flex flex-wrap items-center gap-3">
           <span className="rounded-full bg-[var(--bg4)] px-3 py-1 text-[11px] text-[var(--text3)]">
             {visible.length} de {total} filas (página {page} de {totalPages})

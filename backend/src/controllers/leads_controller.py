@@ -7,18 +7,23 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
-from src.models import Lead as LeadEntity, ReelContent, StorySequence
+from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent
 from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse, LeadsMetricsOut
+from src.services.programs_services import (
+    build_program_norm_price_map,
+    program_price_usd_for_prog_raw,
+)
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
 
 _AR = ZoneInfo("America/Argentina/Buenos_Aires")
 
 _STORY_AGENDA_PREFIX = "story:"
+_YOUTUBE_AGENDA_PREFIX = "youtube:"
 
 
-def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
-    """Normaliza `punto_agenda`: reel (id interno o instagram_id), historia (`story:<id>`), `bio`, u otro texto."""
+def _normalize_channel_anchor_value(user_id_int: int, raw: str | None) -> str:
+    """Valor canónico para `punto_agenda` o `via`: bio, reel id, story:<id>, youtube:<id>, texto libre."""
     s = (str(raw) if raw is not None else "").strip()
     if not s:
         return ""
@@ -44,6 +49,22 @@ def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
         if int(seq.user_id) != user_id_int:
             raise HTTPException(status_code=400, detail="Secuencia de historia no encontrada.")
         return f"{_STORY_AGENDA_PREFIX}{sid}"
+    if low.startswith(_YOUTUBE_AGENDA_PREFIX):
+        rest = s[len(_YOUTUBE_AGENDA_PREFIX) :].strip()
+        try:
+            yid = int(rest)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Referencia de YouTube inválida (usar youtube:<id>).",
+            ) from None
+        try:
+            yrow = YoutubeContent.get(id=yid)
+        except ObjectNotFound as e:
+            raise HTTPException(status_code=400, detail="Video de YouTube no encontrado.") from e
+        if int(yrow.user_id) != user_id_int:
+            raise HTTPException(status_code=400, detail="Video de YouTube no encontrado.")
+        return f"{_YOUTUBE_AGENDA_PREFIX}{yid}"
     try:
         rid = int(s)
     except ValueError:
@@ -67,6 +88,16 @@ def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
     except ObjectNotFound:
         pass
     return s
+
+
+def _normalize_punto_agenda_value(user_id_int: int, raw: str | None) -> str:
+    """Normaliza `punto_agenda`: reel, historia, youtube, bio, u otro texto."""
+    return _normalize_channel_anchor_value(user_id_int, raw)
+
+
+def _normalize_via_value(user_id_int: int, raw: str | None) -> str:
+    """Normaliza `via` / entry_channel con los mismos tokens que punto_agenda (sin sumar métricas por campo)."""
+    return _normalize_channel_anchor_value(user_id_int, raw)
 
 
 def _lead_effective_dt(row: LeadEntity) -> datetime | None:
@@ -172,7 +203,7 @@ def _parse_dt_in(val: str | None) -> datetime | None:
         return None
 
 
-def _to_lead_out(row: LeadEntity) -> LeadOut:
+def _to_lead_out(row: LeadEntity, norm_prices: dict[str, float] | None = None) -> LeadOut:
     st = (row.status or row.estado or "").strip() or "Pendiente"
     created = row.created_at
     if created is not None and created.tzinfo is not None:
@@ -183,6 +214,7 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
         month_s = f"{created.year}-{created.month:02d}"
     ing = float(row.ingresos_lead or 0)
     kw = row.keyword
+    price_catalog = program_price_usd_for_prog_raw(norm_prices or {}, row.programa_ofrecido)
     return LeadOut(
         id=str(row.id),
         lead_user_id=str(row.user_id),
@@ -207,6 +239,7 @@ def _to_lead_out(row: LeadEntity) -> LeadOut:
         call_link=row.link_llamada,
         closer_report=None,
         program_offered=row.programa_ofrecido,
+        program_price_usd=price_catalog,
         revenue=ing,
         payment=float(row.pago or 0),
         owed=float(row.debe or 0),
@@ -253,6 +286,7 @@ def list_leads(
             raise HTTPException(status_code=400, detail="Parámetro month inválido (usar YYYY-MM).")
 
     with db_session:
+        norm_prices = build_program_norm_price_map(uid)
         rows = [
             r
             for r in list(LeadEntity.select())
@@ -267,7 +301,7 @@ def list_leads(
             ]
 
         rows.sort(key=_lead_sort_ts, reverse=True)
-        out = [_to_lead_out(r) for r in rows]
+        out = [_to_lead_out(r, norm_prices) for r in rows]
 
     return LeadsListResponse(leads=out)
 
@@ -368,9 +402,9 @@ def patch_lead(
         elif "origin" in data:
             row.origen = (data["origin"] or "") or ""
         if "via" in data:
-            row.via = (data["via"] or "") or ""
+            row.via = _normalize_via_value(uid, data.get("via"))
         elif "entry_channel" in data:
-            row.via = data["entry_channel"] or ""
+            row.via = _normalize_via_value(uid, data.get("entry_channel"))
         if "entry_funnel" in data:
             row.keyword = data["entry_funnel"] or ""
         if "keyword" in data:
@@ -427,7 +461,8 @@ def patch_lead(
 
         _sync_dias_para_agendar(row)
 
-        return _to_lead_out(row)
+        norm_prices = build_program_norm_price_map(uid)
+        return _to_lead_out(row, norm_prices)
 
 
 @router.delete("/{lead_id}")

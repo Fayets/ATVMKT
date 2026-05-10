@@ -20,15 +20,15 @@ type NavGroup = {
 
 const navigation: NavGroup[] = [
   {
-    title: 'Dashboard marketing',
-    icon: '◆',
-    href: '/dashboard',
-    items: [],
-  },
-  {
     title: 'Dashboard ventas',
     icon: '◆',
     href: '/sales-dashboard',
+    items: [],
+  },
+  {
+    title: 'Dashboard marketing',
+    icon: '◆',
+    href: '/dashboard',
     items: [],
   },
 ]
@@ -41,7 +41,7 @@ const dataGroups: NavGroup[] = [
       { label: 'Historias', href: '/historias' },
       { label: 'YouTube', href: '/youtube' },
       { label: 'BIO', href: '/bio' },
-      { label: 'Keyword', href: '/keywords', children: [{ label: 'Métricas', href: '/metrica-keywords' }] },
+      { label: 'Lead por reel', href: '/keywords', children: [{ label: 'Métricas', href: '/metrica-keywords' }] },
     ],
   },
   {
@@ -67,6 +67,7 @@ const settingsGroup: NavGroup = {
   defaultOpen: true,
   items: [
     { label: 'Listas maestras', href: '/listas' },
+    { label: 'Programas', href: '/programas' },
     { label: 'Conexiones API', href: '/conexiones' },
   ],
 }

@@ -12,7 +12,7 @@
 **Costo actual:**
 - Horas semanales cruzando datos entre Instagram Insights, hojas de calculo y CRM
 - Decisiones de contenido basadas en vanity metrics (likes) en vez de cash
-- No hay forma de saber el CPC (Cash Per Chat) por canal ni por pieza
+- No hay forma de saber el cash por chat por canal ni por pieza
 - El equipo de ventas (setters/closers) no tiene metricas claras de rendimiento
 - Atribucion de ventas rota: no se sabe si la venta vino de un reel, historia o referido
 
@@ -24,7 +24,7 @@
 
 **Flujo principal (Happy Path):**
 
-1. **El creador se loguea** → ve el Dashboard con KPIs del mes (cash total, chats, piezas, CPC)
+1. **El creador se loguea** → ve el Dashboard con KPIs del mes (cash total, chats, piezas, cash por chat)
 2. **Importa contenido automaticamente** → Metricool (reels + historias IG), YouTube API, Apify (scraping con transcripcion)
 3. **Trackea ventas en el spreadsheet de leads** → leads con status, closer, programa, ingresos, pagos
 4. **La IA clasifica el contenido** → Claude analiza transcripciones y asigna dolor, angulo, CTA
@@ -85,8 +85,8 @@
 ### Output (lo que sale del sistema):
 
 **Dashboards:**
-- Dashboard de Contenido: KPIs (cash total, chats total, piezas, CPC), breakdown por canal (reels/historias/BIO), sparklines, comparacion vs mes anterior
-- Cash Metrics: ranking de piezas por cash generado, top por canal, CPC por pieza
+- Dashboard de Contenido: KPIs (cash total, chats total, piezas, cash por chat), breakdown por canal (reels/historias/BIO), sparklines, comparacion vs mes anterior
+- Cash Metrics: ranking de piezas por cash generado, top por canal, cash por chat por pieza
 - Dashboard de Ventas: funnel completo (chats → agendas → shows → cierres), tasas de conversion, AOV, ticket promedio, cash/agenda, programas ofrecidos vs comprados
 - Setter Metrics: metricas del setter (leads contactados, agendas logradas, tasas)
 - Closer Metrics: metricas del closer (calls tomadas, cierres, close rate, cash)
@@ -94,9 +94,9 @@
 
 **Panel de Objetivos:**
 - Progreso vs meta de cash mensual
-- Chats necesarios calculados desde CPC actual
+- Chats necesarios calculados desde el cash por chat actual
 - Views necesarias calculadas desde ratio views/chat
-- Escenarios: volumen (mas contenido), conservador (subir CPC un poco), agresivo (subir CPC mucho)
+- Escenarios: volumen (mas contenido), conservador (subir el cash por chat un poco), agresivo (subir el cash por chat mucho)
 - Diagnostico de cuellos de botella en el funnel
 
 **Exportaciones:**
@@ -258,7 +258,7 @@ account_metrics
 **Metrica principal:** Visibilidad completa del negocio — saber exactamente cuanto cash genera cada pieza de contenido, cada canal y cada miembro del equipo, con metricas en tiempo real.
 
 **KPIs especificos:**
-- CPC (Cash Per Chat) por canal: Reels, Historias, BIO
+- Cash por chat por canal: Reels, Historias, BIO
 - Funnel completo: Chats → Agendas → Shows → Cierres (con tasas de conversion)
 - Cash total del mes vs objetivo
 - Rendimiento del equipo: comisiones, close rate por closer

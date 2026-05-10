@@ -43,7 +43,7 @@ export function KpiGrid({ data }: KpiGridProps) {
           trend={trendCalc(data.piezas, data.prevMonth.piezas)}
         />
         <KpiCard
-          label="CPC (Cash/Chat)"
+          label="Cash por chat"
           value={fmt(data.cpc)}
           trend={trendCalc(data.cpc, data.prevMonth.cpc)}
         />

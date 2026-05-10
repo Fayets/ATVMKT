@@ -11,7 +11,8 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
-from src.models import ApiConnection, YoutubeContent
+from src.db import db
+from src.models import ApiConnection, Lead, YoutubeContent
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"], redirect_slashes=False)
 
@@ -139,7 +140,19 @@ def _stat_int(stats: dict, key: str) -> int:
         return 0
 
 
-def _row_to_video(row: YoutubeContent) -> dict:
+def _count_agendas_for_youtube_video(user_id: int, video_db_id: int) -> int:
+    """Leads con punto_agenda = youtube:<id de fila YoutubeContent>."""
+    tid = f"youtube:{video_db_id}"
+    tbl = Lead._table_ or "lead"
+    sql = f"""COUNT(*) FROM {tbl} l
+WHERE l.user_id = $user_id
+AND trim(both from coalesce(l.punto_agenda, '')) = $tid"""
+    with db_session:
+        rows = db.select(sql, globals(), {"user_id": user_id, "tid": tid})
+    return int(rows[0]) if rows else 0
+
+
+def _row_to_video(row: YoutubeContent, *, user_id: int, skip_agg: bool = False) -> dict:
     ph = row.performance_history if isinstance(row.performance_history, list) else []
     cls = dict(row.classification) if isinstance(row.classification, dict) else {}
     raw_desc = (row.description or "").strip()
@@ -147,6 +160,9 @@ def _row_to_video(row: YoutubeContent) -> dict:
         cls["description"] = raw_desc
     pub = row.published_at
     published_iso = pub.isoformat() if pub is not None else None
+    agendas_n = (
+        0 if skip_agg else _count_agendas_for_youtube_video(user_id, int(row.id))
+    )
     return {
         "id": str(row.id),
         "title": row.title,
@@ -168,6 +184,7 @@ def _row_to_video(row: YoutubeContent) -> dict:
         "url": row.url,
         "notes": (row.notes or "").strip() or None,
         "external_id": row.external_id,
+        "agendas": agendas_n,
     }
 
 
@@ -365,6 +382,10 @@ def list_youtube_videos(
     ),
     page: int = Query(default=1, ge=1, description="Página (1-based)."),
     page_size: int = Query(default=12, ge=1, le=50, description="Videos por página."),
+    skip_agg: bool = Query(
+        default=False,
+        description="Si true, no cuenta agendas por video (listados rápidos / pickers).",
+    ),
 ) -> dict[str, Any]:
     uid = _uid_int(user_id)
     filter_set: set[tuple[int, int]] | None = None
@@ -403,14 +424,16 @@ def list_youtube_videos(
     filtered_rows.sort(key=_row_pub_sort, reverse=True)
 
     aggregates = _aggregate_from_rows(filtered_rows)
-    out_full = [_row_to_video(r) for r in filtered_rows]
-    total_count = len(out_full)
+    total_count = len(filtered_rows)
     total_pages = (total_count + page_size - 1) // page_size if total_count else 0
     page_eff = page
     if total_pages > 0 and page_eff > total_pages:
         page_eff = total_pages
     start = (page_eff - 1) * page_size
-    page_videos = out_full[start : start + page_size]
+    page_rows = filtered_rows[start : start + page_size]
+    page_videos = [
+        _row_to_video(r, user_id=uid, skip_agg=skip_agg) for r in page_rows
+    ]
 
     return {
         "scope": scope,

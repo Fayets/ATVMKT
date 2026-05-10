@@ -56,7 +56,7 @@ def build_team_reports_pdf(reports: list[dict]) -> bytes:
     pdf = _TeamReportsPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 14)
-    pdf.cell(0, 8, _pdf_line("Reportes de equipo (setter y closer)"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, _pdf_line("Reportes de equipo (setter, closer y seguimiento)"), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 8)
     pdf.cell(0, 5, _pdf_line(f"Total de registros: {len(reports)}"), new_x="LMARGIN", new_y="NEXT")
@@ -82,6 +82,9 @@ def build_team_reports_pdf(reports: list[dict]) -> bytes:
             _emit(pdf, "Sentimiento trafico", row.get("sentimiento_trafico"))
             _emit(pdf, "Avatar / agendas", row.get("avatar_tipo_agendas"))
             _emit(pdf, "Insights marketing", row.get("insights_marketing"))
+        elif kind == "seguimiento":
+            _emit(pdf, "Nombre lead", row.get("nombre_lead"))
+            _emit(pdf, "Monto", row.get("monto"))
         elif kind == "closer":
             _emit(pdf, "Tipo reporte", row.get("reporte_tipo"))
             # Closer marketing no usa métricas de ventas (quedan en 0); no las listamos en el PDF.

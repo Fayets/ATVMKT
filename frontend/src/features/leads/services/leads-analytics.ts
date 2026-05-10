@@ -32,10 +32,18 @@ export type WeekMetrics = {
   noShows: number[]
 }
 
+export type CashCollectedComposition = {
+  /** Suma columna Pagó en leads del mes. */
+  pago: number
+  /** Formularios de seguimiento del mes. */
+  seguimiento: number
+}
+
 export type LeadsAnalytics = LeadsFunnel & {
   programas: { nombre: string; ventas: number; ingresos: number }[]
   byWeek: WeekMetrics
   byWeekDay: { [K in keyof WeekMetrics]: number[][] } // [4 weeks][7 days]
+  cashCollectedComposition: CashCollectedComposition
 }
 
 export type MemberMetrics = LeadsFunnel & {
@@ -86,6 +94,41 @@ export function distribute(total: number, n: number): number[] {
 // FULL ANALYTICS (for sales-dashboard)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/** Igual que status: ignorar mayúsculas y acentos al cruzar programa del lead con el catálogo. */
+function normProgramLookupKey(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .trim()
+    .toLowerCase()
+}
+
+function resolveProgramPrice(programPrices: Record<string, number>, progRaw: unknown): number | null {
+  const raw = String(progRaw ?? '').trim()
+  if (!raw) return null
+  if (Object.prototype.hasOwnProperty.call(programPrices, raw)) {
+    const v = programPrices[raw]
+    return v !== undefined ? v : null
+  }
+  const nk = normProgramLookupKey(raw)
+  for (const [k, v] of Object.entries(programPrices)) {
+    if (normProgramLookupKey(k) === nk) return v
+  }
+  return null
+}
+
+/** ISO `YYYY-MM-DD` para bucket semanal/diario de cash (columna Pagó). */
+function leadMetricDateIso(l: LeadRow): string | null {
+  const candidates = [l.date, l.scheduled_at, l.call_at, l.agendo]
+  for (const c of candidates) {
+    const s = String(c ?? '').trim()
+    if (!s) continue
+    const head = s.slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(head)) return head
+  }
+  return null
+}
+
 function monthRangeIso(month: string): { desde: string; hasta: string } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(month.trim())
   if (!m) return null
@@ -102,21 +145,58 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const leads: LeadRow[] = []
   const setterReports: Record<string, unknown>[] = []
   const closerReports: Record<string, unknown>[] = []
+  let programPrices: Record<string, number> = {}
 
   const range = monthRangeIso(month)
+  let seguimientoEntries: { fecha: string; monto: number }[] = []
+  let seguimientoTotal = 0
   try {
     const leadsReq = apiFetch(`/leads?month=${encodeURIComponent(month)}`)
+    const programsReq = apiFetch('/programs')
+    const segReq =
+      range != null
+        ? apiFetch(`/team/seguimiento-reports/month?month=${encodeURIComponent(month)}`)
+        : Promise.resolve(new Response('', { status: 400 }))
     const reportsReq =
       range != null
         ? apiFetch(
             `/team/reports?desde=${encodeURIComponent(range.desde)}&hasta=${encodeURIComponent(range.hasta)}`,
           )
         : Promise.resolve(new Response('', { status: 400 }))
-    const [leadsRes, repRes] = await Promise.all([leadsReq, reportsReq])
+    const [leadsRes, repRes, progRes, segRes] = await Promise.all([leadsReq, reportsReq, programsReq, segReq])
     if (leadsRes.ok) {
       const j = (await leadsRes.json().catch(() => ({}))) as { leads?: LeadRow[] }
       if (Array.isArray(j.leads)) leads.push(...j.leads)
     }
+    if (progRes.ok) {
+      const pj = (await progRes.json().catch(() => ({}))) as {
+        programs?: { name?: string; price_usd?: number }[]
+      }
+      const next: Record<string, number> = {}
+      for (const p of pj.programs || []) {
+        const n = String(p?.name ?? '').trim()
+        if (n) next[n] = Number(p?.price_usd) || 0
+      }
+      programPrices = next
+    }
+
+    if (segRes.ok) {
+      const sj = (await segRes.json().catch(() => ({}))) as {
+        total?: unknown
+        entries?: unknown
+      }
+      seguimientoTotal = Number(sj.total) || 0
+      if (Array.isArray(sj.entries)) {
+        seguimientoEntries = sj.entries
+          .map((x) => x as Record<string, unknown>)
+          .map((x) => ({
+            fecha: String(x.fecha ?? '').slice(0, 10),
+            monto: Number(x.monto) || 0,
+          }))
+          .filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x.fecha))
+      }
+    }
+
     if (repRes.ok && range != null) {
       const j = (await repRes.json().catch(() => ({}))) as { reports?: unknown[] }
       if (Array.isArray(j.reports)) {
@@ -158,13 +238,57 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const agendas = sumField(setterReports, 'agendas')
   const shows = sumField(closerReports, 'shows')
   const cierres = sumField(closerReports, 'cierres')
-  const ingresos = sumField(closerReports, 'ingreso')
+  /** Ingreso declarado en reportes closer (solo fallback facturación si no hay programa en leads). */
+  const ingresosReports = sumField(closerReports, 'ingreso')
+  const cashFromLeadsPayments = leads.reduce((s, l) => s + (Number(l.payment) || 0), 0)
+  /** Cash collected = suma columna Pagó (`payment`) en leads del mes + montos de formularios de seguimiento. */
+  const cashCollected = cashFromLeadsPayments + seguimientoTotal
   const noShows = Math.max(0, agendas - shows)
-  const revenueLeads = leads.reduce(
-    (s, l) => s + (Number(l.revenue) || Number(l.payment) || 0),
-    0,
-  )
-  const facturacion = revenueLeads > 0 ? revenueLeads : ingresos
+
+  const catalogDefined = Object.keys(programPrices).length > 0
+  const leadsWithProgramOfferedCount = leads.filter(
+    (l) => String(l.program_offered ?? '').trim() !== '',
+  ).length
+
+  /**
+   * Facturación por programa: cada fila con «Prog. ofrecido» suma el precio del catálogo
+   * (`program_price_usd` en API o /programs), sin exigir status Cerrado.
+   * Filas sin programa: en modo legacy (sin catálogo en cliente) suman revenue/payment.
+   */
+  const leadFacturacionUsd = (l: LeadRow): number => {
+    const prog = String(l.program_offered ?? '').trim()
+    const apiPriceRaw = l.program_price_usd
+    const hasApiPrice = apiPriceRaw != null && Number.isFinite(Number(apiPriceRaw))
+
+    if (!prog) {
+      if (!catalogDefined && !hasApiPrice) {
+        return Number(l.revenue) || Number(l.payment) || 0
+      }
+      return 0
+    }
+
+    if (hasApiPrice) return Number(apiPriceRaw)
+    const priced = resolveProgramPrice(programPrices, l.program_offered)
+    if (priced != null) return priced
+    return Number(l.revenue) || 0
+  }
+
+  const revenueLeads = leads.reduce((s, l) => s + leadFacturacionUsd(l), 0)
+  const facturacion = revenueLeads > 0 ? revenueLeads : ingresosReports
+
+  const billingUsesPrograms =
+    catalogDefined ||
+    leads.some(
+      (x) =>
+        String(x.program_offered ?? '').trim() !== '' &&
+        x.program_price_usd != null &&
+        Number.isFinite(Number(x.program_price_usd)),
+    )
+
+  const avgTicketFromBilling =
+    (catalogDefined || billingUsesPrograms) && leadsWithProgramOfferedCount > 0
+      ? facturacion / leadsWithProgramOfferedCount
+      : null
 
   const funnel: LeadsFunnel = {
     conversaciones,
@@ -172,24 +296,37 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     shows,
     noShows,
     cierres,
-    ingresos,
+    ingresos: cashCollected,
     facturacion,
-    ticketPromedio: cierres > 0 ? ingresos / cierres : 0,
+    ticketPromedio:
+      avgTicketFromBilling != null
+        ? avgTicketFromBilling
+        : cierres > 0
+          ? cashCollected / cierres
+          : 0,
     closeRate: shows > 0 ? (cierres / shows) * 100 : 0,
     showUpRate: agendas > 0 ? (shows / agendas) * 100 : 0,
     tasaAgendamiento: conversaciones > 0 ? (agendas / conversaciones) * 100 : 0,
-    cashPorAgenda: agendas > 0 ? ingresos / agendas : 0,
-    cashPorShow: shows > 0 ? ingresos / shows : 0,
-    aov: cierres > 0 ? facturacion / cierres : 0,
+    cashPorAgenda: agendas > 0 ? cashCollected / agendas : 0,
+    cashPorShow: shows > 0 ? cashCollected / shows : 0,
+    aov:
+      avgTicketFromBilling != null
+        ? avgTicketFromBilling
+        : cierres > 0
+          ? facturacion / cierres
+          : 0,
   }
 
-  // Programs breakdown (from leads table)
+  // Programs breakdown (from leads table; ingresos = facturación USD del programa cuando hay catálogo)
   const progMap: Record<string, { ventas: number; ingresos: number }> = {}
   leads.forEach(l => {
-    const p = l.program_offered as string
-    if (p) {
-      progMap[p] = progMap[p] || { ventas: 0, ingresos: 0 }
-      progMap[p].ventas++
+    const p = String(l.program_offered ?? '').trim()
+    if (!p) return
+    progMap[p] = progMap[p] || { ventas: 0, ingresos: 0 }
+    progMap[p].ventas++
+    if (catalogDefined) {
+      progMap[p].ingresos += leadFacturacionUsd(l)
+    } else {
       progMap[p].ingresos += Number(l.payment) || 0
     }
   })
@@ -218,13 +355,39 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     const ag = Number(r.agendas) || 0
     const sh = Number(r.shows) || 0
     const ci = Number(r.cierres) || 0
-    const ing = Number(r.ingreso) || 0
 
     byWeek.conversaciones[w] += conv; byWeekDay.conversaciones[w][dow] += conv
     byWeek.agendas[w] += ag;         byWeekDay.agendas[w][dow] += ag
     byWeek.shows[w] += sh;           byWeekDay.shows[w][dow] += sh
     byWeek.cierres[w] += ci;         byWeekDay.cierres[w][dow] += ci
-    byWeek.ingresos[w] += ing;       byWeekDay.ingresos[w][dow] += ing
+  })
+
+  // Cash semanal/diario: columna Pagó por lead (misma ventana mensual que GET /leads)
+  leads.forEach((l) => {
+    const pay = Number(l.payment) || 0
+    if (pay <= 0) return
+    const iso = leadMetricDateIso(l)
+    if (!iso) return
+    const date = new Date(`${iso}T12:00:00`)
+    if (Number.isNaN(date.getTime())) return
+    const dayOfMonth = date.getDate()
+    const w = Math.min(3, Math.floor((dayOfMonth - 1) / 7))
+    const dow = (date.getDay() + 6) % 7
+    byWeek.ingresos[w] += pay
+    byWeekDay.ingresos[w][dow] += pay
+  })
+
+  seguimientoEntries.forEach((e) => {
+    const monto = Number(e.monto) || 0
+    if (monto <= 0) return
+    const iso = e.fecha.slice(0, 10)
+    const date = new Date(`${iso}T12:00:00`)
+    if (Number.isNaN(date.getTime())) return
+    const dayOfMonth = date.getDate()
+    const w = Math.min(3, Math.floor((dayOfMonth - 1) / 7))
+    const dow = (date.getDay() + 6) % 7
+    byWeek.ingresos[w] += monto
+    byWeekDay.ingresos[w][dow] += monto
   })
 
   // Compute noShows per week and per day
@@ -238,7 +401,16 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   return {
     leads,
     conversaciones,
-    analytics: { ...funnel, programas, byWeek, byWeekDay },
+    analytics: {
+      ...funnel,
+      programas,
+      byWeek,
+      byWeekDay,
+      cashCollectedComposition: {
+        pago: cashFromLeadsPayments,
+        seguimiento: seguimientoTotal,
+      },
+    },
   }
 }
 

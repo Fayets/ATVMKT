@@ -294,7 +294,7 @@ AND EXISTS (
         reel: ReelResponse,
         refresh: bool = False,
     ) -> ReelResponse:
-        """Ajusta chats/CPC; `cash` ya es suma de pagos por agenda (no se mezcla con manual_cash)."""
+        """Ajusta chats y cash por chat; `cash` ya es suma de pagos por agenda (no se mezcla con manual_cash)."""
         _ = refresh
         manual_chats = int(reel.manual_chats if reel.manual_chats is not None else 0)
         leads_chats = self._chats_leads_for_response(user_id, reel)

@@ -21,9 +21,12 @@ function errMessage(data: unknown): string {
   return 'Error en la solicitud'
 }
 
-function mergeMembers(setters: Member[], closers: Member[]): Member[] {
-  return [...setters, ...closers].sort((a, b) => {
-    if (a.rol !== b.rol) return a.rol === 'setter' ? -1 : 1
+function mergeMembers(setters: Member[], closers: Member[], cashMembers: Member[]): Member[] {
+  const order: Record<string, number> = { setter: 0, closer: 1, cash: 2 }
+  return [...setters, ...closers, ...cashMembers].sort((a, b) => {
+    const oa = order[a.rol] ?? 9
+    const ob = order[b.rol] ?? 9
+    if (oa !== ob) return oa - ob
     return a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })
   })
 }
@@ -37,7 +40,7 @@ export default function TeamEquipoEditPage() {
   const [savingId, setSavingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  const [addRole, setAddRole] = useState<'setter' | 'closer'>('setter')
+  const [addRole, setAddRole] = useState<'setter' | 'closer' | 'cash'>('setter')
   const [confirmDeleteMember, setConfirmDeleteMember] = useState<Member | null>(null)
   const [deleteSubmitting, setDeleteSubmitting] = useState(false)
 
@@ -55,8 +58,8 @@ export default function TeamEquipoEditPage() {
         setMembers([])
         return
       }
-      const data = (await res.json()) as { setters?: Member[]; closers?: Member[] }
-      const list = mergeMembers(data.setters ?? [], data.closers ?? [])
+      const data = (await res.json()) as { setters?: Member[]; closers?: Member[]; cash?: Member[] }
+      const list = mergeMembers(data.setters ?? [], data.closers ?? [], data.cash ?? [])
       setMembers(list)
       const d: Record<number, { nombre: string }> = {}
       for (const m of list) {
@@ -175,11 +178,23 @@ export default function TeamEquipoEditPage() {
           >
             + Closer
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setAddRole('cash')
+              setShowAdd(true)
+            }}
+            className="rounded-lg border border-[var(--border2)] bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text2)] hover:border-[var(--green)] hover:text-[var(--green)]"
+          >
+            + Cash
+          </button>
         </div>
       </div>
 
       {members.length === 0 ? (
-        <p className="text-[13px] text-[var(--text3)]">No hay miembros. Usá + Setter o + Closer para agregar.</p>
+        <p className="text-[13px] text-[var(--text3)]">
+          No hay miembros. Usá + Setter, + Closer o + Cash para agregar.
+        </p>
       ) : (
         <div className="glass-card glass-card--performant overflow-x-auto p-5">
           <table className="w-full min-w-[480px] border-collapse text-left text-[13px]">
@@ -195,6 +210,7 @@ export default function TeamEquipoEditPage() {
                 const d = draft[m.id] ?? { nombre: m.nombre }
                 const dirty = d.nombre !== m.nombre
                 const isSetter = m.rol === 'setter'
+                const isCash = m.rol === 'cash'
                 const busy = savingId === m.id || deletingId === m.id || confirmDeleteMember?.id === m.id
                 return (
                   <tr key={m.id} className="border-b border-[var(--border2)] last:border-0">
@@ -202,11 +218,15 @@ export default function TeamEquipoEditPage() {
                       <span
                         className="inline-block rounded px-1.5 py-0.5 text-[9px] font-bold uppercase"
                         style={{
-                          backgroundColor: isSetter ? 'rgba(212,168,67,0.15)' : 'rgba(230,57,70,0.12)',
-                          color: isSetter ? '#d4a843' : 'var(--accent)',
+                          backgroundColor: isCash
+                            ? 'rgba(34,197,94,0.12)'
+                            : isSetter
+                              ? 'rgba(212,168,67,0.15)'
+                              : 'rgba(230,57,70,0.12)',
+                          color: isCash ? 'var(--green)' : isSetter ? '#d4a843' : 'var(--accent)',
                         }}
                       >
-                        {isSetter ? 'Setter' : 'Closer'}
+                        {isCash ? 'Cash' : isSetter ? 'Setter' : 'Closer'}
                       </span>
                     </td>
                     <td className="py-3 pr-4 align-middle">
@@ -251,8 +271,12 @@ export default function TeamEquipoEditPage() {
         </div>
       )}
 
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={`Agregar ${addRole}`} maxWidth="400px">
-        <AddMemberForm role={addRole} onAdd={handleAdd} onCancel={() => setShowAdd(false)} />
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={`Agregar ${addRole === 'cash' ? 'Cash' : addRole === 'setter' ? 'Setter' : 'Closer'}`} maxWidth="400px">
+        <AddMemberForm
+          role={addRole === 'cash' ? 'Cash' : addRole === 'setter' ? 'Setter' : 'Closer'}
+          onAdd={handleAdd}
+          onCancel={() => setShowAdd(false)}
+        />
       </Modal>
 
       <Modal
@@ -269,7 +293,11 @@ export default function TeamEquipoEditPage() {
             <p className="mb-3 text-[13px] leading-snug text-[var(--text)]">
               ¿Seguro que querés eliminar a{' '}
               <span className="font-semibold">{confirmDeleteMember.nombre}</span> (
-              {confirmDeleteMember.rol === 'setter' ? 'setter' : 'closer'})?
+              {confirmDeleteMember.rol === 'setter'
+                ? 'setter'
+                : confirmDeleteMember.rol === 'cash'
+                  ? 'cash'
+                  : 'closer'})?
             </p>
             <div className="flex justify-end gap-2">
               <button

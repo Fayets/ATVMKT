@@ -42,6 +42,28 @@ class MasterListsResponse(BaseModel):
     ctas: list[str] = Field(default_factory=list)
 
 
+class OfferedProgramOut(BaseModel):
+    id: int
+    name: str
+    price_usd: float
+    sort_order: int
+
+
+class OfferedProgramsListResponse(BaseModel):
+    programs: list[OfferedProgramOut] = Field(default_factory=list)
+
+
+class OfferedProgramCreateRequest(BaseModel):
+    name: str = ""
+    price_usd: float = 0
+
+
+class OfferedProgramPatchRequest(BaseModel):
+    name: str | None = None
+    price_usd: float | None = None
+    sort_order: int | None = None
+
+
 class ApiConnectionResponse(BaseModel):
     id: str
     user_id: str
@@ -74,7 +96,7 @@ class ReelResponse(BaseModel):
     manual_cash: float | None = None
     manual_chats: int | None = None
     cash_total: float = 0
-    cpc: float = 0
+    cpc: float = Field(0, description="Cash por chat (cash ÷ chats).")
     agendas: int = 0
 
 
@@ -393,6 +415,10 @@ class LeadOut(BaseModel):
     call_link: str | None = None
     closer_report: str | None = None
     program_offered: str | None = None
+    program_price_usd: float | None = Field(
+        default=None,
+        description="Precio USD del catálogo (OfferedProgram) si coincide `programa_ofrecido` en BD.",
+    )
     revenue: float = 0
     payment: float = 0
     owed: float = 0

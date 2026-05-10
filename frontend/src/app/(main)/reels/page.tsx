@@ -1076,7 +1076,7 @@ function ReelCard({
       {!isExpanded && (
         <div className="p-3">
           <div className="text-[12px] font-medium truncate">{title}</div>
-          <div className="text-[11px] text-[var(--text3)] mt-0.5">{reel.chats} chats · CPC {formatCash(cpc)}</div>
+          <div className="text-[11px] text-[var(--text3)] mt-0.5">{reel.chats} chats · cash por chat {formatCash(cpc)}</div>
           {dolor && (
             <div className="mt-2 flex flex-wrap gap-1">
               <span className="rounded-md border border-red-500/20 bg-red-500/15 px-1.5 py-0.5 text-[9px] font-medium text-red-400">{dolor}</span>
@@ -1194,7 +1194,7 @@ function ReelCard({
               </button>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">CPC</div>
+              <div className="text-[8px] uppercase tracking-wider text-[var(--text3)]">Cash por chat</div>
               <div className="font-mono-num text-[16px] font-bold">{formatCash(cpc)}</div>
             </div>
             <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">

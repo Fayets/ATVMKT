@@ -19,10 +19,13 @@ import {
   canonicalLeadStatus,
   ORIGIN_OPTIONS,
   AGENDO_EN_OPTIONS,
+  PROGRAM_COLORS,
 } from '../types'
 
 type AgendaReelLookup = { title: string; publishedAt: string | null }
 type AgendaSequenceLookup = { title: string; sequenceDate: string | null }
+
+type AgendaYoutubeLookup = { title: string; publishedAt: string | null }
 
 /** Fecha para badge Pto agenda (ISO reel o YYYY-MM-DD de historia). */
 function formatAgendaPointDate(raw: string | null | undefined): string {
@@ -41,11 +44,22 @@ const LEGACY_AGENDA_SNIPPET_LEN = 42
 
 function formatAgendaPointBadgeText(
   raw: string | null | undefined,
-  lookups: { reels: Record<string, AgendaReelLookup>; sequences: Record<string, AgendaSequenceLookup> },
+  lookups: {
+    reels: Record<string, AgendaReelLookup>
+    sequences: Record<string, AgendaSequenceLookup>
+    youtube?: Record<string, AgendaYoutubeLookup>
+  },
 ): string {
   const k = String(raw || '').trim()
   if (!k) return ''
   if (k.toLowerCase() === 'bio') return '[BIO]'
+  const yt = /^youtube:(\d+)$/i.exec(k)
+  if (yt) {
+    const id = yt[1]
+    const ent = lookups.youtube?.[`youtube:${id}`] ?? lookups.youtube?.[id]
+    if (ent) return `[YT] · ${formatAgendaPointDate(ent.publishedAt)}`
+    return `[YT] · —`
+  }
   const reel = lookups.reels[k]
   if (reel) return `[REEL] · ${formatAgendaPointDate(reel.publishedAt)}`
 
@@ -68,22 +82,6 @@ function formatAgendaPointBadgeText(
   return k
 }
 
-/** Solo '' + valores agregados con + en el header (sin lista fija). Vía. */
-function mergeCustomLeadsDropdownOptions(custom: string[]): string[] {
-  const nonEmpty = [
-    ...new Set(custom.map((c) => String(c || '').trim()).filter(Boolean)),
-  ].sort((a, b) => a.localeCompare(b, 'es'))
-  return ['', ...nonEmpty]
-}
-
-/** Incluye el valor guardado del lead si no está en la lista (datos legacy / API). */
-function entryChannelSelectOptions(lead: Lead, parentOpts: string[]): string[] {
-  const v = String(lead.entry_channel || '').trim()
-  if (!v || parentOpts.includes(v)) return parentOpts
-  const rest = parentOpts.filter((x) => x !== '')
-  return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
-}
-
 /** Setter/closer: incluye el nombre guardado aunque ya no esté en el equipo activo. */
 function teamRoleSelectOptions(
   lead: Lead,
@@ -91,6 +89,15 @@ function teamRoleSelectOptions(
   parentOpts: string[],
 ): string[] {
   const v = String(lead[field] || '').trim()
+  if (!v || parentOpts.includes(v)) return parentOpts
+  const rest = parentOpts.filter((x) => x !== '')
+  return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
+}
+
+const PROGRAM_COLOR_PALETTE = ['#22C55E', '#3B82F6', '#F59E0B', '#A855F7', '#EC4899', '#06B6D4', '#EAB308', '#64748B']
+
+function programOfferedSelectOptions(lead: Lead, parentOpts: string[]): string[] {
+  const v = String(lead.program_offered || '').trim()
   if (!v || parentOpts.includes(v)) return parentOpts
   const rest = parentOpts.filter((x) => x !== '')
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
@@ -181,9 +188,25 @@ export function LeadsPage() {
 
   const [setterNames, setSetterNames] = useState<string[]>([])
   const [closerNames, setCloserNames] = useState<string[]>([])
+  const [offeredPrograms, setOfferedPrograms] = useState<{ id: number; name: string; price_usd: number }[]>([])
 
-  // Dynamic columns based on team members
-  const COLUMNS = useMemo(() => buildColumns(setterNames, closerNames), [setterNames, closerNames])
+  const programColumnMeta = useMemo(() => {
+    const names = offeredPrograms
+      .map((p) => String(p.name ?? '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'es'))
+    const colors: Record<string, string> = { ...PROGRAM_COLORS }
+    names.forEach((n, i) => {
+      if (!colors[n]) colors[n] = PROGRAM_COLOR_PALETTE[i % PROGRAM_COLOR_PALETTE.length]
+    })
+    return { options: ['', ...names] as string[], colors }
+  }, [offeredPrograms])
+
+  // Dynamic columns based on team members + programas (Ajustes)
+  const COLUMNS = useMemo(
+    () => buildColumns(setterNames, closerNames, programColumnMeta),
+    [setterNames, closerNames, programColumnMeta],
+  )
 
   // UI state
   const [statusTab, setStatusTab] = useState('Todos')
@@ -211,19 +234,17 @@ export function LeadsPage() {
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[] | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
 
-  /** Opciones de Vía agregadas manualmente (+ en header); persisten solo en memoria de la sesión. */
-  const [customViaOptions, setCustomViaOptions] = useState<string[]>([])
-  const [viaAddOpen, setViaAddOpen] = useState(false)
-  const [viaDraft, setViaDraft] = useState('')
-
   const [agendaLookups, setAgendaLookups] = useState<{
     reels: Record<string, AgendaReelLookup>
     sequences: Record<string, AgendaSequenceLookup>
+    youtube: Record<string, AgendaYoutubeLookup>
   }>({
     reels: {},
     sequences: {},
+    youtube: {},
   })
   const [agendaModalLead, setAgendaModalLead] = useState<Lead | null>(null)
+  const [funnelModalLead, setFunnelModalLead] = useState<Lead | null>(null)
 
   // ── Data fetching ──
   const fetchTeamMembers = useCallback(async () => {
@@ -256,6 +277,26 @@ export function LeadsPage() {
     } catch {
       setSetterNames([])
       setCloserNames([])
+    }
+  }, [ready, userId])
+
+  const fetchPrograms = useCallback(async () => {
+    if (!ready || !userId) {
+      setOfferedPrograms([])
+      return
+    }
+    try {
+      const res = await apiFetch('/programs')
+      const data = (await res.json().catch(() => ({}))) as {
+        programs?: { id: number; name: string; price_usd: number }[]
+      }
+      if (!res.ok) {
+        setOfferedPrograms([])
+        return
+      }
+      setOfferedPrograms(Array.isArray(data.programs) ? data.programs : [])
+    } catch {
+      setOfferedPrograms([])
     }
   }, [ready, userId])
 
@@ -294,6 +335,7 @@ export function LeadsPage() {
     if (!ready || !userId) return
     const reels: Record<string, AgendaReelLookup> = {}
     const sequences: Record<string, AgendaSequenceLookup> = {}
+    const youtube: Record<string, AgendaYoutubeLookup> = {}
     try {
       let page = 1
       for (;;) {
@@ -332,7 +374,29 @@ export function LeadsPage() {
           sequences[`story:${s.id}`] = meta
         }
       }
-      setAgendaLookups({ reels, sequences })
+      let yp = 1
+      for (;;) {
+        const yr = await apiFetch(`/youtube/videos?page=${yp}&page_size=50&skip_agg=1`)
+        const yd = (await yr.json().catch(() => ({}))) as {
+          videos?: { id: string; title: string | null; published_at?: string | null }[]
+          total_pages?: number
+        }
+        if (!yr.ok) break
+        for (const v of yd.videos || []) {
+          const id = String(v.id)
+          const meta = {
+            title: (v.title && v.title.trim()) || `YouTube ${id}`,
+            publishedAt: v.published_at ?? null,
+          }
+          youtube[id] = meta
+          youtube[`youtube:${id}`] = meta
+        }
+        const ytp = Math.max(1, yd.total_pages ?? 1)
+        if (yp >= ytp) break
+        yp += 1
+        if (yp > 40) break
+      }
+      setAgendaLookups({ reels, sequences, youtube })
     } catch {
       /* noop */
     }
@@ -342,7 +406,18 @@ export function LeadsPage() {
     void loadAgendaLookups()
   }, [loadAgendaLookups])
 
-  useEffect(() => { fetchTeamMembers() }, [fetchTeamMembers])
+  useEffect(() => {
+    void fetchTeamMembers()
+    void fetchPrograms()
+  }, [fetchTeamMembers, fetchPrograms])
+
+  useEffect(() => {
+    const refresh = () => {
+      void fetchPrograms()
+    }
+    window.addEventListener('offered-programs-updated', refresh)
+    return () => window.removeEventListener('offered-programs-updated', refresh)
+  }, [fetchPrograms])
   useEffect(() => { fetchLeads() }, [fetchLeads])
   useEffect(() => { setSelectedRows(new Set()) }, [month, statusTab])
 
@@ -551,30 +626,12 @@ export function LeadsPage() {
     [COLUMNS, visibleColumns],
   )
 
-  const tableColumns = useMemo(() => {
-    const viaOpts = mergeCustomLeadsDropdownOptions(customViaOptions)
-    return activeColumns.map((c) => {
-      if (c.key === 'entry_channel') return { ...c, options: viaOpts }
-      return c
-    })
-  }, [activeColumns, customViaOptions])
+  const tableColumns = activeColumns
 
   const resolveAgendaBadgeLabel = useCallback(
     (raw: string | null | undefined) => formatAgendaPointBadgeText(raw, agendaLookups),
     [agendaLookups],
   )
-
-  const confirmNewViaOption = useCallback(() => {
-    const t = viaDraft.trim()
-    if (!t) {
-      setViaAddOpen(false)
-      setViaDraft('')
-      return
-    }
-    setCustomViaOptions((prev) => (prev.includes(t) ? prev : [...prev, t]))
-    setViaAddOpen(false)
-    setViaDraft('')
-  }, [viaDraft])
 
   if (!ready) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -708,13 +765,15 @@ export function LeadsPage() {
                 totalLeads={filtered.length}
                 onPreviewText={(title, text) => setTextPreview({ title, text })}
                 readOnly={readOnlyGrid}
-                viaAddOpen={viaAddOpen}
-                setViaAddOpen={setViaAddOpen}
-                viaDraft={viaDraft}
-                setViaDraft={setViaDraft}
-                onConfirmNewViaOption={confirmNewViaOption}
                 resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
-                onOpenAgendaPicker={(lead) => setAgendaModalLead(lead)}
+                onOpenAgendaPicker={(lead) => {
+                  setFunnelModalLead(null)
+                  setAgendaModalLead(lead)
+                }}
+                onOpenFunnelPicker={(lead) => {
+                  setAgendaModalLead(null)
+                  setFunnelModalLead(lead)
+                }}
               />
             </div>
           ))}
@@ -733,25 +792,41 @@ export function LeadsPage() {
             totalLeads={filtered.length}
             onPreviewText={(title, text) => setTextPreview({ title, text })}
             readOnly={readOnlyGrid}
-            viaAddOpen={viaAddOpen}
-            setViaAddOpen={setViaAddOpen}
-            viaDraft={viaDraft}
-            setViaDraft={setViaDraft}
-            onConfirmNewViaOption={confirmNewViaOption}
             resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
-            onOpenAgendaPicker={(lead) => setAgendaModalLead(lead)}
+            onOpenAgendaPicker={(lead) => {
+              setFunnelModalLead(null)
+              setAgendaModalLead(lead)
+            }}
+            onOpenFunnelPicker={(lead) => {
+              setAgendaModalLead(null)
+              setFunnelModalLead(lead)
+            }}
           />
         </div>
       )}
 
       <AgendaPointPickerModal
-        open={!!agendaModalLead}
-        onClose={() => setAgendaModalLead(null)}
-        hasAssignedPuntoAgenda={Boolean(agendaModalLead?.agenda_point?.trim())}
+        open={Boolean(agendaModalLead || funnelModalLead)}
+        modalTitle={funnelModalLead ? '1er ingreso embudo' : 'Punto de agenda'}
+        onClose={() => {
+          setAgendaModalLead(null)
+          setFunnelModalLead(null)
+        }}
+        hasAssignedPuntoAgenda={
+          funnelModalLead
+            ? Boolean(funnelModalLead.entry_channel?.trim())
+            : Boolean(agendaModalLead?.agenda_point?.trim())
+        }
         onSavePuntoAgenda={async (value) => {
-          const lead = agendaModalLead
-          if (!lead) return
-          await handleInlineUpdate(lead.id, 'agenda_point', value)
+          const funnel = funnelModalLead
+          const agenda = agendaModalLead
+          if (funnel) {
+            await handleInlineUpdate(funnel.id, 'entry_channel', value)
+            return
+          }
+          if (agenda) {
+            await handleInlineUpdate(agenda.id, 'agenda_point', value)
+          }
         }}
         onCacheReel={(id, meta) =>
           setAgendaLookups((prev) => ({
@@ -763,6 +838,16 @@ export function LeadsPage() {
           setAgendaLookups((prev) => ({
             ...prev,
             sequences: { ...prev.sequences, [id]: meta },
+          }))
+        }
+        onCacheYoutube={(id, meta) =>
+          setAgendaLookups((prev) => ({
+            ...prev,
+            youtube: {
+              ...prev.youtube,
+              [id]: meta,
+              [`youtube:${id}`]: meta,
+            },
           }))
         }
       />
@@ -874,13 +959,9 @@ function LeadsTable({
   totalLeads,
   onPreviewText,
   readOnly,
-  viaAddOpen,
-  setViaAddOpen,
-  viaDraft,
-  setViaDraft,
-  onConfirmNewViaOption,
   resolveAgendaBadgeLabel,
   onOpenAgendaPicker,
+  onOpenFunnelPicker,
 }: {
   leads: Lead[]
   columns: ColumnDef[]
@@ -899,19 +980,11 @@ function LeadsTable({
   totalLeads: number
   onPreviewText: (title: string, text: string) => void
   readOnly?: boolean
-  viaAddOpen: boolean
-  setViaAddOpen: (v: boolean) => void
-  viaDraft: string
-  setViaDraft: (v: string) => void
-  onConfirmNewViaOption: () => void
   resolveAgendaBadgeLabel: (raw: string | null | undefined) => string
   onOpenAgendaPicker: (lead: Lead) => void
+  onOpenFunnelPicker: (lead: Lead) => void
 }) {
   const stickyName = columns.some((c) => c.key === 'client_name' && c.sticky)
-  const viaInputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (viaAddOpen) viaInputRef.current?.focus()
-  }, [viaAddOpen])
 
   return (
     <table
@@ -946,10 +1019,7 @@ function LeadsTable({
           {/* Columns */}
           {columns.map(col => (
             <th key={col.key}
-              onClick={(e) => {
-                if ((e.target as HTMLElement).closest('[data-leads-header-addon]')) return
-                onToggleSort(col.key)
-              }}
+              onClick={() => onToggleSort(col.key)}
               className={`border-b border-[var(--border2)] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] hover:text-[var(--text2)] cursor-pointer select-none whitespace-nowrap transition-colors ${
                 stickyName && col.key === 'client_name'
                   ? 'leads-table__sticky-frozen leads-table__sticky-name'
@@ -960,56 +1030,6 @@ function LeadsTable({
                 <span className="truncate">{col.label}</span>
                 {sort.field === col.key && (
                   <span className="text-[var(--accent)] text-[9px] shrink-0">{sort.dir === 'asc' ? '↑' : '↓'}</span>
-                )}
-                {col.key === 'entry_channel' && !readOnly && (
-                  <span data-leads-header-addon className="inline-flex items-center gap-0.5 shrink-0 ml-0.5">
-                    {!viaAddOpen ? (
-                      <button
-                        type="button"
-                        title="Nueva opción de vía"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setViaAddOpen(true)
-                        }}
-                        className="flex h-5 min-w-[1.25rem] items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] font-semibold text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-                      >
-                        +
-                      </button>
-                    ) : (
-                      <>
-                        <input
-                          ref={viaInputRef}
-                          type="text"
-                          value={viaDraft}
-                          onChange={(e) => setViaDraft(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault()
-                              onConfirmNewViaOption()
-                            }
-                            if (e.key === 'Escape') {
-                              setViaAddOpen(false)
-                              setViaDraft('')
-                            }
-                          }}
-                          placeholder="Nueva vía"
-                          className="h-5 w-[7.5rem] rounded border border-[var(--accent)] bg-[var(--bg3)] px-1.5 text-[10px] font-normal normal-case tracking-normal text-[var(--text)] placeholder:text-[var(--text3)] outline-none"
-                        />
-                        <button
-                          type="button"
-                          title="Confirmar"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onConfirmNewViaOption()
-                          }}
-                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[var(--border2)] bg-[var(--bg2)] text-[11px] text-[var(--green)] hover:border-[var(--green)] transition-colors"
-                        >
-                          ✓
-                        </button>
-                      </>
-                    )}
-                  </span>
                 )}
               </div>
             </th>
@@ -1070,6 +1090,7 @@ function LeadsTable({
                   readOnly={readOnly}
                   resolveAgendaBadgeLabel={resolveAgendaBadgeLabel}
                   onOpenAgendaPicker={onOpenAgendaPicker}
+                  onOpenFunnelPicker={onOpenFunnelPicker}
                 />
               </td>
             ))}
@@ -1121,6 +1142,7 @@ function LeadsTableCell({
   readOnly,
   resolveAgendaBadgeLabel,
   onOpenAgendaPicker,
+  onOpenFunnelPicker,
 }: {
   lead: Lead
   col: ColumnDef
@@ -1132,6 +1154,7 @@ function LeadsTableCell({
   readOnly?: boolean
   resolveAgendaBadgeLabel: (raw: string | null | undefined) => string
   onOpenAgendaPicker: (lead: Lead) => void
+  onOpenFunnelPicker: (lead: Lead) => void
 }) {
   const raw = (lead as Record<string, unknown>)[col.key]
   const value =
@@ -1159,6 +1182,21 @@ function LeadsTableCell({
       return (
         <span
           title={rawAp}
+          className="inline-flex max-w-full items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium"
+          style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}
+        >
+          {label}
+        </span>
+      )
+    }
+    if (col.key === 'entry_channel') {
+      const rawEc = String(lead.entry_channel || '').trim()
+      if (!rawEc) return <span className="text-[12px] text-[var(--text3)]">—</span>
+      const label = resolveAgendaBadgeLabel(lead.entry_channel)
+      const color = '#6B7280'
+      return (
+        <span
+          title={rawEc}
           className="inline-flex max-w-full items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium"
           style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}
         >
@@ -1264,10 +1302,10 @@ function LeadsTableCell({
           ? originSelectOptions(lead)
           : col.key === 'agendo_en'
             ? agendoEnSelectOptions(lead)
-            : col.key === 'entry_channel'
-              ? entryChannelSelectOptions(lead, col.options!)
-              : col.key === 'setter' || col.key === 'closer'
-                ? teamRoleSelectOptions(lead, col.key, col.options!)
+            : col.key === 'setter' || col.key === 'closer'
+              ? teamRoleSelectOptions(lead, col.key, col.options!)
+              : col.key === 'program_offered'
+                ? programOfferedSelectOptions(lead, col.options!)
                 : col.options!
       return (
         <select
@@ -1324,6 +1362,30 @@ function LeadsTableCell({
           }
         }}
         onClick={() => onOpenAgendaPicker(lead)}
+        className="inline-flex max-w-full cursor-pointer items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium hover:opacity-90"
+        style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}
+      >
+        {label || '—'}
+      </span>
+    )
+  }
+
+  if (col.key === 'entry_channel' && !readOnly) {
+    const rawEc = String(lead.entry_channel || '').trim()
+    const label = rawEc ? resolveAgendaBadgeLabel(lead.entry_channel) : ''
+    const color = '#6B7280'
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        title={rawEc || undefined}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onOpenFunnelPicker(lead)
+          }
+        }}
+        onClick={() => onOpenFunnelPicker(lead)}
         className="inline-flex max-w-full cursor-pointer items-center truncate rounded-full px-2.5 py-0.5 text-[11px] font-medium hover:opacity-90"
         style={{ backgroundColor: color + '18', color, border: `1px solid ${color}30` }}
       >

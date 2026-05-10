@@ -30,7 +30,7 @@ Estoy trabajando en el proyecto **Laboratorio de Contenido 3.0** — una platafo
 src/
 ├── app/(auth)/           # Login, Signup (redirige a /dashboard si logueado)
 ├── app/(main)/           # Todas las secciones protegidas (redirige a /login si no logueado)
-│   ├── dashboard/        # KPIs, sparkline cash, donut, chats, CPC, referidos, diferidos, objetivos
+│   ├── dashboard/        # KPIs, sparkline cash, donut, chats, cash por chat, referidos, diferidos, objetivos
 │   ├── reels/            # CRUD reels + extraction IA + form con listas maestras
 │   ├── historias/        # CRUD historias + screenshot analysis + secuencias
 │   ├── youtube/          # CRUD videos + YouTube Analytics OAuth2 + CTR/retention
@@ -154,7 +154,7 @@ git push -u origin feat/mi-tarea
 ## 18 secciones implementadas (funcional)
 
 - Auth completo (login/signup/logout)
-- Dashboard con sparkline, donut, CPC, referidos, diferidos, objetivos sidebar
+- Dashboard con sparkline, donut, cash por chat, referidos, diferidos, objetivos sidebar
 - Cash Metrics con donut, tops dolor/angulo/CTA, ranking piezas
 - Sales Dashboard VD con tabs Mensual/Semanal/Diario, funnel, charts, comparaciones
 - Setter/Closer con tabs, KPIs, charts, rendimiento individual, metas

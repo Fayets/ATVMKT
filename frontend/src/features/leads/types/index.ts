@@ -28,6 +28,8 @@ export type Lead = {
   call_link: string | null
   closer_report: string | null
   program_offered: string | null
+  /** Precio USD del catálogo en BD (GET /leads); mismo criterio que Ajustes → Programas. */
+  program_price_usd?: number | null
   revenue: number
   payment: number
   owed: number
@@ -182,7 +184,14 @@ export const CLOSER_COLORS: Record<string, string> = {
   _default: '#8B5CF6',
 }
 
-export function buildColumns(setterNames: string[], closerNames: string[]): ColumnDef[] {
+/** Opciones de «Prog. ofrecido»: definidas en Ajustes → Programas (fallback: PROGRAM_OPTIONS). */
+export function buildColumns(
+  setterNames: string[],
+  closerNames: string[],
+  programOffered?: { options: string[]; colors: Record<string, string> },
+): ColumnDef[] {
+  const progOpts = programOffered?.options ?? PROGRAM_OPTIONS
+  const progColors = { ...PROGRAM_COLORS, ...(programOffered?.colors ?? {}) }
   return [
     // Datos de contacto
     { key: 'client_name', label: 'Nombre', width: 160, type: 'text', editable: true, sticky: true, defaultVisible: true },
@@ -195,7 +204,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
     // entry_funnel (keyword) no se muestra en esta vista
     { key: 'agenda_point', label: 'Pto agenda', width: 160, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
-    { key: 'entry_channel', label: 'Vía', width: 110, type: 'badge', editable: true, options: [''], colors: {}, defaultVisible: true },
+    { key: 'entry_channel', label: '1er ingreso embudo', width: 180, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
     { key: 'ctas_responded', label: 'CTAs resp.', width: 90, type: 'number', editable: true, defaultVisible: true },
     // Fechas
     { key: 'first_contact_at', label: '1er contacto', width: 120, type: 'date', editable: true, defaultVisible: true },
@@ -215,7 +224,7 @@ export function buildColumns(setterNames: string[], closerNames: string[]): Colu
     { key: 'razon_compra', label: 'Razón compra', width: 200, type: 'text', editable: true, defaultVisible: true },
     { key: 'ingresos_mensuales', label: 'Ingresos lead', width: 130, type: 'currency', editable: true, defaultVisible: true },
     // Venta
-    { key: 'program_offered', label: 'Prog. ofrecido', width: 130, type: 'badge', editable: true, options: PROGRAM_OPTIONS, colors: PROGRAM_COLORS, defaultVisible: true },
+    { key: 'program_offered', label: 'Prog. ofrecido', width: 130, type: 'badge', editable: true, options: progOpts, colors: progColors, defaultVisible: true },
     { key: 'payment', label: 'Pagó', width: 100, type: 'currency', editable: true, defaultVisible: true },
     { key: 'owed', label: 'Debe', width: 100, type: 'currency', editable: true, defaultVisible: true },
     // Calificación Calendly

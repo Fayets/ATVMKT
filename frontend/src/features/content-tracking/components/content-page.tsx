@@ -192,7 +192,7 @@ export function ContentPage({ contentType, platform, title, columns }: ContentPa
           <div className="font-mono-num mt-1 text-xl font-semibold">{totalChats}</div>
         </div>
         <div className="glass-card p-4">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">CPC</div>
+          <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--text3)]">Cash por chat</div>
           <div className="font-mono-num mt-1 text-xl font-semibold">{formatCash(cpc)}</div>
         </div>
         <div className="glass-card p-4">

@@ -18,8 +18,17 @@ type VideoClassification = {
   keyPoints?: string[]; targetAudience?: string; mainHook?: string
 }
 type Video = {
-  id: string; title: string | null; metrics: VideoMetrics; classification: VideoClassification
-  cash: number; chats: number; published_at: string | null; url: string | null; notes: string | null; external_id: string | null
+  id: string
+  title: string | null
+  metrics: VideoMetrics
+  classification: VideoClassification
+  cash: number
+  chats: number
+  agendas?: number
+  published_at: string | null
+  url: string | null
+  notes: string | null
+  external_id: string | null
 }
 type Lead = { client_name: string | null; status: string | null; payment: number | null; program_offered: string | null; agenda_point: string | null }
 
@@ -596,11 +605,14 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }
 }) {
   const cls = v.classification || {}
   const title = v.title || 'Sin titulo'
-  const related = leads.filter(l => l.agenda_point && title.length > 3 && l.agenda_point.toLowerCase().includes(title.toLowerCase().substring(0, 25)))
+  const relatedAgenda = leads.filter(
+    (l) => String(l.agenda_point || '').trim().toLowerCase() === `youtube:${v.id}`.toLowerCase(),
+  )
 
   const visitas = Number(v.metrics?.views) || 0
   const comentarios = Number(v.metrics?.comments) || 0
-  const buyers = related.filter(
+  const agendasMetric = typeof v.agendas === 'number' ? v.agendas : relatedAgenda.length
+  const buyers = relatedAgenda.filter(
     (l) => l.status === 'Cerrado' || (Number(l.payment) || 0) > 0,
   )
 
@@ -628,11 +640,17 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
             <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Visitas</div>
             <div className="font-mono-num text-[15px] font-bold tabular-nums leading-tight text-[var(--text)] sm:text-[17px]">
               {formatIntegerEsAr(visitas)}
+            </div>
+          </div>
+          <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
+            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Agendas</div>
+            <div className="font-mono-num text-[15px] font-bold tabular-nums leading-tight text-[var(--accent)] sm:text-[17px]">
+              {formatIntegerEsAr(agendasMetric)}
             </div>
           </div>
           <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
@@ -694,11 +712,11 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }
               ))}
             </div>
           </div>
-        ) : related.length > 0 ? (
+        ) : relatedAgenda.length > 0 ? (
           <div>
-            <div className="mb-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text3)]">Leads relacionados (misma agenda / título)</div>
+            <div className="mb-2 text-[9px] font-semibold uppercase tracking-wider text-[var(--text3)]">Leads con punto de agenda en este video</div>
             <div className="space-y-1.5">
-              {related.slice(0, 6).map((l, i) => (
+              {relatedAgenda.slice(0, 6).map((l, i) => (
                 <div key={i} className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--bg4)] px-3 py-2 text-[11px]">
                   <span className="truncate text-[var(--text2)]">{l.client_name || 'Sin nombre'}</span>
                   <span className={l.status === 'Cerrado' ? 'font-semibold text-[var(--green)]' : 'text-[var(--text3)]'}>{l.status}</span>
@@ -738,10 +756,14 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }
           <p className="line-clamp-2 text-[12px] font-medium leading-snug text-white">{title}</p>
         </div>
       </div>
-      <div className="grid grid-cols-3 divide-x divide-[var(--border)] border-t border-[var(--border)] bg-[var(--bg3)]">
+      <div className="grid grid-cols-4 divide-x divide-[var(--border)] border-t border-[var(--border)] bg-[var(--bg3)]">
         <div className="px-2 py-3 text-center sm:px-3">
           <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Visitas</div>
           <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--text)] sm:text-lg">{formatIntegerEsAr(visitas)}</div>
+        </div>
+        <div className="px-2 py-3 text-center sm:px-3">
+          <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Agendas</div>
+          <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--accent)] sm:text-lg">{formatIntegerEsAr(agendasMetric)}</div>
         </div>
         <div className="px-2 py-3 text-center sm:px-3">
           <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Comentarios</div>

@@ -13,13 +13,16 @@ function isAllowedImageUrl(url: string): boolean {
     h.endsWith('cdninstagram.com') ||
     h.endsWith('instagram.com') ||
     h.endsWith('fbcdn.net') ||
-    h.endsWith('fbsbx.com')
+    h.endsWith('fbsbx.com') ||
+    h.endsWith('ytimg.com') ||
+    h.endsWith('googleusercontent.com') ||
+    h.endsWith('ggpht.com')
   )
 }
 
 /**
- * Sirve miniaturas de Instagram/Apify evitando bloqueos de hotlink en el navegador.
- * Solo permite hosts de Meta/Instagram para no abrir un proxy SSRF genérico.
+ * Sirve miniaturas (Instagram/Apify/YouTube) evitando bloqueos de hotlink en el navegador.
+ * Solo permite hosts conocidos para no abrir un proxy SSRF genérico.
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
