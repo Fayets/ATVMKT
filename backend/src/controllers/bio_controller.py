@@ -3,6 +3,8 @@
 from datetime import datetime
 from typing import Annotated
 
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
@@ -48,12 +50,36 @@ def _anchor_dt(row: LeadEntity) -> datetime | None:
     return row.fecha_bot or row.created_at
 
 
-def _in_month(row: LeadEntity, y: int, mn: int) -> bool:
+_AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _today_calendar_ar() -> tuple[int, int, int]:
+    d = datetime.now(_AR_TZ).date()
+    return d.year, d.month, d.day
+
+
+def _max_day_mtd(month_key: tuple[int, int] | None) -> int | None:
+    """Si el mes pedido es el mes actual en Argentina, contar solo hasta hoy (MTD). Si no, mes completo."""
+    if month_key is None:
+        return None
+    y, mn = month_key
+    ty, tm, td = _today_calendar_ar()
+    if ty == y and tm == mn:
+        return td
+    return None
+
+
+def _in_month_calendar(row: LeadEntity, y: int, mn: int, max_day: int | None) -> bool:
+    """Lead en el mes calendario (y, mn); si max_day está definido, solo días 1..max_day."""
     ref = _anchor_dt(row)
     if ref is None:
         return False
     dt = ref.replace(tzinfo=None) if ref.tzinfo else ref
-    return dt.year == y and dt.month == mn
+    if dt.year != y or dt.month != mn:
+        return False
+    if max_day is None:
+        return True
+    return 1 <= dt.day <= max_day
 
 
 def _dt_iso(dt: datetime | None) -> str | None:
@@ -115,16 +141,17 @@ def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
 def _rows_for_user_month(uid: int, month_key: tuple[int, int] | None) -> list[LeadEntity]:
     with db_session:
         rows = [r for r in list(LeadEntity.select()) if int(r.user_id) == uid]
+    max_day = _max_day_mtd(month_key)
     if month_key is not None:
         y, mn = month_key
-        rows = [r for r in rows if _in_month(r, y, mn)]
+        rows = [r for r in rows if _in_month_calendar(r, y, mn, max_day)]
     return [r for r in rows if _is_bio_profile_lead(r)]
 
 
 @router.get("/leads", response_model=BioLeadsListResponse)
 def list_bio_leads(
     user_id: Annotated[str, Depends(require_user_id)],
-    month: str | None = Query(default=None, description="YYYY-MM; filtra por fecha_bot o created_at"),
+    month: str | None = Query(default=None, description="YYYY-MM; filtra por fecha_bot o created_at. Mes actual en AR = solo hasta hoy (MTD)."),
 ) -> BioLeadsListResponse:
     try:
         uid = int(user_id)
@@ -149,7 +176,7 @@ def list_bio_leads(
 @router.get("/metrics", response_model=BioMetricsResponse)
 def bio_metrics(
     user_id: Annotated[str, Depends(require_user_id)],
-    month: str | None = Query(default=None, description="YYYY-MM; mismo criterio que /leads"),
+    month: str | None = Query(default=None, description="YYYY-MM; mismo criterio que /leads. Mes actual AR = hasta hoy (MTD)."),
 ) -> BioMetricsResponse:
     try:
         uid = int(user_id)

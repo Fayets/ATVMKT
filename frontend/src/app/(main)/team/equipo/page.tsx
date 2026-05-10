@@ -40,7 +40,7 @@ export default function TeamEquipoEditPage() {
   const [savingId, setSavingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [showAdd, setShowAdd] = useState(false)
-  const [addRole, setAddRole] = useState<'setter' | 'closer' | 'cash'>('setter')
+  const [addRole, setAddRole] = useState<'setter' | 'closer'>('setter')
   const [confirmDeleteMember, setConfirmDeleteMember] = useState<Member | null>(null)
   const [deleteSubmitting, setDeleteSubmitting] = useState(false)
 
@@ -178,22 +178,12 @@ export default function TeamEquipoEditPage() {
           >
             + Closer
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setAddRole('cash')
-              setShowAdd(true)
-            }}
-            className="rounded-lg border border-[var(--border2)] bg-transparent px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text2)] hover:border-[var(--green)] hover:text-[var(--green)]"
-          >
-            + Cash
-          </button>
         </div>
       </div>
 
       {members.length === 0 ? (
         <p className="text-[13px] text-[var(--text3)]">
-          No hay miembros. Usá + Setter, + Closer o + Cash para agregar.
+          No hay miembros. Usá + Setter o + Closer para agregar.
         </p>
       ) : (
         <div className="glass-card glass-card--performant overflow-x-auto p-5">
@@ -271,9 +261,9 @@ export default function TeamEquipoEditPage() {
         </div>
       )}
 
-      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={`Agregar ${addRole === 'cash' ? 'Cash' : addRole === 'setter' ? 'Setter' : 'Closer'}`} maxWidth="400px">
+      <Modal open={showAdd} onClose={() => setShowAdd(false)} title={`Agregar ${addRole === 'setter' ? 'Setter' : 'Closer'}`} maxWidth="400px">
         <AddMemberForm
-          role={addRole === 'cash' ? 'Cash' : addRole === 'setter' ? 'Setter' : 'Closer'}
+          role={addRole === 'setter' ? 'Setter' : 'Closer'}
           onAdd={handleAdd}
           onCancel={() => setShowAdd(false)}
         />
