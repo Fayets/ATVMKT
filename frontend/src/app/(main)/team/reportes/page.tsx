@@ -66,7 +66,7 @@ export default function ReportesPage() {
         <div className="overflow-hidden rounded-3xl border border-[var(--border2)] bg-[var(--bg2)] shadow-[var(--shadow-lg)] ring-1 ring-[rgba(255,255,255,0.03)]">
           <div className="grid divide-[var(--border)] lg:grid-cols-3 lg:divide-x">
             <section className="p-5 sm:p-6 lg:p-7" aria-labelledby="reportes-setter-heading">
-              <div className="mb-5 flex items-start gap-3 sm:gap-4">
+              <div className="mb-5 flex items-center gap-3 sm:gap-4">
                 <div
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[rgba(59,130,246,0.12)] text-[rgba(96,165,250,0.95)] ring-1 ring-[rgba(59,130,246,0.28)]"
                   aria-hidden
@@ -80,16 +80,13 @@ export default function ReportesPage() {
                   >
                     Setter
                   </h2>
-                  <p className="mt-1 text-[13px] leading-snug text-[var(--text3)]">
-                    Conversaciones del día, agendas y links de Calendly enviados.
-                  </p>
                 </div>
               </div>
               <DailyReportSection role="setter" />
             </section>
 
             <section className="p-5 sm:p-6 lg:p-7" aria-labelledby="reportes-closer-heading">
-              <div className="mb-5 flex items-start gap-3 sm:gap-4">
+              <div className="mb-5 flex items-center gap-3 sm:gap-4">
                 <div
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[rgba(139,92,246,0.14)] text-[rgba(192,181,253,0.98)] ring-1 ring-[rgba(139,92,246,0.35)]"
                   aria-hidden
@@ -103,16 +100,13 @@ export default function ReportesPage() {
                   >
                     Closer
                   </h2>
-                  <p className="mt-1 text-[13px] leading-snug text-[var(--text3)]">
-                    Reporte diario de ventas y registro por llamada para marketing.
-                  </p>
                 </div>
               </div>
               <DailyReportSection role="closer" />
             </section>
 
             <section className="p-5 sm:p-6 lg:p-7" aria-labelledby="reportes-seguimiento-heading">
-              <div className="mb-5 flex items-start gap-3 sm:gap-4">
+              <div className="mb-5 flex items-center gap-3 sm:gap-4">
                 <div
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[rgba(16,185,129,0.14)] text-[rgba(52,211,153,0.98)] ring-1 ring-[rgba(16,185,129,0.38)]"
                   aria-hidden
@@ -126,19 +120,11 @@ export default function ReportesPage() {
                   >
                     Seguimiento
                   </h2>
-                  <p className="mt-1 text-[13px] leading-snug text-[var(--text3)]">
-                    Cobranzas y seguimiento; el monto suma al cash collected del mes en ventas.
-                  </p>
                 </div>
               </div>
               <SeguimientoReportSection />
             </section>
           </div>
-
-          <p className="border-t border-[var(--border)] bg-[var(--bg3)] px-4 py-3 text-center text-[11px] leading-snug text-[var(--text3)] sm:px-6">
-            Al guardar, se sincroniza el panel de ventas, el historial de reportes y los montos de seguimiento en el cash
-            del mes.
-          </p>
         </div>
       </div>
     </div>

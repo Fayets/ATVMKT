@@ -404,11 +404,11 @@ export function DailyReportSection({ role }: Props) {
   return (
     <div className="space-y-4">
       {role === 'setter' ? (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="space-y-2">
           <button
             type="button"
             onClick={() => setShowForm(!showForm)}
-            className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+            className="w-full rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
           >
             {showForm
               ? 'Cerrar'
@@ -419,33 +419,33 @@ export function DailyReportSection({ role }: Props) {
                 : '+ Cargar reporte diario'}
           </button>
           {setterSavedForDate && (
-            <span className="text-[11px] font-medium text-[var(--green)]">✓ Reporte de hoy cargado</span>
+            <span className="block text-[11px] font-medium text-[var(--green)]">✓ Reporte de hoy cargado</span>
           )}
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="space-y-2">
             <button
               type="button"
               onClick={() => handleCloserOpen('ventas')}
-              className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              className="w-full rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             >
               {closerBtnLabel('ventas')}
             </button>
             {closerVentasSavedForSelection && form.date === today && form.memberId !== '' && (
-              <span className="text-[11px] font-medium text-[var(--green)]">✓ Ventas hoy</span>
+              <span className="block text-[11px] font-medium text-[var(--green)]">✓ Ventas hoy</span>
             )}
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="space-y-2">
             <button
               type="button"
               onClick={() => handleCloserOpen('marketing')}
-              className="rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              className="w-full rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
             >
               {closerBtnLabel('marketing')}
             </button>
             {marketingCountForSelection > 0 && form.date === today && form.memberId !== '' && (
-              <span className="text-[11px] font-medium text-[var(--green)]">
+              <span className="block text-[11px] font-medium text-[var(--green)]">
                 ✓ {marketingCountForSelection} llamada{marketingCountForSelection === 1 ? '' : 's'} marketing hoy
               </span>
             )}
