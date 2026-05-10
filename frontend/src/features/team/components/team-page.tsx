@@ -7,6 +7,7 @@ import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
 import { apiFetch } from '@/lib/api'
+import { getLeadsAnalytics } from '@/features/leads/services/leads-analytics'
 
 type ApiTeamMember = { id: number; nombre: string; rol: string; activo: boolean }
 
@@ -58,6 +59,8 @@ export function TeamPage() {
   const [setters, setSetters] = useState<ApiTeamMember[]>([])
   const [closers, setClosers] = useState<ApiTeamMember[]>([])
   const [dashboard, setDashboard] = useState<TeamDashboardResponse | null>(null)
+  /** Misma fuente que Dashboard de Ventas (programas en leads + fallback reportes). */
+  const [ventasKpis, setVentasKpis] = useState<{ facturacion: number; ingresos: number } | null>(null)
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
@@ -66,20 +69,23 @@ export function TeamPage() {
       setSetters([])
       setClosers([])
       setDashboard(null)
+      setVentasKpis(null)
       setLoading(false)
       return
     }
     setLoading(true)
     try {
-      const [mRes, dRes] = await Promise.all([
+      const [mRes, dRes, analyticsBundle] = await Promise.all([
         apiFetch('/team/members'),
         apiFetch(`/team/dashboard?month=${encodeURIComponent(month)}`),
+        getLeadsAnalytics(month).catch(() => null),
       ])
       if (!mRes.ok) {
         toast(errMessage(await mRes.json().catch(() => ({}))))
         setSetters([])
         setClosers([])
         setDashboard(null)
+        setVentasKpis(null)
         return
       }
       if (!dRes.ok) {
@@ -87,6 +93,12 @@ export function TeamPage() {
         setDashboard(null)
       } else {
         setDashboard((await dRes.json()) as TeamDashboardResponse)
+      }
+      if (analyticsBundle) {
+        const { analytics } = analyticsBundle
+        setVentasKpis({ facturacion: analytics.facturacion, ingresos: analytics.ingresos })
+      } else {
+        setVentasKpis(null)
       }
       const mJson = (await mRes.json()) as { setters: ApiTeamMember[]; closers: ApiTeamMember[] }
       setSetters(mJson.setters ?? [])
@@ -96,10 +108,11 @@ export function TeamPage() {
       setSetters([])
       setClosers([])
       setDashboard(null)
+      setVentasKpis(null)
     } finally {
       setLoading(false)
     }
-  }, [month, ready, userId])
+  }, [month, ready, toast, userId])
 
   useEffect(() => {
     void fetchData()
@@ -110,7 +123,11 @@ export function TeamPage() {
       void fetchData()
     }
     window.addEventListener('atvmkt-team-reports-changed', refresh)
-    return () => window.removeEventListener('atvmkt-team-reports-changed', refresh)
+    window.addEventListener('offered-programs-updated', refresh)
+    return () => {
+      window.removeEventListener('atvmkt-team-reports-changed', refresh)
+      window.removeEventListener('offered-programs-updated', refresh)
+    }
   }, [fetchData])
 
   const handleRemove = async (id: number) => {
@@ -129,11 +146,11 @@ export function TeamPage() {
   const closerStats = (id: number): DashboardCloser | undefined =>
     dashboard?.closers.find((c) => c.member_id === id)
 
-  const cashCollected = dashboard?.cash_total ?? 0
-  const facturacion =
-    dashboard == null
-      ? 0
-      : cashCollected + dashboard.setters.reduce((acc, s) => acc + s.generado, 0)
+  const cashCollectedFallback = dashboard?.cash_total ?? 0
+  const facturacionFallback =
+    dashboard?.closers.reduce((acc, c) => acc + c.ingreso, 0) ?? 0
+  const cashCollected = ventasKpis?.ingresos ?? cashCollectedFallback
+  const facturacion = ventasKpis?.facturacion ?? facturacionFallback
 
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 

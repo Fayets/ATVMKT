@@ -44,6 +44,7 @@ export function Topbar() {
     '/listas',
     '/programas',
     '/conexiones',
+    '/team',
     '/team/reportes',
     '/team/historial-reportes',
   ].includes(pathname)
