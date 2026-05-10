@@ -285,15 +285,57 @@ async function fetchTeamDashboardDaily(
   }
 }
 
-/** Día YYYY-MM-DD para filtrar vistas diaria/semana (el API suele dejar `call_at` vacío). */
-function leadDayForFilter(l: LeadRow): string {
-  for (const key of ['call_at', 'scheduled_at', 'agendo', 'fecha_bot', 'first_contact_at', 'date'] as const) {
+/** Día usado para ubicar cash en vista diaria/semanal; debe coincidir con rawDailyCash/weeklyCash. */
+function leadCashDayForFilter(l: LeadRow): string {
+  for (const key of ['call_at'] as const) {
     const v = l[key]
     if (v == null || v === '') continue
     const s = String(v).trim().slice(0, 10)
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
   }
   return ''
+}
+
+/** Día de conversación del lead para atribuir chats en vista diaria/semanal. */
+function leadChatDayForFilter(l: LeadRow): string {
+  for (const key of ['fecha_bot', 'first_contact_at', 'date'] as const) {
+    const v = l[key]
+    if (v == null || v === '') continue
+    const s = String(v).trim().slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  }
+  return ''
+}
+
+function classifyLeadChatSource(l: LeadRow): 'Historias' | 'Reels' | 'Perfil' | 'Otros' {
+  const url = String(l.content_url || '').toLowerCase()
+  if (url.includes('/reel/') || url.includes('instagram.com/reel')) return 'Reels'
+  const candidates = [
+    l.agenda_point,
+    l.entry_channel,
+    l.entry_funnel,
+    l.keyword,
+    l.origin,
+  ].map(v => String(v || '').trim().toLowerCase())
+  for (const s of candidates) {
+    if (!s) continue
+    if (s.startsWith('story:') || s.includes('historia') || /\bstor(y|ies)\b/.test(s)) return 'Historias'
+    if (s.includes('reel') || /^\d+$/.test(s)) return 'Reels'
+    if (textLooksLikeBioTraffic(s) || s === 'perfil') return 'Perfil'
+  }
+  return 'Otros'
+}
+
+function splitTotalByFourWeights(total: number, wReel: number, wHist: number, wBio: number, wOtros: number): [number, number, number, number] {
+  const t = Math.max(0, Math.floor(total))
+  const weights = [wReel, wHist, wBio, wOtros].map(w => Math.max(0, w))
+  const sum = weights.reduce((a, b) => a + b, 0)
+  if (t === 0) return [0, 0, 0, 0]
+  if (sum <= 0) return [0, 0, 0, t]
+  const reels = Math.floor((t * weights[0]) / sum)
+  const hist = Math.floor((t * weights[1]) / sum)
+  const bio = Math.floor((t * weights[2]) / sum)
+  return [reels, hist, bio, t - reels - hist - bio]
 }
 
 /** Calendario (año, mes, día) en una zona horaria IANA (uso: “hoy” = Argentina, alineado al backend). */
@@ -509,7 +551,7 @@ export default function DashboardPage() {
     const prevDailyCash = Array(daysInMonth).fill(0)
 
     currLeads.filter(l => leadCashCollected(l) > 0).forEach(l => {
-      const d = l.call_at || l.date
+      const d = leadCashDayForFilter(l)
       if (d) { const day = new Date(String(d)).getDate(); if (day >= 1 && day <= daysInMonth) dailyCash[day - 1] += leadCashCollected(l) }
     })
     if (paymentsCashTotal <= 0) {
@@ -521,7 +563,7 @@ export default function DashboardPage() {
     for (let i = 1; i < dailyCash.length; i++) dailyCash[i] += dailyCash[i - 1]
 
     prevLeadsData.filter(l => leadCashCollected(l) > 0).forEach(l => {
-      const d = l.call_at || l.date
+      const d = leadCashDayForFilter(l)
       if (d) { const day = new Date(String(d)).getDate(); if (day >= 1 && day <= daysInMonth) prevDailyCash[day - 1] += leadCashCollected(l) }
     })
     if (prevLeadCash <= 0) {
@@ -717,7 +759,7 @@ export default function DashboardPage() {
   }
 
   const weekHasActivity = (wi: number) =>
-    setterSumInWeekIdx(wi) > 0 || countPiecesInWeekIdx(wi) > 0
+    setterSumInWeekIdx(wi) > 0 || countPiecesInWeekIdx(wi) > 0 || (weeklyCash[wi] || 0) > 0
 
   /**
    * Sin semana elegida en el gráfico: la franja que contiene “hoy” en AR.
@@ -741,7 +783,7 @@ export default function DashboardPage() {
   const effectiveSemanalWeekIdx =
     view === 'semanal'
       ? selectedWeek !== null
-        ? selectedWeek
+        ? Math.min(Math.max(0, selectedWeek), Math.max(0, weekGroups.length - 1))
         : semanalWeekIdxDefault
       : currentWeekIdx
 
@@ -773,9 +815,15 @@ export default function DashboardPage() {
     m,
     daysInMonth,
   )
-  const viewLeads = viewRange
+  const viewCashLeads = viewRange
     ? dashData.rawLeads.filter(l => {
-        const d = leadDayForFilter(l)
+        const d = leadCashDayForFilter(l)
+        return d.length >= 10 && d >= viewRange.start && d <= viewRange.end
+      })
+    : dashData.rawLeads
+  const viewChatLeads = viewRange
+    ? dashData.rawLeads.filter(l => {
+        const d = leadChatDayForFilter(l)
         return d.length >= 10 && d >= viewRange.start && d <= viewRange.end
       })
     : dashData.rawLeads
@@ -792,59 +840,8 @@ export default function DashboardPage() {
     return 'Otros'
   }
 
-  // Classify chat buckets using broader lead context; cash attribution above stays tied to punto_agenda.
-  const classifyLeadSource = (l: LeadRow): string => {
-    const url = String(l.content_url || '').toLowerCase()
-    if (url.includes('/reel/') || url.includes('instagram.com/reel')) return 'Reels'
-    const chEarly = String(l.entry_channel || '').trim().toLowerCase()
-    if (chEarly.startsWith('youtube:')) return 'YouTube'
-    if (chEarly.includes('reel') || chEarly.includes('reels')) return 'Reels'
-    if (chEarly.includes('historia') || chEarly.includes('story')) return 'Historias'
-    if (chEarly.includes('perfil') || chEarly.includes('bio')) return 'Perfil'
-    if (textLooksLikeBioTraffic(chEarly)) return 'Perfil'
-    /** DM Instagram sin ancla — mismo “resto” que chats Historias (vs reel/bio explícitos). */
-    if (chEarly === 'ig chat') return 'Historias'
-    const ap = String(l.agenda_point || '').toLowerCase()
-    const ef = String(l.entry_funnel || '').toLowerCase()
-    const origin = String(l.origin || '').toLowerCase()
-    const kwField = String(l.keyword || '').toLowerCase()
-    // Check agenda_point first (last touchpoint before booking)
-    if (ap.startsWith('youtube:')) return 'YouTube'
-    if (ap.startsWith('story:')) return 'Historias'
-    if (ap.startsWith('historia')) return 'Historias'
-    if (ap.startsWith('reel')) return 'Reels'
-    if (textLooksLikeBioTraffic(ap)) return 'Perfil'
-    if (ap === 'perfil') return 'Perfil'
-    if (ap === 'referido' || ap.startsWith('referido')) return 'Referidos'
-    // Fallback to entry_funnel
-    if (ef.startsWith('youtube:')) return 'YouTube'
-    if (ef.startsWith('story:')) return 'Historias'
-    if (ef.startsWith('historia')) return 'Historias'
-    if (ef.startsWith('reel')) return 'Reels'
-    if (textLooksLikeBioTraffic(ef)) return 'Perfil'
-    if (ef === 'perfil') return 'Perfil'
-    if (ef === 'referido' || ef.startsWith('referido')) return 'Referidos'
-    if (textLooksLikeBioTraffic(kwField)) return 'Perfil'
-    // Fallback to origin/channel
-    if (origin === 'referido') return 'Referidos'
-    if (textLooksLikeBioTraffic(origin)) return 'Perfil'
-    const ch = String(l.entry_channel || '').trim().toLowerCase()
-    if (ch === 'youtube' || ch.startsWith('youtube:')) return 'YouTube'
-    if (ch === 'referido') return 'Referidos'
-    return 'Otros'
-  }
-
-  /** Tres canales IG del panel: Reels = solo fuente Reels; resto (YT/Ref/Otros/IG Chat…) → Historias (resto embudo). */
-  const dashboardChatBucket = (l: LeadRow): 'Historias' | 'Reels' | 'Perfil' => {
-    const s = classifyLeadSource(l)
-    if (s === 'Historias') return 'Historias'
-    if (s === 'Perfil') return 'Perfil'
-    if (s === 'Reels') return 'Reels'
-    return 'Historias'
-  }
-
   const viewCashBySource = (source: string) =>
-    viewLeads
+    viewCashLeads
       .filter(l => classifyLeadCashSource(l) === source && leadCashCollected(l) > 0)
       .reduce((s, l) => s + leadCashCollected(l), 0)
 
@@ -868,6 +865,10 @@ export default function DashboardPage() {
   const viewReelsChatsContent = viewContent.filter(c => c.content_type === 'reel').reduce((s, c) => s + c.chats, 0)
   const viewHistoriasChatsContent = viewContent.filter(c => c.content_type === 'historia' || c.content_type === 'story').reduce((s, c) => s + c.chats, 0)
   const viewBioChatsFromSupabase = viewBio.reduce((s, b) => s + b.chats, 0)
+  const viewReelsChatsFromLeads = viewChatLeads.filter(l => classifyLeadChatSource(l) === 'Reels').length
+  const viewHistoriasChatsFromLeads = viewChatLeads.filter(l => classifyLeadChatSource(l) === 'Historias').length
+  const viewBioChatsFromLeads = viewChatLeads.filter(l => classifyLeadChatSource(l) === 'Perfil').length
+  const viewOtrosChatsFromLeads = viewChatLeads.filter(l => classifyLeadChatSource(l) === 'Otros').length
   const viewBioChatsFallback = (!viewRange && viewBioChatsFromSupabase <= 0 && bioDisplay)
     ? bioDisplay.total_leads
     : viewBioChatsFromSupabase
@@ -878,6 +879,7 @@ export default function DashboardPage() {
   let viewReelsChats: number
   let viewHistoriasChats: number
   let viewBioChats: number
+  let viewOtrosChats: number
   let viewTotalChats: number
   if (!viewRange) {
     if (bioDisplay != null && bioDisplay.total_leads >= 0) {
@@ -887,6 +889,7 @@ export default function DashboardPage() {
         0,
         viewSetterConversacionesSum - viewReelsChats - viewBioChats,
       )
+      viewOtrosChats = 0
       viewTotalChats = viewSetterConversacionesSum
     } else {
       ;[viewReelsChats, viewHistoriasChats, viewBioChats] = splitTotalByWeights(
@@ -895,14 +898,20 @@ export default function DashboardPage() {
         viewHistoriasChatsContent,
         weightBioChats,
       )
+      viewOtrosChats = 0
       viewTotalChats = viewSetterConversacionesSum
     }
   } else {
-    ;[viewReelsChats, viewHistoriasChats, viewBioChats] = splitTotalByWeights(
+    const wReels = viewReelsChatsFromLeads || viewReelsChatsContent
+    const wHistorias = viewHistoriasChatsFromLeads || viewHistoriasChatsContent
+    const wBio = viewBioChatsFromLeads || weightBioChats
+    const wOtros = viewOtrosChatsFromLeads
+    ;[viewReelsChats, viewHistoriasChats, viewBioChats, viewOtrosChats] = splitTotalByFourWeights(
       viewSetterConversacionesSum,
-      viewReelsChatsContent,
-      viewHistoriasChatsContent,
-      weightBioChats,
+      wReels,
+      wHistorias,
+      wBio,
+      wOtros,
     )
     viewTotalChats = viewSetterConversacionesSum
   }
@@ -914,12 +923,11 @@ export default function DashboardPage() {
     ? asFiniteNumber(bioDisplay.cash_total)
     : asFiniteNumber(viewBioCashFromSupabase)
 
-  const leadPayInView = viewLeads.filter(l => leadCashCollected(l) > 0).reduce((s, l) => s + leadCashCollected(l), 0)
+  const leadPayInView = viewCashLeads.filter(l => leadCashCollected(l) > 0).reduce((s, l) => s + leadCashCollected(l), 0)
   const defPart = viewRange ? 0 : dashData.defCash
   const fromLeadsCash = leadPayInView + defPart
-  const fromContentCash = viewReelsCash + viewHistoriasCash + viewBioCash
   /** Este bloque muestra cash de leads; seguimiento se carga aparte y no se suma aca. */
-  const viewCash = !viewRange ? dashData.cash : fromLeadsCash > 0 ? fromLeadsCash : fromContentCash
+  const viewCash = !viewRange ? dashData.cash : fromLeadsCash
 
   // View period label
   const viewLabel = (() => {
@@ -940,8 +948,8 @@ export default function DashboardPage() {
   const vfBio = asFiniteNumber(viewBioCash)
   const vfPerfilLeads = asFiniteNumber(viewPerfilCash)
 
-  let donutHistoriasVal = viewHistoriasCashFromLeads || viewHistoriasCash
-  let donutReelsVal = viewReelsCashFromLeads || viewReelsCash
+  let donutHistoriasVal = viewHistoriasCashFromLeads || (!viewRange ? viewHistoriasCash : 0)
+  let donutReelsVal = viewReelsCashFromLeads || (!viewRange ? viewReelsCash : 0)
   let donutPerfilVal = vfPerfilLeads > 0 ? vfPerfilLeads : vfBio
   let donutOtrosVal = asFiniteNumber(viewOtrosCash)
   /** Mismo cobro contado como BIO (métricas) y como Otros (clasificación de lead). */
@@ -979,22 +987,18 @@ export default function DashboardPage() {
     { label: 'Historias', value: viewHistoriasChats, color: '#F59E0B', prevLabel: 'HISTORIAS' },
     { label: 'Reels', value: viewReelsChats, color: '#EF4444', prevLabel: 'REELS' },
     { label: 'BIO', value: viewBioChats, color: '#A855F7', prevLabel: 'BIO' },
+    { label: 'Otros', value: viewOtrosChats, color: '#6B7280', prevLabel: 'OTROS' },
   ]
 
-  const cashByChatBucket = (bucket: 'Historias' | 'Reels' | 'Perfil') =>
-    asFiniteNumber(
-      viewLeads.filter(l => dashboardChatBucket(l) === bucket).reduce((s, l) => s + leadCashCollected(l), 0),
-    )
-
   // Cash por chat — mismos criterios que el donut: Reels ≠ “todo lo que no es BIO/Historias”
-  const viewBioCashReal =
-    asFiniteNumber(cashByChatBucket('Perfil') || viewPerfilCash) + asFiniteNumber(viewBioCash)
+  const viewBioCashReal = donutPerfilVal
   const reelCashForCpc = donutReelsVal
   const histCashForCpc = asFiniteNumber(donutHistoriasVal)
   const otrosCashForCpc = asFiniteNumber(donutYtVal + donutRefVal + donutOtrosVal)
   const cpcReel = viewReelsChats > 0 ? reelCashForCpc / viewReelsChats : 0
   const cpcHistoria = viewHistoriasChats > 0 ? histCashForCpc / viewHistoriasChats : 0
   const cpcBio = viewBioChats > 0 ? asFiniteNumber(viewBioCashReal / viewBioChats) : 0
+  const cpcOtros = viewOtrosChats > 0 ? asFiniteNumber(otrosCashForCpc / viewOtrosChats) : 0
 
   const kpiConversaciones = viewSetterConversacionesSum
   const kpiReelsPublicados = viewContent.filter(c => c.content_type === 'reel').length
@@ -1369,7 +1373,7 @@ export default function DashboardPage() {
                 { label: 'Historias', chats: viewHistoriasChats, cash: histCashForCpc, cpc: cpcHistoria, color: '#F59E0B' },
                 { label: 'Reels', chats: viewReelsChats, cash: reelCashForCpc, cpc: cpcReel, color: '#EF4444' },
                 { label: 'BIO', chats: viewBioChats, cash: viewBioCashReal, cpc: cpcBio, color: '#A855F7' },
-                { label: 'Otros', chats: 0, cash: otrosCashForCpc, cpc: 0, color: '#6B7280' },
+                { label: 'Otros', chats: viewOtrosChats, cash: otrosCashForCpc, cpc: cpcOtros, color: '#6B7280' },
               ].map(ch => {
                 const pct = viewTotalChats > 0 ? ((ch.chats / viewTotalChats) * 100).toFixed(0) : '0'
                 return (
@@ -1392,6 +1396,7 @@ export default function DashboardPage() {
                 { pct: viewHistoriasChats / Math.max(viewTotalChats, 1) * 100, color: '#F59E0B' },
                 { pct: viewReelsChats / Math.max(viewTotalChats, 1) * 100, color: '#EF4444' },
                 { pct: viewBioChats / Math.max(viewTotalChats, 1) * 100, color: '#A855F7' },
+                { pct: viewOtrosChats / Math.max(viewTotalChats, 1) * 100, color: '#6B7280' },
               ].map((b, i) => <div key={i} style={{ width: `${b.pct}%`, backgroundColor: b.color }} />)}
             </div>
           </div>
