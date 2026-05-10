@@ -505,6 +505,24 @@ class LeadPatchRequest(BaseModel):
     closer: str | None = None
 
 
+class LeadCreateRequest(BaseModel):
+    """Alta manual de lead (cuenta como agendado para listados y métricas del mes)."""
+
+    client_name: str = Field(min_length=1, max_length=500)
+    ig_handle: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    month: str | None = Field(
+        default=None,
+        description="YYYY-MM mes operativo (fecha_bot / agendo); si se omite, mes actual en Argentina.",
+    )
+    entry_channel: str | None = Field(
+        default=None,
+        description="Normalizado como `via` (por defecto texto Manual).",
+    )
+    status: str | None = Field(default="Pendiente")
+
+
 class KeywordClientRow(BaseModel):
     """Lead con keyword y reel asociado (misma keyword que un reel del usuario, si existe)."""
 

@@ -8,7 +8,13 @@ from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
 from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent
-from src.schemas import LeadOut, LeadPatchRequest, LeadsListResponse, LeadsMetricsOut
+from src.schemas import (
+    LeadCreateRequest,
+    LeadOut,
+    LeadPatchRequest,
+    LeadsListResponse,
+    LeadsMetricsOut,
+)
 from src.services.programs_services import (
     build_program_norm_price_map,
     program_price_usd_for_prog_raw,
@@ -83,10 +89,10 @@ def _normalize_channel_anchor_value(user_id_int: int, raw: str | None) -> str:
             return f"{_STORY_AGENDA_PREFIX}{rid}"
     try:
         insta_row = ReelContent.get(instagram_id=s)
-        if int(insta_row.user_id) == user_id_int:
-            return str(insta_row.id)
     except ObjectNotFound:
-        pass
+        insta_row = None
+    if insta_row is not None and int(insta_row.user_id) == user_id_int:
+        return str(insta_row.id)
     return s
 
 
@@ -259,7 +265,13 @@ def _to_lead_out(row: LeadEntity, norm_prices: dict[str, float] | None = None) -
         disposicion_invertir=None,
         calendly_event_uri=None,
         calendly_invitee_uri=None,
-        source_type="manychat" if (row.manychat_contact_id or "").strip() else "neon",
+        source_type=(
+            "manual"
+            if (row.origen or "").strip().casefold() == "manual"
+            else "manychat"
+            if (row.manychat_contact_id or "").strip()
+            else "neon"
+        ),
         content_url=row.content_url,
         manychat_contact_id=row.manychat_contact_id,
         respondio_auto=row.respondio_auto,
@@ -304,6 +316,58 @@ def list_leads(
         out = [_to_lead_out(r, norm_prices) for r in rows]
 
     return LeadsListResponse(leads=out)
+
+
+def _operative_month_for_create(month_param: str | None) -> tuple[int, int]:
+    """Mes operativo para anclar fecha_bot/agendo (AR si no se envía month)."""
+    if month_param and str(month_param).strip():
+        mk = _parse_month_query(month_param)
+        if mk is None:
+            raise HTTPException(status_code=400, detail="month inválido (usar YYYY-MM).")
+        return mk
+    now_ar = datetime.now(timezone.utc).astimezone(_AR)
+    return (now_ar.year, now_ar.month)
+
+
+def _anchor_datetime_for_operative_month(year: int, month: int) -> datetime:
+    """Mitad de mes en UTC naive: consistente con filtro GET /leads ?month= (mes AR)."""
+    return datetime(year, month, 15, 15, 0, 0)
+
+
+@router.post("", response_model=LeadOut)
+def create_lead(
+    body: LeadCreateRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> LeadOut:
+    """Alta manual; el lead aparece en la grilla del mes elegido (como si hubiera agendado)."""
+    try:
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="user_id inválido") from e
+
+    y, mn = _operative_month_for_create(body.month)
+    anchor = _anchor_datetime_for_operative_month(y, mn)
+    st = (body.status or "").strip() or "Pendiente"
+
+    with db_session:
+        via = _normalize_via_value(uid, (body.entry_channel or "").strip() or "Manual")
+        row = LeadEntity(
+            user_id=uid,
+            nombre=(body.client_name or "").strip(),
+            ig=(body.ig_handle or "").strip(),
+            telefono=(body.phone or "").strip(),
+            notas=(body.notes or "").strip(),
+            origen="Manual",
+            via=via,
+            status=st,
+            estado=st,
+            fecha_bot=anchor,
+            agendo=anchor,
+            agendo_en="Manual",
+        )
+        _sync_dias_para_agendar(row)
+        norm_prices = build_program_norm_price_map(uid)
+        return _to_lead_out(row, norm_prices)
 
 
 def _parse_month_query(month: str | None) -> tuple[int, int] | None:

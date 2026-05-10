@@ -221,6 +221,11 @@ export function LeadsPage() {
 
   // New row
   const [addingRow, setAddingRow] = useState(false)
+  const [addLeadOpen, setAddLeadOpen] = useState(false)
+  const [newLeadName, setNewLeadName] = useState('')
+  const [newLeadIg, setNewLeadIg] = useState('')
+  const [newLeadPhone, setNewLeadPhone] = useState('')
+  const [newLeadNotes, setNewLeadNotes] = useState('')
 
   // Inline edit
   const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null)
@@ -513,9 +518,53 @@ export function LeadsPage() {
     [ready, userId, toast, fetchLeads],
   )
 
-  const handleAddRow = async () => {
-    toast('Agregar filas no disponible por ahora.')
-  }
+  const handleAddRow = useCallback(() => {
+    if (addingRow) return
+    setNewLeadName('')
+    setNewLeadIg('')
+    setNewLeadPhone('')
+    setNewLeadNotes('')
+    setAddLeadOpen(true)
+  }, [addingRow])
+
+  const submitNewLead = useCallback(async () => {
+    const name = newLeadName.trim()
+    if (!name) {
+      toast('El nombre es obligatorio.')
+      return
+    }
+    if (!ready || !userId) return
+    setAddingRow(true)
+    try {
+      const res = await apiFetch('/leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client_name: name,
+          ig_handle: newLeadIg.trim() || null,
+          phone: newLeadPhone.trim() || null,
+          notes: newLeadNotes.trim() || null,
+          month: month || null,
+        }),
+      })
+      const raw = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const detail =
+          typeof raw === 'object' && raw && 'detail' in raw
+            ? String((raw as { detail: unknown }).detail)
+            : res.statusText
+        toast(`No se pudo crear: ${detail}`)
+        return
+      }
+      toast('Lead agregado.')
+      setAddLeadOpen(false)
+      await fetchLeads()
+    } catch (e) {
+      toast(`Error de red: ${e instanceof Error ? e.message : 'desconocido'}`)
+    } finally {
+      setAddingRow(false)
+    }
+  }, [ready, userId, newLeadName, newLeadIg, newLeadPhone, newLeadNotes, month, toast, fetchLeads])
 
   // ── Filtering & Sorting ──
   const filtered = useMemo(() => {
@@ -852,6 +901,92 @@ export function LeadsPage() {
         }
       />
 
+      {/* Alta manual de lead */}
+      <Modal
+        open={addLeadOpen}
+        onClose={() => !addingRow && setAddLeadOpen(false)}
+        title="Nuevo lead"
+        maxWidth="440px"
+        compact
+      >
+        <p className="mb-4 text-[12px] leading-relaxed text-[var(--text3)]">
+          Se guarda en el mes seleccionado arriba ({month || 'actual'}). Origen: Manual.
+        </p>
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text3)]">
+              Nombre <span className="text-[var(--accent)]">*</span>
+            </span>
+            <input
+              type="text"
+              value={newLeadName}
+              onChange={(e) => setNewLeadName(e.target.value)}
+              disabled={addingRow}
+              className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:opacity-50"
+              placeholder="Nombre del cliente"
+              autoFocus
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text3)]">
+              Instagram
+            </span>
+            <input
+              type="text"
+              value={newLeadIg}
+              onChange={(e) => setNewLeadIg(e.target.value)}
+              disabled={addingRow}
+              className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:opacity-50"
+              placeholder="@usuario (opcional)"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text3)]">
+              Teléfono
+            </span>
+            <input
+              type="text"
+              value={newLeadPhone}
+              onChange={(e) => setNewLeadPhone(e.target.value)}
+              disabled={addingRow}
+              className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:opacity-50"
+              placeholder="Opcional"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[var(--text3)]">
+              Notas
+            </span>
+            <textarea
+              value={newLeadNotes}
+              onChange={(e) => setNewLeadNotes(e.target.value)}
+              disabled={addingRow}
+              rows={3}
+              className="w-full resize-y rounded-lg border border-[var(--border2)] bg-[var(--bg)] px-3 py-2 text-[13px] text-[var(--text)] outline-none transition-colors focus:border-[var(--accent)] disabled:opacity-50"
+              placeholder="Opcional"
+            />
+          </label>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            disabled={addingRow}
+            onClick={() => setAddLeadOpen(false)}
+            className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-2 text-[11px] font-semibold uppercase text-[var(--text2)] transition-colors hover:border-[var(--text3)] disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            disabled={addingRow}
+            onClick={() => void submitNewLead()}
+            className="rounded-lg bg-[var(--accent)] px-4 py-2 text-[11px] font-semibold uppercase text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+          >
+            {addingRow ? 'Guardando…' : 'Crear lead'}
+          </button>
+        </div>
+      </Modal>
+
       {/* ━━ MODAL confirmar eliminación ━━ */}
       {deleteConfirmIds && deleteConfirmIds.length > 0 && (
         <Modal
@@ -1114,8 +1249,12 @@ function LeadsTable({
         </tr>
         {/* + Nuevo lead row */}
         {!readOnly && (
-          <tr className="cursor-pointer bg-[var(--bg)] transition-colors hover:bg-[rgba(255,255,255,0.02)]"
-            onClick={onAddRow}>
+          <tr
+            className={`cursor-pointer bg-[var(--bg)] transition-colors hover:bg-[rgba(255,255,255,0.02)] ${
+              addingRow ? 'pointer-events-none opacity-50' : ''
+            }`}
+            onClick={onAddRow}
+          >
             <td colSpan={columns.length + 3} className="border-b border-[var(--border)] px-3 py-2">
               <span className="text-[12px] text-[var(--text3)] hover:text-[var(--text2)] transition-colors">
                 {addingRow ? 'Creando...' : '+ Nuevo lead'}
