@@ -114,6 +114,22 @@ const hasCtaValue = (value: string | null | undefined): boolean => {
   return !['no', 'sin cta', 'ninguno', 'none', 'false', '0', 'n/a'].includes(normalized)
 }
 
+/** Misma story IG no se muestra dos veces (p. ej. manual + sync o doble sync). */
+function dedupeSlidesByInstagramId(slides: StorySlide[]): StorySlide[] {
+  const sorted = [...slides].sort((a, b) => a.order_index - b.order_index || a.id - b.id)
+  const seen = new Set<string>()
+  const out: StorySlide[] = []
+  for (const s of sorted) {
+    const mid = String(s.instagram_media_id ?? '').trim()
+    if (mid) {
+      if (seen.has(mid)) continue
+      seen.add(mid)
+    }
+    out.push(s)
+  }
+  return out
+}
+
 export default function HistoriasPage() {
   const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
@@ -201,6 +217,30 @@ export default function HistoriasPage() {
     }
   }, [month, ready, userId])
 
+  const handleDeleteSlide = useCallback(
+    async (slideId: number, options?: { closeDetail?: boolean }) => {
+      if (!ready || !userId) return
+      if (!confirm('¿Eliminar esta historia de la secuencia?')) return
+      const res = await apiFetch(`/stories/slides/${slideId}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
+      const raw = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const detail =
+          typeof raw === 'object' && raw && 'detail' in raw
+            ? String((raw as { detail: unknown }).detail)
+            : res.statusText
+        toast(`No se pudo eliminar: ${detail}`)
+        return
+      }
+      toast('Historia eliminada')
+      if (options?.closeDetail) setDetailSecuencia(null)
+      await fetchData()
+    },
+    [ready, userId, fetchData, toast],
+  )
+
   const fetchMasterLists = useCallback(async () => {
     if (!ready || !userId) return
     try {
@@ -267,15 +307,16 @@ export default function HistoriasPage() {
   // Group stories by date -> secuencias (includes manual secuencias without Metricool stories)
   const secuencias: Secuencia[] = useMemo(() => {
     return sequences.map((seq) => {
-      const angulos = Array.from(new Set(seq.slides.map((s) => s.angulo || '').filter(Boolean)))
-      const dolor = seq.dolor || seq.slides.find((s) => s.dolor)?.dolor || ''
-      const ctaText = seq.cta_text || seq.slides.find((s) => s.cta_text)?.cta_text || ''
+      const slides = dedupeSlidesByInstagramId(seq.slides)
+      const angulos = Array.from(new Set(slides.map((s) => s.angulo || '').filter(Boolean)))
+      const dolor = seq.dolor || slides.find((s) => s.dolor)?.dolor || ''
+      const ctaText = seq.cta_text || slides.find((s) => s.cta_text)?.cta_text || ''
       return {
         id: seq.id,
         fecha: seq.sequence_date,
-        slides: seq.slides,
-        totalReach: seq.slides.reduce((acc, s) => acc + slideReachCount(s), 0),
-        totalReplies: seq.slides.reduce((acc, s) => acc + toNumber(s.replies), 0),
+        slides,
+        totalReach: slides.reduce((acc, s) => acc + slideReachCount(s), 0),
+        totalReplies: slides.reduce((acc, s) => acc + toNumber(s.replies), 0),
         dolor,
         angulo: seq.angulo || angulos[0] || '',
         cta_text: ctaText,
@@ -286,7 +327,7 @@ export default function HistoriasPage() {
         agendas: toNumber(seq.agendas),
         notes: seq.title || '',
         secuenciaDesc: (seq.title || '').trim(),
-        hasSync: seq.slides.some((s) => Boolean(s.instagram_media_id)),
+        hasSync: slides.some((s) => Boolean(s.instagram_media_id)),
       }
     })
   }, [sequences])
@@ -764,6 +805,17 @@ export default function HistoriasPage() {
                       const thumb = getImageUrl(slide.image_url)
                       return (
                         <div key={slide.id} className="flex-shrink-0 w-[120px] h-[200px] rounded-lg bg-[var(--bg4)] border border-[var(--border)] overflow-hidden relative cursor-pointer" onClick={(e) => { e.stopPropagation(); setDetailSecuencia(sec) }}>
+                          <button
+                            type="button"
+                            title="Eliminar esta historia"
+                            className="absolute top-1 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-[14px] font-bold text-white hover:bg-[#F87171]"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleDeleteSlide(slide.id)
+                            }}
+                          >
+                            ×
+                          </button>
                           {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover rounded-lg" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)] text-[10px]">{i + 1}</div>}
                           <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[8px] text-white py-0.5">{i + 1}/{slideCount}</div>
                         </div>
@@ -787,6 +839,7 @@ export default function HistoriasPage() {
                 {isExpanded && (() => {
                   // Build slide data from Metricool stories OR base64 thumbnails
                   const slideMetrics = sec.slides.map((s, i) => ({
+                    slideId: s.id,
                     idx: i + 1,
                     reach: slideReachCount(s),
                     likes: Number(s.replies || 0),
@@ -833,7 +886,7 @@ export default function HistoriasPage() {
                               ? Math.round(((slideMetrics[i - 1].reach - s.reach) / slideMetrics[i - 1].reach) * 100)
                               : 0
                             return (
-                              <div key={s.idx} className="flex items-end flex-1 min-w-0">
+                              <div key={s.slideId} className="flex items-end flex-1 min-w-0">
                                 {/* Dropoff between stories */}
                                 {i > 0 && hasMetrics && (
                                   <div className="flex flex-col items-center justify-center w-6 flex-shrink-0 mb-14">
@@ -847,7 +900,15 @@ export default function HistoriasPage() {
                                 )}
                                 {/* Story card — fixed width to avoid giant single-slide cards */}
                                 <div className="w-[120px] flex-shrink-0 text-center">
-                                  <div className="aspect-[9/16] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)] mb-1.5">
+                                  <div className="relative aspect-[9/16] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)] mb-1.5">
+                                    <button
+                                      type="button"
+                                      title="Eliminar esta historia"
+                                      className="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center rounded bg-black/55 text-[11px] font-bold text-white hover:bg-[#F87171]"
+                                      onClick={() => void handleDeleteSlide(s.slideId)}
+                                    >
+                                      ×
+                                    </button>
                                     {s.thumb ? <img src={s.thumb} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)] text-lg font-bold">{s.idx}</div>}
                                   </div>
                                   {hasMetrics && (
@@ -966,6 +1027,7 @@ export default function HistoriasPage() {
         <StorySequenceDetail
           sequence={detailSecuencia}
           onClose={() => setDetailSecuencia(null)}
+          onDeleteSlide={(slideId) => handleDeleteSlide(slideId, { closeDetail: true })}
           onSave={async (payload) => {
             await saveSecuencia(detailSecuencia, payload)
             setDetailSecuencia(null)
@@ -980,10 +1042,12 @@ function StorySequenceDetail({
   sequence,
   onClose,
   onSave,
+  onDeleteSlide,
 }: {
   sequence: Secuencia
   onClose: () => void
   onSave: (payload: { dolor: string; angulo: string; cta_text: string; cash_generado: number; chats: number }) => Promise<void>
+  onDeleteSlide?: (slideId: number) => Promise<void>
 }) {
   const [cash, setCash] = useState<number>(sequence.cash_manual || 0)
   const [chats, setChats] = useState<number>(sequence.chats || 0)
@@ -1057,7 +1121,17 @@ function StorySequenceDetail({
               const thumb = getImageUrl(slide.image_url)
               return (
                 <div key={slide.id} className="w-[120px] flex-shrink-0">
-                  <div className="h-[200px] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)]">
+                  <div className="relative h-[200px] rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--bg4)]">
+                    {onDeleteSlide && (
+                      <button
+                        type="button"
+                        title="Eliminar esta historia"
+                        className="absolute top-1 right-1 z-10 flex h-7 w-7 items-center justify-center rounded-md bg-black/60 text-[14px] font-bold text-white hover:bg-[#F87171]"
+                        onClick={() => void onDeleteSlide(slide.id)}
+                      >
+                        ×
+                      </button>
+                    )}
                     {thumb ? <img src={thumb} alt="" className="w-full h-full object-cover rounded-lg" /> : <div className="w-full h-full flex items-center justify-center text-[var(--text3)]">{i + 1}</div>}
                   </div>
                   <div className="mt-2 text-[10px] text-[var(--text3)]">ALCANCE: <span className="text-[var(--text)]">{reachVal ? reachVal.toLocaleString('es-AR') : '—'}</span></div>

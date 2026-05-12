@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import certifi
 import httpx
 from fastapi import HTTPException
-from pony.orm import db_session, flush
+from pony.orm import ObjectNotFound, db_session, flush
 
 from src.db import db
 from src.models import ApiConnection, Lead, StorySequence, StorySlide
@@ -106,8 +106,24 @@ AND trim(both from coalesce(l.punto_agenda, '')) = $tid"""
     return float(v) if v is not None else 0.0
 
 
+def _dedupe_slides_for_response(slides: list[StorySlide]) -> list[StorySlide]:
+    """Evita mostrar la misma historia IG dos veces (sync duplicado o manual+sync). Mantiene orden."""
+    ordered = sorted(slides, key=lambda s: (s.order_index, s.id))
+    seen_mid: set[str] = set()
+    out: list[StorySlide] = []
+    for s in ordered:
+        mid = str(s.instagram_media_id or "").strip()
+        if mid:
+            if mid in seen_mid:
+                continue
+            seen_mid.add(mid)
+        out.append(s)
+    return out
+
+
 def _serialize_sequence(sequence: StorySequence, user_id: str) -> dict[str, Any]:
-    slides = sorted(list(sequence.slides), key=lambda s: (s.order_index, s.id))
+    slides_raw = sorted(list(sequence.slides), key=lambda s: (s.order_index, s.id))
+    slides = _dedupe_slides_for_response(slides_raw)
     uid = int(user_id)
     sid = int(sequence.id)
     agendas_n = _count_agendas_for_sequence(uid, sid)
@@ -353,6 +369,27 @@ class StoriesService:
         return True
 
     @db_session
+    def delete_slide(self, slide_id: int, user_id: str) -> bool:
+        """Elimina un slide (historia) de una secuencia; borra archivo local si existe."""
+        try:
+            slide = StorySlide[slide_id]
+        except ObjectNotFound:
+            raise HTTPException(status_code=404, detail="Historia no encontrada.")
+        if int(slide.sequence.user_id) != int(user_id):
+            raise HTTPException(status_code=404, detail="Historia no encontrada.")
+        if slide.image_url:
+            BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+            filepath = os.path.join(BASE_DIR, "..", "..", slide.image_url.lstrip("/"))
+            filepath = os.path.normpath(filepath)
+            if os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                except Exception as e:
+                    print(f"[stories] Error eliminando imagen de slide {slide_id}: {e}")
+        slide.delete()
+        return True
+
+    @db_session
     def get_metrics(self, user_id: str, month: str) -> dict[str, int]:
         print("[stories] get_metrics llamado con user_id:", user_id, "month:", month)
         try:
@@ -446,6 +483,53 @@ class StoriesService:
             for s in list(StorySlide.select())
             if (s.instagram_media_id or "") == story_id and s.sequence.user_id == uid
         ]
+
+    @db_session
+    def _collapse_duplicate_slide_ids(self, slide_ids: list[int]) -> list[int]:
+        """Si el mismo `instagram_media_id` quedó duplicado en BD, deja un solo slide."""
+        if len(slide_ids) <= 1:
+            return slide_ids
+        primary = min(slide_ids)
+        for sid in slide_ids:
+            if sid != primary:
+                StorySlide[sid].delete()
+        return [primary]
+
+    @db_session
+    def _first_placeholder_slide_id(self, sequence_id: int) -> int | None:
+        """Primer slide de la secuencia sin `instagram_media_id` (p. ej. carga manual antes del sync)."""
+        seq = StorySequence.get(id=sequence_id)
+        if seq is None:
+            return None
+        blanks = [s for s in list(seq.slides) if not str(s.instagram_media_id or "").strip()]
+        if not blanks:
+            return None
+        blanks.sort(key=lambda s: (s.order_index, s.id))
+        return blanks[0].id
+
+    @db_session
+    def _hydrate_slide_from_instagram(
+        self,
+        slide_id: int,
+        story_id: str,
+        image_url: str | None,
+        metrics: dict[str, int | None],
+        order_index: int,
+    ) -> None:
+        slide = StorySlide[slide_id]
+        slide.instagram_media_id = story_id
+        slide.order_index = order_index
+        if image_url:
+            slide.image_url = image_url
+        slide.views = metrics.get("views") if metrics.get("views") is not None else slide.views
+        slide.reach = metrics.get("reach") if metrics.get("reach") is not None else slide.reach
+        slide.shares = metrics.get("shares") if metrics.get("shares") is not None else slide.shares
+        slide.replies = metrics.get("replies") if metrics.get("replies") is not None else slide.replies
+        slide.navigation = metrics.get("navigation") if metrics.get("navigation") is not None else slide.navigation
+        slide.profile_visits = (
+            metrics.get("profile_visits") if metrics.get("profile_visits") is not None else slide.profile_visits
+        )
+        slide.synced_at = datetime.now(AR_TZ)
 
     @db_session
     def _create_slide(
@@ -584,15 +668,22 @@ class StoriesService:
                             print(f"[sync] insights para story {story_id}:", metrics)
 
                             slide_ids = self._get_slide_ids_to_update(user_id, story_id)
+                            slide_ids = self._collapse_duplicate_slide_ids(slide_ids)
                             if not slide_ids:
-                                self._create_slide(
-                                    sequence_id=sequence_id,
-                                    order_index=idx + 1,
-                                    image_url=image_url,
-                                    story_id=story_id,
-                                    metrics=metrics,
-                                )
-                                created += 1
+                                ph_id = self._first_placeholder_slide_id(sequence_id)
+                                if ph_id is not None:
+                                    self._hydrate_slide_from_instagram(
+                                        ph_id, story_id, image_url, metrics, idx + 1
+                                    )
+                                else:
+                                    self._create_slide(
+                                        sequence_id=sequence_id,
+                                        order_index=idx + 1,
+                                        image_url=image_url,
+                                        story_id=story_id,
+                                        metrics=metrics,
+                                    )
+                                    created += 1
                             else:
                                 for slide_id in slide_ids:
                                     self._update_slide(slide_id=slide_id, image_url=image_url, metrics=metrics)

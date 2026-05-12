@@ -91,6 +91,19 @@ def delete_sequence(
         raise HTTPException(status_code=500, detail="Error inesperado al eliminar secuencia de historias.")
 
 
+@router.delete("/slides/{slide_id}")
+def delete_slide(
+    slide_id: int,
+    user_id: Annotated[str, Depends(get_current_user)],
+) -> dict[str, bool]:
+    try:
+        return {"ok": service.delete_slide(slide_id, user_id)}
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al eliminar la historia.")
+
+
 @router.get("/metrics", response_model=StoriesMetricsOut)
 def get_metrics(
     user_id: Annotated[str, Depends(get_current_user)],

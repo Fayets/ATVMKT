@@ -28,7 +28,10 @@ export type WeekMetrics = {
   conversaciones: number[]
   shows: number[]
   cierres: number[]
+  /** Cash por bucket: reportes closer ventas (`ingreso`) + formularios seguimiento. El embudo mensual `ingresos` sigue siendo Pagó + seguimiento. */
   ingresos: number[]
+  /** Facturación USD (mismo criterio que `funnel.facturacion` / `leadFacturacionUsd`) por bucket semanal. */
+  facturacion: number[]
   noShows: number[]
 }
 
@@ -117,7 +120,7 @@ function resolveProgramPrice(programPrices: Record<string, number>, progRaw: unk
   return null
 }
 
-/** ISO `YYYY-MM-DD` para bucket semanal/diario de cash (columna Pagó). */
+/** ISO `YYYY-MM-DD` para bucket semanal/diario de facturación en leads. */
 function leadMetricDateIso(l: LeadRow): string | null {
   const candidates = [l.date, l.scheduled_at, l.call_at, l.agendo]
   for (const c of candidates) {
@@ -335,12 +338,24 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
 
   // Weekly + daily distributions from daily_reports by actual date
   const allReports = [...setterReports, ...closerReports]
-  const byWeek: WeekMetrics = { agendas: [0,0,0,0], conversaciones: [0,0,0,0], shows: [0,0,0,0], cierres: [0,0,0,0], ingresos: [0,0,0,0], noShows: [0,0,0,0] }
-  const z7 = () => [0,0,0,0,0,0,0]
+  const byWeek: WeekMetrics = {
+    agendas: [0, 0, 0, 0],
+    conversaciones: [0, 0, 0, 0],
+    shows: [0, 0, 0, 0],
+    cierres: [0, 0, 0, 0],
+    ingresos: [0, 0, 0, 0],
+    facturacion: [0, 0, 0, 0],
+    noShows: [0, 0, 0, 0],
+  }
+  const z7 = () => [0, 0, 0, 0, 0, 0, 0]
   const byWeekDay: LeadsAnalytics['byWeekDay'] = {
-    conversaciones: [z7(),z7(),z7(),z7()], agendas: [z7(),z7(),z7(),z7()],
-    shows: [z7(),z7(),z7(),z7()], cierres: [z7(),z7(),z7(),z7()],
-    ingresos: [z7(),z7(),z7(),z7()], noShows: [z7(),z7(),z7(),z7()],
+    conversaciones: [z7(), z7(), z7(), z7()],
+    agendas: [z7(), z7(), z7(), z7()],
+    shows: [z7(), z7(), z7(), z7()],
+    cierres: [z7(), z7(), z7(), z7()],
+    ingresos: [z7(), z7(), z7(), z7()],
+    facturacion: [z7(), z7(), z7(), z7()],
+    noShows: [z7(), z7(), z7(), z7()],
   }
 
   allReports.forEach((r: Record<string, unknown>) => {
@@ -354,26 +369,13 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     const ag = Number(r.agendas) || 0
     const sh = Number(r.shows) || 0
     const ci = Number(r.cierres) || 0
+    const ing = Number(r.ingreso) || 0
 
     byWeek.conversaciones[w] += conv; byWeekDay.conversaciones[w][dow] += conv
     byWeek.agendas[w] += ag;         byWeekDay.agendas[w][dow] += ag
     byWeek.shows[w] += sh;           byWeekDay.shows[w][dow] += sh
     byWeek.cierres[w] += ci;         byWeekDay.cierres[w][dow] += ci
-  })
-
-  // Cash semanal/diario: columna Pagó por lead (misma ventana mensual que GET /leads)
-  leads.forEach((l) => {
-    const pay = Number(l.payment) || 0
-    if (pay <= 0) return
-    const iso = leadMetricDateIso(l)
-    if (!iso) return
-    const date = new Date(`${iso}T12:00:00`)
-    if (Number.isNaN(date.getTime())) return
-    const dayOfMonth = date.getDate()
-    const w = Math.min(3, Math.floor((dayOfMonth - 1) / 7))
-    const dow = (date.getDay() + 6) % 7
-    byWeek.ingresos[w] += pay
-    byWeekDay.ingresos[w][dow] += pay
+    byWeek.ingresos[w] += ing;       byWeekDay.ingresos[w][dow] += ing
   })
 
   seguimientoEntries.forEach((e) => {
@@ -387,6 +389,21 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     const dow = (date.getDay() + 6) % 7
     byWeek.ingresos[w] += monto
     byWeekDay.ingresos[w][dow] += monto
+  })
+
+  // Facturación por día/semana: mismo `leadFacturacionUsd` que el embudo mensual (fecha vía `leadMetricDateIso`)
+  leads.forEach((l) => {
+    const bill = leadFacturacionUsd(l)
+    if (bill <= 0) return
+    const iso = leadMetricDateIso(l)
+    if (!iso) return
+    const date = new Date(`${iso}T12:00:00`)
+    if (Number.isNaN(date.getTime())) return
+    const dayOfMonth = date.getDate()
+    const w = Math.min(3, Math.floor((dayOfMonth - 1) / 7))
+    const dow = (date.getDay() + 6) % 7
+    byWeek.facturacion[w] += bill
+    byWeekDay.facturacion[w][dow] += bill
   })
 
   // Compute noShows per week and per day

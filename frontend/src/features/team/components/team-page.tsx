@@ -59,7 +59,7 @@ export function TeamPage() {
   const [setters, setSetters] = useState<ApiTeamMember[]>([])
   const [closers, setClosers] = useState<ApiTeamMember[]>([])
   const [dashboard, setDashboard] = useState<TeamDashboardResponse | null>(null)
-  /** Misma fuente que Dashboard de Ventas (programas en leads + fallback reportes). */
+  /** Misma fuente que Dashboard de Ventas: reportes closer (`ingreso`) y seguimiento (`monto`). */
   const [ventasKpis, setVentasKpis] = useState<{ facturacion: number; ingresos: number } | null>(null)
   const [loading, setLoading] = useState(true)
 

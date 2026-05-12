@@ -10,6 +10,10 @@ import { getLeadsAnalytics } from '@/features/leads/services/leads-analytics'
 import type { VDData } from '@/features/sales-dashboard/sales-dashboard-vd'
 
 function fP(v: number) { return v.toFixed(1) + '%' }
+function fPOrDash(v: number) {
+  if (!Number.isFinite(v) || Number.isNaN(v)) return '—'
+  return fP(v)
+}
 function fN(v: number) { return Math.round(v).toLocaleString('es-AR') }
 function pct(o: number, n: number) { if (o === 0) return n > 0 ? 100 : 0; return ((n - o) / Math.abs(o)) * 100 }
 
@@ -326,10 +330,20 @@ function MensualView({ curr, prev, delta }: { curr: VDData; prev: VDData; delta:
 // ── SEMANAL ──
 function SemanalView({ curr }: { curr: VDData }) {
   const weeks = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4']
-  const showUpRates = curr.agendasByWeek.map((a, i) => a > 0 ? (curr.showsByWeek[i] / a) * 100 : 0)
-  const closeRates = curr.showsByWeek.map((s, i) => s > 0 ? (curr.cierresByWeek[i] / s) * 100 : 0)
+  const showUpRates = curr.agendasByWeek.map((a, i) => {
+    const sh = curr.showsByWeek[i] ?? 0
+    if (a > 0) return (sh / a) * 100
+    return sh > 0 ? Number.NaN : 0
+  })
+  const closeRates = curr.showsByWeek.map((s, i) => {
+    const ci = curr.cierresByWeek[i] ?? 0
+    if (s > 0) return (ci / s) * 100
+    return ci > 0 ? Number.NaN : 0
+  })
   const tasaAgend = curr.conversacionesByWeek.map((c, i) => c > 0 ? (curr.agendasByWeek[i] / c) * 100 : 0)
-  const aovW = curr.cierresByWeek.map((c, i) => c > 0 ? curr.ingresosByWeek[i] / c : 0)
+  const aovW = curr.cierresByWeek.map((c, i) =>
+    c > 0 ? (curr.byWeek.facturacion[i] ?? 0) / c : 0,
+  )
 
   const rows = [
     { label: 'Conversaciones', data: curr.conversacionesByWeek },
@@ -337,10 +351,9 @@ function SemanalView({ curr }: { curr: VDData }) {
     { label: 'Shows', data: curr.showsByWeek },
     { label: 'No Shows', data: curr.noShowsByWeek },
     { label: 'Cierres', data: curr.cierresByWeek },
-    { label: 'Facturación', data: curr.ingresosByWeek, fmt: formatCash },
     { label: 'T. Agendamiento %', data: tasaAgend, fmt: fP },
-    { label: 'Show Up Rate %', data: showUpRates, fmt: fP },
-    { label: 'Close Rate %', data: closeRates, fmt: fP },
+    { label: 'Show Up Rate %', data: showUpRates, fmt: fPOrDash },
+    { label: 'Close Rate %', data: closeRates, fmt: fPOrDash },
     { label: 'AOV', data: aovW, fmt: formatCash },
   ]
 
@@ -374,7 +387,7 @@ function SemanalView({ curr }: { curr: VDData }) {
           <Bar data={{ labels: weeks, datasets: [{ data: curr.agendasByWeek, backgroundColor: 'rgba(245,158,11,0.25)', hoverBackgroundColor: '#F59E0B', borderRadius: 8, borderSkipped: false, barPercentage: 0.5, categoryPercentage: 0.7 }] }}
             options={{ responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.6)', font: { size: 11 } } }, y: { grid: { color: 'rgba(255,255,255,0.03)', drawTicks: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.4)', font: { size: 10 }, padding: 8, maxTicksLimit: 4 } } }, plugins: { tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, cornerRadius: 8, displayColors: false } } }} />
         </ChartCard>
-        <ChartCard title="Ingresos por semana" value={formatCash(curr.ingresosByWeek.reduce((s, v) => s + v, 0))} subtitle="total">
+        <ChartCard title="Ingresos por semana" value={formatCash(curr.ingresosByWeek.reduce((s, v) => s + v, 0))} subtitle="closer ventas + seguimiento">
           <Bar data={{ labels: weeks, datasets: [{ data: curr.ingresosByWeek, backgroundColor: 'rgba(34,197,94,0.25)', hoverBackgroundColor: '#22C55E', borderRadius: 8, borderSkipped: false, barPercentage: 0.5, categoryPercentage: 0.7 }] }}
             options={{ responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.6)', font: { size: 11 } } }, y: { grid: { color: 'rgba(255,255,255,0.03)', drawTicks: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.4)', font: { size: 10 }, padding: 8, maxTicksLimit: 4, callback: (v: string | number) => '$' + (Number(v) >= 1000 ? (Number(v) / 1000).toFixed(0) + 'k' : v) } } }, plugins: { tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, cornerRadius: 8, displayColors: false, callbacks: { label: (ctx: { parsed: { y: number | null } }) => formatCash(ctx.parsed.y ?? 0) } } } }} />
         </ChartCard>
@@ -402,23 +415,49 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
   const noShowsD = wd.noShows[w]
   const cierres = wd.cierres[w]
   const ingresos = wd.ingresos[w]
-  const showUpD = agendas.map((a, i) => a > 0 ? (shows[i] / a) * 100 : 0)
-  const closeD = shows.map((s, i) => s > 0 ? (cierres[i] / s) * 100 : 0)
+  const facturacionD = wd.facturacion[w]
+  const showUpD = agendas.map((a, i) => {
+    const s = shows[i] ?? 0
+    if (a > 0) return (s / a) * 100
+    return s > 0 ? Number.NaN : 0
+  })
+  const closeD = shows.map((s, i) => {
+    const c = cierres[i] ?? 0
+    if (s > 0) return (c / s) * 100
+    return c > 0 ? Number.NaN : 0
+  })
   const tasaAgD = conv.map((c, i) => c > 0 ? (agendas[i] / c) * 100 : 0)
-  const aovD = cierres.map((c, i) => c > 0 ? ingresos[i] / c : 0)
+  const aovD = cierres.map((c, i) => (c > 0 ? facturacionD[i] / c : 0))
 
   const sum = (arr: number[]) => arr.reduce((s, v) => s + v, 0)
+  const sumAg = sum(agendas)
+  const sumSh = sum(shows)
+  const sumCi = sum(cierres)
+  const sumFact = sum(facturacionD)
+  const sumIng = sum(ingresos)
+  const sumConv = sum(conv)
+
   const rows = [
-    { label: 'Conversaciones', data: conv, total: sum(conv) },
-    { label: 'Agendas', data: agendas, total: sum(agendas) },
-    { label: 'Shows', data: shows, total: sum(shows) },
+    { label: 'Conversaciones', data: conv, total: sumConv },
+    { label: 'Agendas', data: agendas, total: sumAg },
+    { label: 'Shows', data: shows, total: sumSh },
     { label: 'No Shows', data: noShowsD, total: sum(noShowsD) },
-    { label: 'Cierres', data: cierres, total: sum(cierres) },
-    { label: 'Facturación', data: ingresos, total: sum(ingresos), fmt: formatCash },
-    { label: 'T. Agendamiento', data: tasaAgD, total: sum(conv) > 0 ? (sum(agendas) / sum(conv)) * 100 : 0, fmt: fP },
-    { label: 'Show Up Rate', data: showUpD, total: sum(agendas) > 0 ? (sum(shows) / sum(agendas)) * 100 : 0, fmt: fP },
-    { label: 'Close Rate', data: closeD, total: sum(shows) > 0 ? (sum(cierres) / sum(shows)) * 100 : 0, fmt: fP },
-    { label: 'AOV', data: aovD, total: sum(cierres) > 0 ? sum(ingresos) / sum(cierres) : 0, fmt: formatCash },
+    { label: 'Cierres', data: cierres, total: sumCi },
+    { label: 'Ingresos (reportes)', data: ingresos, total: sumIng, fmt: formatCash },
+    { label: 'T. Agendamiento', data: tasaAgD, total: sumConv > 0 ? (sumAg / sumConv) * 100 : 0, fmt: fP },
+    {
+      label: 'Show Up Rate',
+      data: showUpD,
+      total: sumAg > 0 ? (sumSh / sumAg) * 100 : sumSh > 0 ? Number.NaN : 0,
+      fmt: fPOrDash,
+    },
+    {
+      label: 'Close Rate',
+      data: closeD,
+      total: sumSh > 0 ? (sumCi / sumSh) * 100 : sumCi > 0 ? Number.NaN : 0,
+      fmt: fPOrDash,
+    },
+    { label: 'AOV', data: aovD, total: sumCi > 0 ? sumFact / sumCi : 0, fmt: formatCash },
   ]
 
   return (
@@ -463,7 +502,7 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
           <Bar data={{ labels: days, datasets: [{ data: agendas, backgroundColor: 'rgba(245,158,11,0.25)', hoverBackgroundColor: '#F59E0B', borderRadius: 6, borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.8 }] }}
             options={{ responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.6)', font: { size: 11 } } }, y: { grid: { color: 'rgba(255,255,255,0.03)', drawTicks: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.4)', font: { size: 10 }, padding: 8, maxTicksLimit: 4 } } }, plugins: { tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, cornerRadius: 8, displayColors: false } } }} />
         </ChartCard>
-        <ChartCard title="Ingresos diarios" value={formatCash(ingresos.reduce((s, v) => s + v, 0))} subtitle="total">
+        <ChartCard title="Ingresos diarios" value={formatCash(ingresos.reduce((s, v) => s + v, 0))} subtitle="closer ventas + seguimiento">
           <Bar data={{ labels: days, datasets: [{ data: ingresos, backgroundColor: 'rgba(34,197,94,0.25)', hoverBackgroundColor: '#22C55E', borderRadius: 6, borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.8 }] }}
             options={{ responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.6)', font: { size: 11 } } }, y: { grid: { color: 'rgba(255,255,255,0.03)', drawTicks: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.4)', font: { size: 10 }, padding: 8, maxTicksLimit: 4, callback: (v: string | number) => '$' + (Number(v) >= 1000 ? (Number(v) / 1000).toFixed(0) + 'k' : v) } } }, plugins: { tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, cornerRadius: 8, displayColors: false, callbacks: { label: (ctx: { parsed: { y: number | null } }) => formatCash(ctx.parsed.y ?? 0) } } } }} />
         </ChartCard>
