@@ -390,6 +390,55 @@ def _migrate_postgres_lead_closer_report() -> None:
         conn.close()
 
 
+def _migrate_postgres_lead_programada_ofrecido_llamada() -> None:
+    """Añade columna programada_ofrecido_llamada (programa ofrecido en llamada; no facturación)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'lead'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            cur.execute(
+                """
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+                """,
+                (physical, "programada_ofrecido_llamada"),
+            )
+            if not cur.fetchone():
+                try:
+                    cur.execute(
+                        f"ALTER TABLE {sql_table} ADD COLUMN programada_ofrecido_llamada TEXT NOT NULL DEFAULT ''"
+                    )
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
 def _migrate_postgres_youtube_content() -> None:
     """Crea `youtubecontent` en Postgres (Pony no altera tablas ya mapeadas)."""
     if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
@@ -811,6 +860,7 @@ def init_db() -> None:
     _migrate_postgres_drop_canal_agendo()
     _migrate_postgres_lead_setter_closer()
     _migrate_postgres_lead_closer_report()
+    _migrate_postgres_lead_programada_ofrecido_llamada()
     _migrate_postgres_youtube_content()
     _migrate_postgres_storyslide_views_shares()
     _migrate_postgres_setter_report_text_columns()

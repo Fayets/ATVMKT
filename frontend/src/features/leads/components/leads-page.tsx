@@ -96,8 +96,12 @@ function teamRoleSelectOptions(
 
 const PROGRAM_COLOR_PALETTE = ['#22C55E', '#3B82F6', '#F59E0B', '#A855F7', '#EC4899', '#06B6D4', '#EAB308', '#64748B']
 
-function programOfferedSelectOptions(lead: Lead, parentOpts: string[]): string[] {
-  const v = String(lead.program_offered || '').trim()
+function programOfferedSelectOptions(
+  lead: Lead,
+  field: 'program_offered' | 'programada_ofrecido_llamada',
+  parentOpts: string[],
+): string[] {
+  const v = String(lead[field] || '').trim()
   if (!v || parentOpts.includes(v)) return parentOpts
   const rest = parentOpts.filter((x) => x !== '')
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
@@ -1440,8 +1444,10 @@ function LeadsTableCell({
             : col.key === 'setter' || col.key === 'closer'
               ? teamRoleSelectOptions(lead, col.key, col.options!)
               : col.key === 'program_offered'
-                ? programOfferedSelectOptions(lead, col.options!)
-                : col.options!
+                ? programOfferedSelectOptions(lead, 'program_offered', col.options!)
+                : col.key === 'programada_ofrecido_llamada'
+                  ? programOfferedSelectOptions(lead, 'programada_ofrecido_llamada', col.options!)
+                  : col.options!
       return (
         <select
           autoFocus

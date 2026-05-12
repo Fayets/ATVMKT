@@ -28,6 +28,8 @@ export type Lead = {
   call_link: string | null
   closer_report: string | null
   program_offered: string | null
+  /** Programa ofrecido en la llamada (BD `programada_ofrecido_llamada`); no usado en facturación. */
+  programada_ofrecido_llamada: string | null
   /** Precio USD del catálogo en BD (GET /leads); mismo criterio que Ajustes → Programas. */
   program_price_usd?: number | null
   revenue: number
@@ -224,7 +226,17 @@ export function buildColumns(
     { key: 'razon_compra', label: 'Razón compra', width: 200, type: 'text', editable: true, defaultVisible: true },
     { key: 'ingresos_mensuales', label: 'Ingresos lead', width: 130, type: 'currency', editable: true, defaultVisible: true },
     // Venta
-    { key: 'program_offered', label: 'Prog. ofrecido', width: 130, type: 'badge', editable: true, options: progOpts, colors: progColors, defaultVisible: true },
+    {
+      key: 'programada_ofrecido_llamada',
+      label: 'Prog. ofrecido',
+      width: 130,
+      type: 'badge',
+      editable: true,
+      options: progOpts,
+      colors: progColors,
+      defaultVisible: true,
+    },
+    { key: 'program_offered', label: 'Prog. comprado', width: 130, type: 'badge', editable: true, options: progOpts, colors: progColors, defaultVisible: true },
     { key: 'payment', label: 'Pagó', width: 100, type: 'currency', editable: true, defaultVisible: true },
     { key: 'owed', label: 'Debe', width: 100, type: 'currency', editable: true, defaultVisible: true },
     // Calificación Calendly

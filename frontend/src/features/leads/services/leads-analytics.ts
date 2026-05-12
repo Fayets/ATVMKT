@@ -251,9 +251,8 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   ).length
 
   /**
-   * Facturación por programa: cada fila con «Prog. ofrecido» suma el precio del catálogo
-   * (`program_price_usd` en API o /programs), sin exigir status Cerrado.
-   * Filas sin programa: en modo legacy (sin catálogo en cliente) suman revenue/payment.
+   * Facturación por programa: solo «Prog. comprado» (`program_offered` / `programa_ofrecido` en BD).
+   * `programada_ofrecido_llamada` no interviene aquí.
    */
   const leadFacturacionUsd = (l: LeadRow): number => {
     const prog = String(l.program_offered ?? '').trim()
@@ -317,7 +316,7 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
           : 0,
   }
 
-  // Programs breakdown (from leads table; ingresos = facturación USD del programa cuando hay catálogo)
+  // Programs breakdown (solo programa comprado / facturación; no `programada_ofrecido_llamada`)
   const progMap: Record<string, { ventas: number; ingresos: number }> = {}
   leads.forEach(l => {
     const p = String(l.program_offered ?? '').trim()

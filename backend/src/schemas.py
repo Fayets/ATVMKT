@@ -414,7 +414,14 @@ class LeadOut(BaseModel):
     call: str | None = Field(default=None, description="ISO fecha/hora de la cita (misma columna `call` en BD)")
     call_link: str | None = None
     closer_report: str | None = None
-    program_offered: str | None = None
+    program_offered: str | None = Field(
+        default=None,
+        description="Programa comprado / facturación (columna `programa_ofrecido` en BD).",
+    )
+    programada_ofrecido_llamada: str | None = Field(
+        default=None,
+        description="Programa ofrecido en la llamada (solo CRM; no entra en facturación). Columna `programada_ofrecido_llamada`.",
+    )
     program_price_usd: float | None = Field(
         default=None,
         description="Precio USD del catálogo (OfferedProgram) si coincide `programa_ofrecido` en BD.",
@@ -493,6 +500,7 @@ class LeadPatchRequest(BaseModel):
     call: str | None = Field(default=None, description="ISO fecha/hora → columna call (alias de scheduled_at)")
     call_link: str | None = None
     program_offered: str | None = None
+    programada_ofrecido_llamada: str | None = None
     revenue: float | None = None
     ingresos_mensuales: float | None = None
     payment: float | None = None

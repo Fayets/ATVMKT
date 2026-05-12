@@ -173,6 +173,7 @@ class Lead(db.Entity):
     closer_report = Optional(str, default="")
     razon_compra = Optional(str, default="")
     programa_ofrecido = Optional(str, default="")
+    programada_ofrecido_llamada = Optional(str, default="")
     # Ventas
     pago = Optional(float, default=0)
     debe = Optional(float, default=0)
