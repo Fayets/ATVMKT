@@ -68,6 +68,7 @@ const settingsGroup: NavGroup = {
   items: [
     { label: 'Listas maestras', href: '/listas' },
     { label: 'Programas', href: '/programas' },
+    { label: 'Tasa de refresco', href: '/ajustes/tasa-refresco' },
     { label: 'Conexiones API', href: '/conexiones' },
   ],
 }

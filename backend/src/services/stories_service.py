@@ -17,11 +17,10 @@ from pony.orm import ObjectNotFound, db_session, flush
 from src.db import db
 from src.models import ApiConnection, Lead, StorySequence, StorySlide
 from src.schemas import StorySequenceIn
+from src.services.sync_settings_service import get_stories_interval_minutes
 from src.story_sync_scheduler_ref import next_auto_sync_stories_run_time
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
-# Debe coincidir con el job `auto_sync_stories` en main.py (IntervalTrigger).
-STORIES_SYNC_INTERVAL_MINUTES = 5
 _sync_lock = asyncio.Lock()
 
 
@@ -586,7 +585,9 @@ class StoriesService:
         if sched_next is not None:
             next_sync = sched_next
         else:
-            next_sync = last + timedelta(minutes=STORIES_SYNC_INTERVAL_MINUTES) if last else None
+            next_sync = (
+                last + timedelta(minutes=get_stories_interval_minutes()) if last else None
+            )
 
         token_saved_at: datetime | None = None
         token_expires_at: datetime | None = None

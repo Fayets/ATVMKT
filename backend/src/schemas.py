@@ -594,3 +594,23 @@ class KeywordsListResponse(BaseModel):
         description="Opciones de reels con keyword para filtro en frontend.",
     )
     metrics: KeywordsMetrics = Field(default_factory=KeywordsMetrics)
+
+
+class SyncSettingsOut(BaseModel):
+    stories_interval_minutes: int
+    reels_interval_minutes: int
+    stories_next_sync: str | None = None
+    reels_next_sync: str | None = None
+    min_interval_minutes: int = 1
+    max_interval_minutes: int = 10080
+
+
+class SyncSettingsPatch(BaseModel):
+    stories_interval_minutes: int | None = Field(
+        default=None,
+        description="Minutos entre sync automático de historias (Instagram).",
+    )
+    reels_interval_minutes: int | None = Field(
+        default=None,
+        description="Minutos entre refresh automático de métricas de reels.",
+    )

@@ -235,6 +235,17 @@ class CloserReport(db.Entity):
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
+class AppSyncSettings(db.Entity):
+    """Config global del servidor: intervalos de sync automático (singleton id=1)."""
+
+    _table_ = "app_sync_settings"
+
+    id = PrimaryKey(int)
+    stories_interval_minutes = Required(int, default=5)
+    reels_interval_minutes = Required(int, default=1440)
+    updated_at = Optional(datetime)
+
+
 class SeguimientoReport(db.Entity):
     """Cobranzas / seguimiento declaradas por setter, closer o cash; suman a cash collected del mes."""
 

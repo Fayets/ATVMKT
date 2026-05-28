@@ -56,6 +56,8 @@ type Secuencia = {
   fecha: string
   slides: StorySlide[]
   totalReach: number
+  /** Promedio de views (Graph API) entre los slides de la secuencia. */
+  avgViews: number
   totalReplies: number
   dolor?: string
   angulo?: string
@@ -107,6 +109,8 @@ function formatSequenceDateDisplay(iso: string): string {
 
 /** Alcance único por slide (Graph API `reach`); métrica principal de historias — no views ni navigation. */
 const slideReachCount = (s: Pick<StorySlide, 'reach'>) => toNumber(s.reach)
+/** Reproducciones/impresiones por slide (Graph API `views`). */
+const slideViewsCount = (s: Pick<StorySlide, 'views'>) => toNumber(s.views)
 
 const hasCtaValue = (value: string | null | undefined): boolean => {
   const normalized = (value || '').trim().toLowerCase()
@@ -316,6 +320,9 @@ export default function HistoriasPage() {
         fecha: seq.sequence_date,
         slides,
         totalReach: slides.reduce((acc, s) => acc + slideReachCount(s), 0),
+        avgViews: slides.length > 0
+          ? Math.round(slides.reduce((acc, s) => acc + slideViewsCount(s), 0) / slides.length)
+          : 0,
         totalReplies: slides.reduce((acc, s) => acc + toNumber(s.replies), 0),
         dolor,
         angulo: seq.angulo || angulos[0] || '',
@@ -770,10 +777,11 @@ export default function HistoriasPage() {
                   <div className="flex items-center gap-4">
                     <div className="text-[14px] font-semibold">{formatSequenceDateDisplay(sec.fecha)}</div>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">ALCANCE: {sec.totalReach.toLocaleString('es-AR')}</span>
+                    <span className="font-mono-num text-[12px] text-[var(--text2)]">VIS. PROM.: {sec.avgViews.toLocaleString('es-AR')}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CASH: {formatCash(sec.cash_generado)}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">CHATS: {sec.chats}</span>
                     <span className="font-mono-num text-[12px] text-[var(--text2)]">AGENDAS: {sec.agendas}</span>
-                    <span className="font-mono-num text-[12px] text-[var(--text2)]">Cash por chat: {formatCash(cpc)}</span>
+                    <span className="font-mono-num text-[12px] text-[var(--text2)]">CPC: {formatCash(cpc)}</span>
                     {sec.hasSync
                       ? <span className="rounded bg-[rgba(34,197,94,0.15)] px-2 py-1 text-[10px] text-[var(--green)] font-medium">SINCRONIZADO</span>
                       : <span className="rounded bg-[rgba(161,161,170,0.15)] px-2 py-1 text-[10px] text-[var(--text3)] font-medium">Sin sincronizar</span>}
@@ -1075,11 +1083,12 @@ function StorySequenceDetail({
 
         <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-[var(--text2)]">
           <span className="font-mono-num">ALCANCE: {sequence.totalReach.toLocaleString('es-AR')}</span>
+          <span className="font-mono-num">VIS. PROM: {sequence.avgViews.toLocaleString('es-AR')}</span>
           <span className="font-mono-num">CASH: {formatCash(sequence.cash_generado)}</span>
           <span className="font-mono-num">CHATS: {sequence.chats}</span>
           <span className="font-mono-num">AGENDAS: {sequence.agendas}</span>
           <span className="font-mono-num">
-            Cash por chat: {formatCash(sequence.chats > 0 ? sequence.cash_generado / sequence.chats : 0)}
+            CPC: {formatCash(sequence.chats > 0 ? sequence.cash_generado / sequence.chats : 0)}
           </span>
         </div>
 
@@ -1102,7 +1111,7 @@ function StorySequenceDetail({
             <input type="number" value={chats} onChange={(e) => setChats(Number(e.target.value) || 0)} className="w-full bg-transparent text-center font-mono-num text-2xl font-bold text-[var(--text)] outline-none" />
           </div>
           <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">
-            <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">Cash por chat</div>
+            <div className="text-[9px] uppercase tracking-wider text-[var(--text3)]">CPC</div>
             <div className="font-mono-num text-2xl font-bold">{formatCash(cashPorChatTotal)}</div>
           </div>
           <div className="rounded-lg bg-[var(--bg4)] p-4 text-center">

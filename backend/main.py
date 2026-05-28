@@ -5,7 +5,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from decouple import config
 from fastapi import FastAPI
@@ -23,14 +22,26 @@ from src.controllers.keywords_controller import router as keywords_router
 from src.controllers.leads_controller import router as leads_router
 from src.controllers.reels_controller import router as reels_router
 from src.controllers.stories_controller import router as stories_router
+from src.controllers.sync_settings_controller import router as sync_settings_router
 from src.controllers.team_controller import router as team_router
 from src.controllers.youtube_controller import router as youtube_router
 from src.controllers.webhook_controller import router as webhook_router
 from src.db import db, init_db
 from src.models import ApiConnection
 from src.services.reels_services import ReelsServices
-from src.story_sync_scheduler_ref import bind_stories_scheduler
-from src.services.stories_service import STORIES_SYNC_INTERVAL_MINUTES, StoriesService
+from src.services.sync_scheduler_service import (
+    REELS_JOB_ID,
+    STORIES_JOB_ID,
+    apply_sync_schedules,
+    bind_sync_scheduler,
+)
+from src.services.sync_settings_service import (
+    DEFAULT_REELS_INTERVAL_MINUTES,
+    DEFAULT_STORIES_INTERVAL_MINUTES,
+    get_reels_interval_minutes,
+    get_stories_interval_minutes,
+)
+from src.services.stories_service import StoriesService
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 scheduler = AsyncIOScheduler()
@@ -82,21 +93,27 @@ async def lifespan(_: FastAPI):
     print(f"[media] Directorio: {media_dir}")
     scheduler.add_job(
         auto_sync_stories,
-        trigger=IntervalTrigger(minutes=STORIES_SYNC_INTERVAL_MINUTES),
-        id="auto_sync_stories",
+        trigger=IntervalTrigger(minutes=DEFAULT_STORIES_INTERVAL_MINUTES),
+        id=STORIES_JOB_ID,
         replace_existing=True,
         next_run_time=datetime.now(AR_TZ),
     )
     scheduler.add_job(
         auto_refresh_reels_metrics,
-        trigger=CronTrigger(hour=7, minute=0, timezone=AR_TZ),
-        id="auto_refresh_reels_metrics",
+        trigger=IntervalTrigger(minutes=DEFAULT_REELS_INTERVAL_MINUTES),
+        id=REELS_JOB_ID,
         replace_existing=True,
     )
-    bind_stories_scheduler(scheduler)
+    bind_sync_scheduler(scheduler)
+    apply_sync_schedules()
     scheduler.start()
-    print(f"[scheduler] Auto-sync de historias iniciado (cada {STORIES_SYNC_INTERVAL_MINUTES} min)")
-    print("[scheduler] Auto refresh-metrics de reels iniciado (diario 07:00 AR)")
+    print(
+        f"[scheduler] Auto-sync historias cada {get_stories_interval_minutes()} min "
+        f"(próximo job según APScheduler)"
+    )
+    print(
+        f"[scheduler] Auto refresh-metrics reels cada {get_reels_interval_minutes()} min"
+    )
     yield
     scheduler.shutdown()
 
@@ -128,6 +145,7 @@ app.include_router(keywords_router)
 app.include_router(reels_router)
 app.include_router(bio_router)
 app.include_router(stories_router)
+app.include_router(sync_settings_router)
 app.include_router(team_router)
 app.include_router(youtube_router)
 app.include_router(webhook_router)
