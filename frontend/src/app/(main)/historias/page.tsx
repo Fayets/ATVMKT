@@ -515,13 +515,6 @@ export default function HistoriasPage() {
         cash_generado: cashGenerado,
         has_cta: hasCtaValue(ctaText),
         chats,
-        slides: sec.slides.map((s, i) => ({
-          order_index: i + 1,
-          image_url: s.image_url || null,
-          dolor: form.dolor || s.dolor || null,
-          angulo: formAngulos[0] || s.angulo || null,
-          cta_text: ctaText || s.cta_text || null,
-        })),
       }),
     })
     if (!res.ok) {
