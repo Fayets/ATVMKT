@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useMonthContext } from '@/shared/components/app-providers'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
@@ -135,7 +134,6 @@ function dedupeSlidesByInstagramId(slides: StorySlide[]): StorySlide[] {
 }
 
 export default function HistoriasPage() {
-  const { month, options, setMonth } = useMonthContext()
   const { toast } = useToast()
   const { ready, userId } = useAuthUser()
   const [sequences, setSequences] = useState<StorySequence[]>([])
@@ -154,7 +152,10 @@ export default function HistoriasPage() {
   const [countdown, setCountdown] = useState<string>('')
   const [expanded, setExpanded] = useState<number | null>(null)
   const [detailSecuencia, setDetailSecuencia] = useState<Secuencia | null>(null)
-  const [monthMode, setMonthMode] = useState<'current' | 'comparison'>('current')
+  const [monthMode, setMonthMode] = useState<'current' | 'selected'>('current')
+  const [selectedMonth, setSelectedMonth] = useState('')
+  const [showMonthModal, setShowMonthModal] = useState(false)
+  const [monthDraft, setMonthDraft] = useState('')
   const [form, setForm] = useState<Record<string, string>>({ chats: '0', cash: '0' })
   const [formAngulos, setFormAngulos] = useState<string[]>([])
   const [formSlides, setFormSlides] = useState<string[]>([])
@@ -169,16 +170,34 @@ export default function HistoriasPage() {
     if (userId) headers['X-User-Id'] = userId
     return headers
   }
-  const now = new Date()
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const comparisonMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`
 
   // Undo
   const [undoAction, setUndoAction] = useState<{ label: string; execute: () => Promise<void> } | null>(null)
   const [undoProgress, setUndoProgress] = useState(100)
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const undoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const currentMonth = useMemo(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }, [])
+
+  const effectiveMonth = monthMode === 'current' ? currentMonth : selectedMonth || currentMonth
+
+  const monthChoices = useMemo(() => {
+    const fromSequences = sequences
+      .map((s) => String(s.sequence_date || '').trim().slice(0, 7))
+      .filter((ym) => /^\d{4}-\d{2}$/.test(ym))
+    const merged = [...new Set([...fromSequences, ...recentMonthOptions(36)])]
+    merged.sort((a, b) => b.localeCompare(a))
+    return merged
+  }, [sequences])
+
+  const filterSubtitle = useMemo(() => {
+    if (monthMode === 'current') return formatMonthLabel(currentMonth)
+    if (monthMode === 'selected' && selectedMonth) return formatMonthLabel(selectedMonth)
+    return formatMonthLabel(currentMonth)
+  }, [monthMode, selectedMonth, currentMonth])
   const showUndo = (label: string, fn: () => Promise<void>) => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current)
     if (undoIntervalRef.current) clearInterval(undoIntervalRef.current)
@@ -194,10 +213,10 @@ export default function HistoriasPage() {
     setLoading(true)
     try {
       const [seqRes, metricsRes] = await Promise.all([
-        apiFetch(`/stories/sequences?month=${encodeURIComponent(month)}`, {
+        apiFetch(`/stories/sequences?month=${encodeURIComponent(effectiveMonth)}`, {
           headers: authHeaders(),
         }),
-        apiFetch(`/stories/metrics?month=${encodeURIComponent(month)}`, {
+        apiFetch(`/stories/metrics?month=${encodeURIComponent(effectiveMonth)}`, {
           headers: authHeaders(),
         }),
       ])
@@ -219,7 +238,7 @@ export default function HistoriasPage() {
     } finally {
       setLoading(false)
     }
-  }, [month, ready, userId])
+  }, [effectiveMonth, ready, userId])
 
   const handleDeleteSlide = useCallback(
     async (slideId: number, options?: { closeDetail?: boolean }) => {
@@ -292,10 +311,6 @@ export default function HistoriasPage() {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [fetchMasterLists])
-  useEffect(() => {
-    setMonth(monthMode === 'current' ? currentMonth : comparisonMonth)
-  }, [monthMode, setMonth, currentMonth, comparisonMonth])
-
   // Auto-classify unclassified secuencias on page load (once per session)
   const [autoClassified, setAutoClassified] = useState(false)
   useEffect(() => {
@@ -582,22 +597,84 @@ export default function HistoriasPage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h2 className="text-lg font-semibold tracking-tight">Historias</h2>
-        <div className="flex items-center gap-2">
+        <h2 className="text-lg font-semibold tracking-tight">
+          Historias{' '}
+          <span className="text-[var(--text3)] text-sm font-normal">{filterSubtitle}</span>
+        </h2>
+        <div className="inline-flex gap-2 rounded-xl border border-[var(--border2)] bg-[var(--bg2)] p-1">
           <button
+            type="button"
             onClick={() => setMonthMode('current')}
             className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'current' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
           >
             MES ACTUAL
           </button>
           <button
-            onClick={() => setMonthMode('comparison')}
-            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'comparison' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
+            type="button"
+            onClick={() => {
+              const opts = monthChoices
+              setMonthDraft(
+                monthMode === 'selected' && selectedMonth
+                  ? selectedMonth
+                  : opts[1] || opts[0] || currentMonth,
+              )
+              setShowMonthModal(true)
+            }}
+            className={`rounded-lg px-4 py-2 text-[11px] font-semibold uppercase ${monthMode === 'selected' ? 'bg-[var(--accent)] text-white' : 'border border-[var(--border2)] text-[var(--text3)]'}`}
           >
             SELECCIONAR MES Y AÑO
           </button>
         </div>
       </div>
+
+      {showMonthModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg2)] p-5">
+            <div className="mb-4 text-[14px] font-semibold">Seleccionar mes y año</div>
+            <p className="mb-4 text-[12px] text-[var(--text3)]">
+              Elegí el mes para ver secuencias, métricas y chats de historias.
+            </p>
+            <div>
+              <label className="mb-1 block text-[11px] text-[var(--text3)]">Mes y año</label>
+              <select
+                value={monthDraft}
+                onChange={(e) => setMonthDraft(e.target.value)}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[12px] capitalize text-[var(--text)] outline-none"
+              >
+                {monthChoices.map((ym) => (
+                  <option key={ym} value={ym}>
+                    {formatMonthLabel(ym)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowMonthModal(false)}
+                className="rounded-md bg-[var(--bg4)] px-3 py-2 text-[11px] text-[var(--text3)] hover:text-[var(--text)]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!monthDraft) {
+                    toast('Elegí un mes.')
+                    return
+                  }
+                  setSelectedMonth(monthDraft)
+                  setMonthMode('selected')
+                  setShowMonthModal(false)
+                }}
+                className="rounded-md bg-[var(--accent)] px-3 py-2 text-[11px] font-semibold text-white"
+              >
+                Aplicar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats row — 4 cards */}
       <div className="mb-6 grid grid-cols-4 gap-4">
@@ -1193,3 +1270,21 @@ function StorySequenceDetail({
   )
 }
 
+function recentMonthOptions(count: number): string[] {
+  const out: string[] = []
+  const d = new Date()
+  for (let i = 0; i < count; i++) {
+    const x = new Date(d.getFullYear(), d.getMonth() - i, 1)
+    out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return out
+}
+
+function formatMonthLabel(ym: string): string {
+  const parts = ym.split('-')
+  const y = Number(parts[0])
+  const m = Number(parts[1])
+  if (!y || !m) return ym
+  const d = new Date(y, m - 1, 1)
+  return d.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })
+}
