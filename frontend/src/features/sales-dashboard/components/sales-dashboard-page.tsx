@@ -30,6 +30,9 @@ export function SalesDashboardPage() {
     const { analytics } = await getLeadsAnalytics(m)
     return {
       ...analytics,
+      chats: analytics.chats,
+      chatsReels: analytics.chatsReels,
+      chatsStories: analytics.chatsStories,
       agendasByWeek: analytics.byWeek.agendas,
       conversacionesByWeek: analytics.byWeek.conversaciones,
       showsByWeek: analytics.byWeek.shows,
@@ -129,17 +132,19 @@ function VDKpi({ label, value, change, hib = true }: { label: string; value: str
 // ── Funnel Component ──
 function VDFunnel({ d }: { d: VDData }) {
   const steps = [
-    { label: 'CHATS', value: d.conversaciones },
+    { label: 'CHATS', value: d.chats },
+    { label: 'CONVERSACIONES', value: d.conversaciones },
     { label: 'AGENDAS', value: d.agendas },
     { label: 'SHOWS', value: d.shows },
     { label: 'CIERRES', value: d.cierres },
   ]
   const rates = [
+    { label: 'Tasa de conversación', rate: d.chats > 0 ? (d.conversaciones / d.chats) * 100 : 0 },
     { label: 'Tasa de agendamiento', rate: d.tasaAgendamiento },
     { label: 'Tasa de show', rate: d.showUpRate },
     { label: 'Tasa de cierre', rate: d.closeRate },
   ]
-  const widths = [100, 60, 42, 28]
+  const widths = [100, 75, 55, 42, 28]
 
   return (
     <div className="glass-card p-6">
@@ -151,13 +156,20 @@ function VDFunnel({ d }: { d: VDData }) {
             <div key={s.label} className="relative flex items-center justify-center py-3 transition-all" style={{
               width: `${widths[i]}%`,
               background: `rgba(230,57,70,${0.35 - i * 0.07})`,
-              borderRadius: i === 0 ? '8px 8px 0 0' : i === 3 ? '0 0 8px 8px' : '0',
-              clipPath: i < 3 ? `polygon(0 0, 100% 0, ${100 - (widths[i] - widths[i + 1]) / 2}% 100%, ${(widths[i] - widths[i + 1]) / 2}% 100%)` : undefined,
-              minHeight: '70px',
+              borderRadius: i === 0 ? '8px 8px 0 0' : i === steps.length - 1 ? '0 0 8px 8px' : '0',
+              clipPath: i < steps.length - 1 ? `polygon(0 0, 100% 0, ${100 - (widths[i] - widths[i + 1]) / 2}% 100%, ${(widths[i] - widths[i + 1]) / 2}% 100%)` : undefined,
+              minHeight: i === 0 ? '84px' : '70px',
             }}>
               <div className="text-center z-10">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-[rgba(255,255,255,0.7)]">{s.label}</div>
                 <div className="font-mono-num text-[22px] font-bold text-white">{s.value}</div>
+                {s.label === 'CHATS' && (
+                  <div className="mt-1 flex items-center justify-center gap-2 text-[9px] text-[rgba(255,255,255,0.6)]">
+                    <span>Historias <span className="font-mono-num text-[rgba(255,255,255,0.85)]">{fN(d.chatsStories)}</span></span>
+                    <span aria-hidden="true">·</span>
+                    <span>Reels <span className="font-mono-num text-[rgba(255,255,255,0.85)]">{fN(d.chatsReels)}</span></span>
+                  </div>
+                )}
               </div>
             </div>
           ))}

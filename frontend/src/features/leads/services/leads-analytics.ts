@@ -7,6 +7,10 @@ import { apiFetch } from '@/lib/api'
 export type LeadRow = Record<string, unknown>
 
 export type LeadsFunnel = {
+  /** Reels + stories del mes (`/reels/metrics` + `/stories/metrics`). */
+  chats: number
+  chatsReels: number
+  chatsStories: number
   conversaciones: number
   agendas: number
   shows: number
@@ -73,6 +77,9 @@ export function calcFunnel(leads: LeadRow[], conversaciones?: number): LeadsFunn
   const conv = conversaciones ?? leads.length
 
   return {
+    chats: 0,
+    chatsReels: 0,
+    chatsStories: 0,
     conversaciones: conv,
     agendas, shows, noShows, cierres, ingresos, facturacion,
     ticketPromedio: cierres > 0 ? ingresos / cierres : 0,
@@ -153,6 +160,9 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const range = monthRangeIso(month)
   let seguimientoEntries: { fecha: string; monto: number }[] = []
   let seguimientoTotal = 0
+  let chats = 0
+  let chatsReels = 0
+  let chatsStories = 0
   try {
     const leadsReq = apiFetch(`/leads?month=${encodeURIComponent(month)}`)
     const programsReq = apiFetch('/programs')
@@ -166,7 +176,16 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
             `/team/reports?desde=${encodeURIComponent(range.desde)}&hasta=${encodeURIComponent(range.hasta)}`,
           )
         : Promise.resolve(new Response('', { status: 400 }))
-    const [leadsRes, repRes, progRes, segRes] = await Promise.all([leadsReq, reportsReq, programsReq, segReq])
+    const reelsMetricsReq = apiFetch(`/reels/metrics?month=${encodeURIComponent(month)}`)
+    const storiesMetricsReq = apiFetch(`/stories/metrics?month=${encodeURIComponent(month)}`)
+    const [leadsRes, repRes, progRes, segRes, reelsMetricsRes, storiesMetricsRes] = await Promise.all([
+      leadsReq,
+      reportsReq,
+      programsReq,
+      segReq,
+      reelsMetricsReq,
+      storiesMetricsReq,
+    ])
     if (leadsRes.ok) {
       const j = (await leadsRes.json().catch(() => ({}))) as { leads?: LeadRow[] }
       if (Array.isArray(j.leads)) leads.push(...j.leads)
@@ -229,6 +248,18 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
         }
       }
     }
+
+    const reelsMetricsData = reelsMetricsRes.ok
+      ? ((await reelsMetricsRes.json().catch(() => ({}))) as { chats_del_mes?: unknown })
+      : {}
+    const storiesMetricsData = storiesMetricsRes.ok
+      ? ((await storiesMetricsRes.json().catch(() => ({}))) as { chats_del_mes?: unknown })
+      : {}
+    const reelsChats = Number(reelsMetricsData?.chats_del_mes ?? 0) || 0
+    const storiesChats = Number(storiesMetricsData?.chats_del_mes ?? 0) || 0
+    chatsReels = reelsChats
+    chatsStories = storiesChats
+    chats = chatsReels + chatsStories
   } catch {
     /* red / sin sesión: seguimos con arrays vacíos */
   }
@@ -293,6 +324,9 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
       : null
 
   const funnel: LeadsFunnel = {
+    chats,
+    chatsReels,
+    chatsStories,
     conversaciones,
     agendas,
     shows,

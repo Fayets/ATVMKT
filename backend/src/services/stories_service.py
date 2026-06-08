@@ -144,7 +144,7 @@ def _serialize_sequence(sequence: StorySequence, user_id: str) -> dict[str, Any]
         "cash_leads": cash_leads_i,
         "agendas": agendas_n,
         "has_cta": bool(sequence.has_cta),
-        "chats": int(sequence.chats or 0),
+        "chats": sum(int(s.replies or 0) for s in sequence.slides),
         "slides": [_serialize_slide(s) for s in slides],
         "created_at": sequence.created_at.isoformat(),
     }
@@ -400,7 +400,9 @@ class StoriesService:
                 and s.sequence_date.year == year
                 and s.sequence_date.month == month_num
             ]
-            chats_del_mes = sum(int(seq.chats or 0) for seq in rows)
+            chats_del_mes = sum(
+                sum(int(s.replies or 0) for s in seq.slides) for seq in rows
+            )
             secuencias_con_cta = sum(1 for seq in rows if _has_cta(seq))
             secuencias_sin_cta = sum(1 for seq in rows if not _has_cta(seq))
             stories_sincronizadas = sum(
