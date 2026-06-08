@@ -29,8 +29,35 @@ type DailyReport = {
   razonCompraFinal: string
   insightsMarketingLlamada: string
   sentimiento_trafico: string
-  avatar_tipo_agendas: string
+  avatar_counts: Record<string, number>
   insights_marketing: string
+  leads_nuevos: number
+  seguimientos: number
+  outbounds: number
+  dia_bueno_malo: string
+}
+
+const SETTER_AVATAR_OPTIONS = [
+  'Experto en info',
+  'Dueño de agencia',
+  'Dueño de negocio',
+  'Habilidades de alto valor',
+  'Creador de contenido',
+  'Creador con infoproducto',
+  'Otro',
+] as const
+
+function emptyAvatarCounts(): Record<string, number> {
+  return Object.fromEntries(SETTER_AVATAR_OPTIONS.map((a) => [a, 0]))
+}
+
+function serializeAvatarCounts(counts: Record<string, number>): string | null {
+  const obj: Record<string, number> = {}
+  for (const [k, v] of Object.entries(counts)) {
+    const n = parseInt(String(v), 10) || 0
+    if (n > 0) obj[k] = n
+  }
+  return Object.keys(obj).length > 0 ? JSON.stringify(obj) : null
 }
 
 const CLOSER_ESTADOS_FINAL = [
@@ -56,7 +83,7 @@ type Props = {
 
 type CloserKind = 'ventas' | 'marketing'
 
-type NumKey = 'conversaciones' | 'agendas' | 'calendly_links' | 'calls_scheduled' | 'shows' | 'cierres' | 'calificados' | 'descalificados' | 'ingreso'
+type NumKey = 'conversaciones' | 'agendas' | 'calendly_links' | 'leads_nuevos' | 'seguimientos' | 'outbounds' | 'calls_scheduled' | 'shows' | 'cierres' | 'calificados' | 'descalificados' | 'ingreso'
 
 function errMessage(data: unknown): string {
   if (data && typeof data === 'object' && 'detail' in data) {
@@ -107,8 +134,12 @@ export function DailyReportSection({ role }: Props) {
     razonCompraFinal: '',
     insightsMarketingLlamada: '',
     sentimiento_trafico: '',
-    avatar_tipo_agendas: '',
+    avatar_counts: emptyAvatarCounts(),
     insights_marketing: '',
+    leads_nuevos: 0,
+    seguimientos: 0,
+    outbounds: 0,
+    dia_bueno_malo: '',
   })
 
   const fetchMembers = useCallback(async () => {
@@ -214,26 +245,35 @@ export function DailyReportSection({ role }: Props) {
     label: string,
     isCurrency = false,
     labelClass = 'text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]',
-  ) => (
+  ) => {
+    const numVal = form[key] as number
+    const displayValue = numVal === 0 ? '' : numVal
+    return (
     <div>
       <label className={`mb-1.5 block leading-snug ${labelClass}`}>{label}</label>
       <input
         type="number"
-        value={form[key]}
-        onChange={(e) =>
+        value={displayValue}
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw === '') {
+            setForm((f) => ({ ...f, [key]: 0 }))
+            return
+          }
           setForm((f) => ({
             ...f,
-            [key]: isCurrency ? parseFloat(e.target.value) || 0 : parseInt(e.target.value, 10) || 0,
+            [key]: isCurrency ? parseFloat(raw) || 0 : parseInt(raw, 10) || 0,
           }))
-        }
+        }}
         placeholder="0"
         className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
       />
     </div>
-  )
+    )
+  }
 
   const textareaField = (
-    key: 'sentimiento_trafico' | 'avatar_tipo_agendas' | 'insights_marketing',
+    key: 'sentimiento_trafico' | 'dia_bueno_malo' | 'insights_marketing',
     label: string,
     placeholder: string,
     rows: number,
@@ -273,8 +313,12 @@ export function DailyReportSection({ role }: Props) {
             links_enviados: form.calendly_links,
             notas: null,
             sentimiento_trafico: form.sentimiento_trafico.trim() || null,
-            avatar_tipo_agendas: form.avatar_tipo_agendas.trim() || null,
+            avatar_tipo_agendas: serializeAvatarCounts(form.avatar_counts),
             insights_marketing: form.insights_marketing.trim() || null,
+            leads_nuevos: form.leads_nuevos,
+            seguimientos: form.seguimientos,
+            outbounds: form.outbounds,
+            dia_bueno_malo: form.dia_bueno_malo.trim() || null,
           }),
         })
         if (!res.ok) {
@@ -504,31 +548,55 @@ export function DailyReportSection({ role }: Props) {
           {role === 'setter' ? (
             <>
               <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {numField(
-                  'conversaciones',
-                  'Conversaciones generadas en el día de hoy',
-                  false,
-                  'text-[11px] font-medium leading-snug text-[var(--text2)]',
-                )}
-                {numField('agendas', 'Total de agendas hoy', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('calendly_links', 'Links de Calendly enviados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+                {numField('conversaciones', 'Conversaciones', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+                {numField('agendas', 'Agendas', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+                {numField('calendly_links', 'Calendlys enviados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+              </div>
+              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {numField('leads_nuevos', 'Leads nuevos', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+                {numField('seguimientos', 'Seguimientos', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+                {numField('outbounds', 'Outbounds', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+              </div>
+              <div className="mb-4">
+                <label className="mb-2 block text-[12px] font-medium leading-snug text-[var(--text)]">
+                  Avatar / Tipo de agendas generadas
+                </label>
+                <div className="space-y-2 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] p-3">
+                  {SETTER_AVATAR_OPTIONS.map((avatar) => (
+                    <div key={avatar} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 flex-1 text-[12px] leading-snug text-[var(--text2)]">{avatar}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={(form.avatar_counts[avatar] ?? 0) === 0 ? '' : form.avatar_counts[avatar]}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                          if (raw === '') {
+                            setForm((f) => ({
+                              ...f,
+                              avatar_counts: { ...f.avatar_counts, [avatar]: 0 },
+                            }))
+                            return
+                          }
+                          const n = parseInt(raw, 10) || 0
+                          setForm((f) => ({
+                            ...f,
+                            avatar_counts: { ...f.avatar_counts, [avatar]: n },
+                          }))
+                        }}
+                        placeholder="0"
+                        className="w-20 shrink-0 rounded-lg border border-[var(--border2)] bg-[var(--bg2)] px-2 py-1.5 text-right text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="mb-4 space-y-4">
-                {textareaField(
-                  'sentimiento_trafico',
-                  '¿Cómo sentiste el día de hoy el tráfico?',
-                  'Ej.: más lento de lo habitual, picos al mediodía…',
-                  2,
-                )}
-                {textareaField(
-                  'avatar_tipo_agendas',
-                  'Avatar / Tipo de agendas generadas',
-                  'Ej.: Hoy realicé 3 agendas (2 de ellas fueron experto en info y un dueño de agencia)',
-                  3,
-                )}
+                {textareaField('sentimiento_trafico', 'Tipo de tráfico', 'Ej.: más lento de lo habitual, picos al mediodía…', 2)}
+                {textareaField('dia_bueno_malo', '¿Fue un día bueno o malo?', 'Ej.: Bueno — buen volumen y calidad de leads…', 2)}
                 {textareaField(
                   'insights_marketing',
-                  'Insights clave que podrías aportar desde el setting hacia marketing',
+                  'Feedback a MKT',
                   'Qué viste en conversaciones que sirva para creativos, copy o segmentación…',
                   4,
                 )}

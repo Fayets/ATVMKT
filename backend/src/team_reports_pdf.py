@@ -77,11 +77,15 @@ def build_team_reports_pdf(reports: list[dict]) -> bytes:
         if kind == "setter":
             _emit(pdf, "Conversaciones", row.get("conversaciones"))
             _emit(pdf, "Agendas", row.get("agendas"))
-            _emit(pdf, "Links enviados", row.get("links_enviados"))
+            _emit(pdf, "Calendlys enviados", row.get("links_enviados"))
+            _emit(pdf, "Leads nuevos", row.get("leads_nuevos"))
+            _emit(pdf, "Seguimientos", row.get("seguimientos"))
+            _emit(pdf, "Outbounds", row.get("outbounds"))
             _emit(pdf, "Notas", row.get("notas"))
-            _emit(pdf, "Sentimiento trafico", row.get("sentimiento_trafico"))
+            _emit(pdf, "Tipo de trafico", row.get("sentimiento_trafico"))
             _emit(pdf, "Avatar / agendas", row.get("avatar_tipo_agendas"))
-            _emit(pdf, "Insights marketing", row.get("insights_marketing"))
+            _emit(pdf, "Dia bueno o malo", row.get("dia_bueno_malo"))
+            _emit(pdf, "Feedback a MKT", row.get("insights_marketing"))
         elif kind == "seguimiento":
             _emit(pdf, "Nombre lead", row.get("nombre_lead"))
             _emit(pdf, "Monto", row.get("monto"))

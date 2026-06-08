@@ -207,6 +207,10 @@ class SetterReport(db.Entity):
     sentimiento_trafico = Optional(str, default="")
     avatar_tipo_agendas = Optional(str, default="")
     insights_marketing = Optional(str, default="")
+    leads_nuevos = Required(int, default=0)
+    seguimientos = Required(int, default=0)
+    outbounds = Required(int, default=0)
+    dia_bueno_malo = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 

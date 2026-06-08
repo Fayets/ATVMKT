@@ -122,6 +122,10 @@ def _collect_team_reports(uid: int, desde: date, hasta: date) -> list[dict[str, 
                     "sentimiento_trafico": r.sentimiento_trafico or "",
                     "avatar_tipo_agendas": r.avatar_tipo_agendas or "",
                     "insights_marketing": r.insights_marketing or "",
+                    "leads_nuevos": int(getattr(r, "leads_nuevos", 0) or 0),
+                    "seguimientos": int(getattr(r, "seguimientos", 0) or 0),
+                    "outbounds": int(getattr(r, "outbounds", 0) or 0),
+                    "dia_bueno_malo": getattr(r, "dia_bueno_malo", None) or "",
                 }
             )
         for r in list(CloserReport.select()):
@@ -231,6 +235,10 @@ class SetterReportBody(BaseModel):
     sentimiento_trafico: str | None = None
     avatar_tipo_agendas: str | None = None
     insights_marketing: str | None = None
+    leads_nuevos: int = 0
+    seguimientos: int = 0
+    outbounds: int = 0
+    dia_bueno_malo: str | None = None
 
 
 class CloserReportBody(BaseModel):
@@ -466,6 +474,10 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             r.sentimiento_trafico = _notas_str(body.sentimiento_trafico)
             r.avatar_tipo_agendas = _notas_str(body.avatar_tipo_agendas)
             r.insights_marketing = _notas_str(body.insights_marketing)
+            r.leads_nuevos = body.leads_nuevos
+            r.seguimientos = body.seguimientos
+            r.outbounds = body.outbounds
+            r.dia_bueno_malo = _notas_str(body.dia_bueno_malo)
             return ReportSavedOut(id=r.id, updated=True)
         r = SetterReport(
             user_id=uid,
@@ -478,6 +490,10 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             sentimiento_trafico=_notas_str(body.sentimiento_trafico),
             avatar_tipo_agendas=_notas_str(body.avatar_tipo_agendas),
             insights_marketing=_notas_str(body.insights_marketing),
+            leads_nuevos=body.leads_nuevos,
+            seguimientos=body.seguimientos,
+            outbounds=body.outbounds,
+            dia_bueno_malo=_notas_str(body.dia_bueno_malo),
         )
         r.flush()
         return ReportSavedOut(id=r.id, updated=False)

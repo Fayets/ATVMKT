@@ -24,6 +24,10 @@ type ReportRow =
       sentimiento_trafico: string
       avatar_tipo_agendas: string
       insights_marketing: string
+      leads_nuevos: number
+      seguimientos: number
+      outbounds: number
+      dia_bueno_malo: string
     }
   | {
       kind: 'seguimiento'
@@ -115,6 +119,102 @@ function pdfAniosOpciones(): number[] {
   return out
 }
 
+/** Formatea avatar_tipo_agendas (JSON o texto legacy) para el historial. */
+function formatAvatarAgendas(raw: string): string {
+  const t = raw.trim()
+  if (!t) return '—'
+  try {
+    const parsed = JSON.parse(t) as unknown
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const entries = Object.entries(parsed as Record<string, unknown>)
+        .map(([k, v]) => [k, Number(v)] as const)
+        .filter(([, n]) => Number.isFinite(n) && n > 0)
+        .map(([k, n]) => `${k}: ${n}`)
+      if (entries.length > 0) return entries.join(' · ')
+      return '—'
+    }
+  } catch {
+    /* texto libre legacy */
+  }
+  return t
+}
+
+function textOrDash(value: string | undefined | null): string {
+  const t = (value ?? '').trim()
+  return t || '—'
+}
+
+function SetterReportDetail({ r }: { r: Extract<ReportRow, { kind: 'setter' }> }) {
+  const tasaAgend = r.conversaciones > 0 ? ((r.agendas / r.conversaciones) * 100).toFixed(1) : null
+
+  return (
+    <dl className="grid gap-3 text-[12px] text-[var(--text)]">
+      <div className="sm:col-span-2">
+        <dt className="mb-2 font-bold text-[var(--text)]">Métricas del día</dt>
+        <dd className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+          <div>
+            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Conversaciones</span>
+            <span className="font-mono-num text-[var(--text)]">{r.conversaciones}</span>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Agendas</span>
+            <span className="font-mono-num text-[var(--text)]">{r.agendas}</span>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Calendlys enviados</span>
+            <span className="font-mono-num text-[var(--text)]">{r.links_enviados}</span>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Leads nuevos</span>
+            <span className="font-mono-num text-[var(--text)]">{r.leads_nuevos ?? 0}</span>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Seguimientos</span>
+            <span className="font-mono-num text-[var(--text)]">{r.seguimientos ?? 0}</span>
+          </div>
+          <div>
+            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Outbounds</span>
+            <span className="font-mono-num text-[var(--text)]">{r.outbounds ?? 0}</span>
+          </div>
+          {tasaAgend != null ? (
+            <div>
+              <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Tasa agend.</span>
+              <span className="font-mono-num text-[var(--accent)]">{tasaAgend}%</span>
+            </div>
+          ) : null}
+        </dd>
+      </div>
+
+      <div>
+        <dt className="font-bold text-[var(--text)]">Avatar / Tipo de agendas generadas</dt>
+        <dd className="whitespace-pre-wrap text-[var(--text)]">{formatAvatarAgendas(r.avatar_tipo_agendas)}</dd>
+      </div>
+
+      <div>
+        <dt className="font-bold text-[var(--text)]">Tipo de tráfico</dt>
+        <dd className="whitespace-pre-wrap text-[var(--text)]">{textOrDash(r.sentimiento_trafico)}</dd>
+      </div>
+
+      <div>
+        <dt className="font-bold text-[var(--text)]">¿Fue un día bueno o malo?</dt>
+        <dd className="whitespace-pre-wrap text-[var(--text)]">{textOrDash(r.dia_bueno_malo)}</dd>
+      </div>
+
+      <div>
+        <dt className="font-bold text-[var(--text)]">Feedback a MKT</dt>
+        <dd className="whitespace-pre-wrap text-[var(--text)]">{textOrDash(r.insights_marketing)}</dd>
+      </div>
+
+      {r.notas.trim() ? (
+        <div>
+          <dt className="font-bold text-[var(--text)]">Notas</dt>
+          <dd className="whitespace-pre-wrap text-[var(--text)]">{r.notas}</dd>
+        </div>
+      ) : null}
+    </dl>
+  )
+}
+
 /** Una línea: REPORTE SETTER | CLOSER VENTAS | CLOSER MARKETING - dd-mm-aaaa - NOMBRE */
 function reportListTitle(r: ReportRow): string {
   const fd = formatIsoDateDdMmYyyy(r.fecha)
@@ -130,40 +230,7 @@ function reportListTitle(r: ReportRow): string {
 
 function ReportDetail({ r }: { r: ReportRow }) {
   if (r.kind === 'setter') {
-    return (
-      <dl className="grid gap-1 text-[12px] text-[var(--text)] sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <dt className="font-bold text-[var(--text)]">Resumen</dt>
-          <dd className="font-mono-num text-[var(--text)]">
-            Conv. {r.conversaciones} · Agendas {r.agendas} · Links {r.links_enviados}
-          </dd>
-        </div>
-        {r.notas ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Notas</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.notas}</dd>
-          </div>
-        ) : null}
-        {r.sentimiento_trafico ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Tráfico</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.sentimiento_trafico}</dd>
-          </div>
-        ) : null}
-        {r.avatar_tipo_agendas ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Avatar / agendas</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.avatar_tipo_agendas}</dd>
-          </div>
-        ) : null}
-        {r.insights_marketing ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Insights marketing</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.insights_marketing}</dd>
-          </div>
-        ) : null}
-      </dl>
-    )
+    return <SetterReportDetail r={r} />
   }
   if (r.kind === 'seguimiento') {
     return (

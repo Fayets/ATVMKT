@@ -575,6 +575,10 @@ def _migrate_postgres_setter_report_text_columns() -> None:
                 f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS sentimiento_trafico TEXT",
                 f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS avatar_tipo_agendas TEXT",
                 f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS insights_marketing TEXT",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS leads_nuevos integer NOT NULL DEFAULT 0",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS seguimientos integer NOT NULL DEFAULT 0",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS outbounds integer NOT NULL DEFAULT 0",
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS dia_bueno_malo text NOT NULL DEFAULT ''",
             ):
                 try:
                     cur.execute(ddl)
