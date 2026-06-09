@@ -343,6 +343,7 @@ export default function TeamHistorialReportesPage() {
   const [pdfDesdeModal, setPdfDesdeModal] = useState('')
   const [pdfHastaModal, setPdfHastaModal] = useState('')
   const [pdfFiltro, setPdfFiltro] = useState<ReporteFiltro>('todos')
+  const [discordSendingId, setDiscordSendingId] = useState<number | null>(null)
 
   const fetchReports = useCallback(async () => {
     if (!ready || !userId) {
@@ -479,6 +480,29 @@ export default function TeamHistorialReportesPage() {
     }
     void runPdfDownload(pdfDesdeModal, pdfHastaModal)
   }
+
+  const sendSetterReportToDiscord = useCallback(
+    async (reportId: number) => {
+      if (!userId) {
+        toast('Iniciá sesión')
+        return
+      }
+      setDiscordSendingId(reportId)
+      try {
+        const res = await apiFetch(`/team/setter-reports/${reportId}/discord`, { method: 'POST' })
+        if (!res.ok) {
+          toast(errMessage(await res.json().catch(() => ({}))))
+          return
+        }
+        toast('Reporte enviado a Discord')
+      } catch {
+        toast('No se pudo enviar a Discord.')
+      } finally {
+        setDiscordSendingId(null)
+      }
+    },
+    [userId, toast],
+  )
 
   if (!ready) {
     return <div className="py-12 text-[13px] text-[var(--text3)]">Cargando…</div>
@@ -705,8 +729,24 @@ export default function TeamHistorialReportesPage() {
           <div className="glass-card glass-card--performant divide-y divide-[var(--border2)] overflow-hidden rounded-lg border border-[var(--border)]">
             {paginatedReports.map((r) => (
               <details key={`${r.kind}-${r.id}`} className="group bg-[var(--bg2)]/30 open:bg-[var(--bg3)]/40">
-                <summary className="cursor-pointer list-none px-4 py-2.5 text-[11px] font-extrabold uppercase leading-snug tracking-wide text-[var(--text)] transition-colors hover:bg-[var(--nav-hover)] marker:content-none [&::-webkit-details-marker]:hidden">
-                  <span className="select-none">{reportListTitle(r)}</span>
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-[11px] font-extrabold uppercase leading-snug tracking-wide text-[var(--text)] transition-colors hover:bg-[var(--nav-hover)] marker:content-none [&::-webkit-details-marker]:hidden">
+                  <span className="min-w-0 flex-1 select-none">{reportListTitle(r)}</span>
+                  {r.kind === 'setter' ? (
+                    <button
+                      type="button"
+                      title="Enviar reporte a Discord"
+                      disabled={discordSendingId === r.id}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        void sendSetterReportToDiscord(r.id)
+                      }}
+                      className="shrink-0 rounded-lg border border-[#5865F2]/40 bg-[#5865F2]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#949cf0] transition-colors hover:border-[#5865F2] hover:bg-[#5865F2]/20 hover:text-[#c5c9ff] disabled:opacity-50"
+                    >
+                      {discordSendingId === r.id ? 'Enviando…' : 'Discord'}
+                    </button>
+                  ) : null}
                 </summary>
                 <div className="border-t border-[var(--border2)] px-4 pb-3 pt-2">
                   <ReportDetail r={r} />

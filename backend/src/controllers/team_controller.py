@@ -10,9 +10,11 @@ from pydantic import BaseModel, Field
 from starlette.responses import Response
 
 from src.models import CloserReport, SeguimientoReport, SetterReport, TeamMember
+from src.services.discord_service import DiscordServices
 from src.team_reports_pdf import build_team_reports_pdf, fecha_iso_a_dd_mm_yyyy
 
 router = APIRouter(prefix="/api/team", tags=["team"], redirect_slashes=False)
+discord_service = DiscordServices()
 
 DEFAULT_COMMISSION_PCT = 5.0
 VALID_ROLES = frozenset({"setter", "closer", "cash"})
@@ -46,6 +48,26 @@ def require_user_id(
 
 def _notas_str(val: str | None) -> str:
     return (val or "").strip()
+
+
+def _setter_report_discord_payload(r: SetterReport) -> dict[str, Any]:
+    sentimiento = _notas_str(r.sentimiento_trafico)
+    insights = _notas_str(r.insights_marketing)
+    dia_bueno = _notas_str(getattr(r, "dia_bueno_malo", None))
+    avatar = _notas_str(r.avatar_tipo_agendas)
+    return {
+        "fecha": r.fecha.isoformat(),
+        "conversaciones": int(r.conversaciones),
+        "agendas": int(r.agendas),
+        "links_enviados": int(r.links_enviados),
+        "leads_nuevos": int(getattr(r, "leads_nuevos", 0) or 0),
+        "seguimientos": int(getattr(r, "seguimientos", 0) or 0),
+        "outbounds": int(getattr(r, "outbounds", 0) or 0),
+        "sentimiento_trafico": sentimiento or None,
+        "avatar_tipo_agendas": avatar or None,
+        "insights_marketing": insights or None,
+        "dia_bueno_malo": dia_bueno or None,
+    }
 
 
 def _parse_uid(user_id: str) -> int:
@@ -273,6 +295,11 @@ class ReportSavedOut(BaseModel):
     updated: bool
 
 
+class DiscordNotifyOut(BaseModel):
+    sent: bool
+    detail: str
+
+
 class SetterStatsOut(BaseModel):
     member_id: int
     nombre: str
@@ -458,8 +485,11 @@ def team_reports_pdf(
 @router.post("/setter-reports")
 def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_user_id)) -> ReportSavedOut:
     uid = _parse_uid(user_id)
+    member_name = ""
+    result: ReportSavedOut
     with db_session:
-        _get_active_member(uid, body.member_id, "setter")
+        member = _get_active_member(uid, body.member_id, "setter")
+        member_name = member.nombre
         existing = [
             r
             for r in list(SetterReport.select())
@@ -478,25 +508,65 @@ def save_setter_report(body: SetterReportBody, user_id: str = Depends(require_us
             r.seguimientos = body.seguimientos
             r.outbounds = body.outbounds
             r.dia_bueno_malo = _notas_str(body.dia_bueno_malo)
-            return ReportSavedOut(id=r.id, updated=True)
-        r = SetterReport(
-            user_id=uid,
-            member_id=body.member_id,
-            fecha=body.fecha,
-            conversaciones=body.conversaciones,
-            agendas=body.agendas,
-            links_enviados=body.links_enviados,
-            notas=_notas_str(body.notas),
-            sentimiento_trafico=_notas_str(body.sentimiento_trafico),
-            avatar_tipo_agendas=_notas_str(body.avatar_tipo_agendas),
-            insights_marketing=_notas_str(body.insights_marketing),
-            leads_nuevos=body.leads_nuevos,
-            seguimientos=body.seguimientos,
-            outbounds=body.outbounds,
-            dia_bueno_malo=_notas_str(body.dia_bueno_malo),
+            result = ReportSavedOut(id=r.id, updated=True)
+        else:
+            r = SetterReport(
+                user_id=uid,
+                member_id=body.member_id,
+                fecha=body.fecha,
+                conversaciones=body.conversaciones,
+                agendas=body.agendas,
+                links_enviados=body.links_enviados,
+                notas=_notas_str(body.notas),
+                sentimiento_trafico=_notas_str(body.sentimiento_trafico),
+                avatar_tipo_agendas=_notas_str(body.avatar_tipo_agendas),
+                insights_marketing=_notas_str(body.insights_marketing),
+                leads_nuevos=body.leads_nuevos,
+                seguimientos=body.seguimientos,
+                outbounds=body.outbounds,
+                dia_bueno_malo=_notas_str(body.dia_bueno_malo),
+            )
+            r.flush()
+            result = ReportSavedOut(id=r.id, updated=False)
+
+    try:
+        discord_service.send_setter_report_to_discord(member_name, body.model_dump(mode="json"))
+    except Exception:
+        pass
+
+    return result
+
+
+@router.post("/setter-reports/{report_id}/discord", response_model=DiscordNotifyOut)
+def notify_setter_report_discord(
+    report_id: int,
+    user_id: str = Depends(require_user_id),
+) -> DiscordNotifyOut:
+    uid = _parse_uid(user_id)
+    if not discord_service.is_setter_webhook_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook de Discord no configurado (DISCORD_SETTER_WEBHOOK_URL).",
         )
-        r.flush()
-        return ReportSavedOut(id=r.id, updated=False)
+    with db_session:
+        found: SetterReport | None = None
+        for r in list(SetterReport.select()):
+            if r.id == report_id and r.user_id == uid:
+                found = r
+                break
+        if found is None:
+            raise HTTPException(status_code=404, detail="Reporte setter no encontrado.")
+        member_name = "(sin miembro)"
+        for m in _members_for_user(uid):
+            if m.id == found.member_id:
+                member_name = m.nombre
+                break
+        payload = _setter_report_discord_payload(found)
+
+    sent = discord_service.send_setter_report_to_discord(member_name, payload)
+    if not sent:
+        raise HTTPException(status_code=502, detail="No se pudo enviar el reporte a Discord.")
+    return DiscordNotifyOut(sent=True, detail="Reporte enviado a Discord.")
 
 
 @router.post("/closer-reports")
