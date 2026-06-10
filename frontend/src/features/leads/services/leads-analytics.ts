@@ -30,6 +30,9 @@ export type LeadsFunnel = {
 export type WeekMetrics = {
   agendas: number[]
   conversaciones: number[]
+  leads_nuevos: number[]
+  seguimientos: number[]
+  outbounds: number[]
   shows: number[]
   cierres: number[]
   /** Cash por bucket: reportes closer ventas (`ingreso`) + formularios seguimiento. El embudo mensual `ingresos` sigue siendo Pagó + seguimiento. */
@@ -231,6 +234,9 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
               date: fecha,
               conversaciones: Number(r.conversaciones) || 0,
               agendas: Number(r.agendas) || 0,
+              leads_nuevos: Number(r.leads_nuevos) || 0,
+              seguimientos: Number(r.seguimientos) || 0,
+              outbounds: Number(r.outbounds) || 0,
               shows: 0,
               cierres: 0,
               ingreso: 0,
@@ -375,6 +381,9 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const byWeek: WeekMetrics = {
     agendas: [0, 0, 0, 0],
     conversaciones: [0, 0, 0, 0],
+    leads_nuevos: [0, 0, 0, 0],
+    seguimientos: [0, 0, 0, 0],
+    outbounds: [0, 0, 0, 0],
     shows: [0, 0, 0, 0],
     cierres: [0, 0, 0, 0],
     ingresos: [0, 0, 0, 0],
@@ -385,6 +394,9 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const byWeekDay: LeadsAnalytics['byWeekDay'] = {
     conversaciones: [z7(), z7(), z7(), z7()],
     agendas: [z7(), z7(), z7(), z7()],
+    leads_nuevos: [z7(), z7(), z7(), z7()],
+    seguimientos: [z7(), z7(), z7(), z7()],
+    outbounds: [z7(), z7(), z7(), z7()],
     shows: [z7(), z7(), z7(), z7()],
     cierres: [z7(), z7(), z7(), z7()],
     ingresos: [z7(), z7(), z7(), z7()],
@@ -401,12 +413,18 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
 
     const conv = Number(r.conversaciones) || 0
     const ag = Number(r.agendas) || 0
+    const leadsNuevos = Number(r.leads_nuevos ?? 0) || 0
+    const seguimientosN = Number(r.seguimientos ?? 0) || 0
+    const outboundsN = Number(r.outbounds ?? 0) || 0
     const sh = Number(r.shows) || 0
     const ci = Number(r.cierres) || 0
     const ing = Number(r.ingreso) || 0
 
     byWeek.conversaciones[w] += conv; byWeekDay.conversaciones[w][dow] += conv
     byWeek.agendas[w] += ag;         byWeekDay.agendas[w][dow] += ag
+    byWeek.leads_nuevos[w] += leadsNuevos; byWeekDay.leads_nuevos[w][dow] += leadsNuevos
+    byWeek.seguimientos[w] += seguimientosN; byWeekDay.seguimientos[w][dow] += seguimientosN
+    byWeek.outbounds[w] += outboundsN; byWeekDay.outbounds[w][dow] += outboundsN
     byWeek.shows[w] += sh;           byWeekDay.shows[w][dow] += sh
     byWeek.cierres[w] += ci;         byWeekDay.cierres[w][dow] += ci
     byWeek.ingresos[w] += ing;       byWeekDay.ingresos[w][dow] += ing

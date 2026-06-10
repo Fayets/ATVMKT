@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
@@ -340,8 +340,76 @@ function MensualView({ curr, prev, delta }: { curr: VDData; prev: VDData; delta:
 }
 
 // ── SEMANAL ──
+type DashboardRowGroup = 'setter' | 'closer' | 'rates'
+
+function dashboardGroupLabel(group: DashboardRowGroup): string {
+  if (group === 'setter') return 'Setter'
+  if (group === 'closer') return 'Closer'
+  return 'Tasas'
+}
+
+function dashboardRowBg(group: DashboardRowGroup): string | undefined {
+  if (group === 'setter') return 'rgba(59,130,246,0.04)'
+  if (group === 'closer') return 'rgba(230,57,70,0.04)'
+  return undefined
+}
+
+function dashboardGroupHeaderStyle(group: DashboardRowGroup) {
+  const base = {
+    padding: '6px 20px',
+    fontSize: '10px',
+    fontWeight: 600,
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase' as const,
+  }
+  if (group === 'setter') {
+    return {
+      ...base,
+      background: 'rgba(59,130,246,0.12)',
+      color: 'rgb(96, 165, 250)',
+      borderTop: '1px solid rgba(59,130,246,0.3)',
+      borderLeft: '3px solid rgb(96, 165, 250)',
+    }
+  }
+  if (group === 'closer') {
+    return {
+      ...base,
+      background: 'rgba(230,57,70,0.12)',
+      color: 'rgb(248, 113, 122)',
+      borderTop: '1px solid rgba(230,57,70,0.3)',
+      borderLeft: '3px solid rgb(248, 113, 122)',
+    }
+  }
+  return {
+    ...base,
+    background: 'rgba(161,161,170,0.06)',
+    color: 'var(--text2)',
+    borderTop: '1px solid var(--border)',
+    borderLeft: '3px solid var(--border2)',
+  }
+}
+
 function SemanalView({ curr }: { curr: VDData }) {
-  const weeks = ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4']
+  const { month } = useMonthContext()
+  const [year, mon] = month.split('-').map(Number)
+  const daysInMonth = new Date(year, mon, 0).getDate()
+
+  // Encontrar el primer lunes del mes
+  let firstMonday = 1
+  for (let d = 1; d <= 7; d++) {
+    const dow = new Date(year, mon - 1, d).getDay()
+    if (dow === 1) {
+      firstMonday = d
+      break
+    }
+  }
+
+  const weeks = [0, 1, 2, 3].map((i) => {
+    const start = firstMonday + i * 7
+    const end = Math.min(start + 6, daysInMonth)
+    if (start > daysInMonth) return `Sem ${i + 1}`
+    return `Sem ${i + 1} (${start}–${end})`
+  })
   const showUpRates = curr.agendasByWeek.map((a, i) => {
     const sh = curr.showsByWeek[i] ?? 0
     if (a > 0) return (sh / a) * 100
@@ -357,17 +425,31 @@ function SemanalView({ curr }: { curr: VDData }) {
     c > 0 ? (curr.byWeek.facturacion[i] ?? 0) / c : 0,
   )
 
-  const rows = [
-    { label: 'Conversaciones', data: curr.conversacionesByWeek },
-    { label: 'Agendas', data: curr.agendasByWeek },
-    { label: 'Shows', data: curr.showsByWeek },
-    { label: 'No Shows', data: curr.noShowsByWeek },
-    { label: 'Cierres', data: curr.cierresByWeek },
-    { label: 'T. Agendamiento %', data: tasaAgend, fmt: fP },
-    { label: 'Show Up Rate %', data: showUpRates, fmt: fPOrDash },
-    { label: 'Close Rate %', data: closeRates, fmt: fPOrDash },
-    { label: 'AOV', data: aovW, fmt: formatCash },
+  type SemanalRowGroup = DashboardRowGroup
+  type SemanalRow = {
+    label: string
+    data: number[]
+    group: SemanalRowGroup
+    fmt?: (v: number) => string
+  }
+
+  const rows: SemanalRow[] = [
+    { label: 'Conversaciones', data: curr.conversacionesByWeek, group: 'setter' },
+    { label: 'Leads nuevos', data: curr.byWeek.leads_nuevos, group: 'setter' },
+    { label: 'Seguimientos', data: curr.byWeek.seguimientos, group: 'setter' },
+    { label: 'Outbounds', data: curr.byWeek.outbounds, group: 'setter' },
+    { label: 'Agendas', data: curr.agendasByWeek, group: 'setter' },
+    { label: 'Shows', data: curr.showsByWeek, group: 'closer' },
+    { label: 'No Shows', data: curr.noShowsByWeek, group: 'closer' },
+    { label: 'Cierres', data: curr.cierresByWeek, group: 'closer' },
+    { label: 'Ingresos (reportes)', data: curr.ingresosByWeek, group: 'closer', fmt: formatCash },
+    { label: 'T. Agendamiento %', data: tasaAgend, group: 'rates', fmt: fP },
+    { label: 'Show Up Rate %', data: showUpRates, group: 'rates', fmt: fPOrDash },
+    { label: 'Close Rate %', data: closeRates, group: 'rates', fmt: fPOrDash },
+    { label: 'AOV', data: aovW, group: 'rates', fmt: formatCash },
   ]
+
+  const totalColumns = weeks.length + 1
 
   return (
     <div className="space-y-6">
@@ -381,14 +463,29 @@ function SemanalView({ curr }: { curr: VDData }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.label} className="border-b border-[var(--border)]">
-                <td className="px-5 py-2.5 text-[13px] font-medium">{r.label}</td>
-                {r.data.map((v, i) => (
-                  <td key={i} className="px-5 py-2.5 font-mono-num text-[13px]">{r.fmt ? r.fmt(v) : fN(v)}</td>
-                ))}
-              </tr>
-            ))}
+            {rows.map((r, idx) => {
+              const prevGroup = idx > 0 ? rows[idx - 1].group : null
+              const showGroupLabel = prevGroup !== r.group
+              return (
+                <Fragment key={r.label}>
+                  {showGroupLabel ? (
+                    <tr>
+                      <td colSpan={totalColumns} style={dashboardGroupHeaderStyle(r.group)}>
+                        {dashboardGroupLabel(r.group)}
+                      </td>
+                    </tr>
+                  ) : null}
+                  <tr className="border-b border-[var(--border)]" style={{ backgroundColor: dashboardRowBg(r.group) }}>
+                    <td className="px-5 py-2.5 text-[13px] font-medium">{r.label}</td>
+                    {r.data.map((v, i) => (
+                      <td key={i} className="px-5 py-2.5 font-mono-num text-[13px]">
+                        {r.fmt ? r.fmt(v) : fN(v)}
+                      </td>
+                    ))}
+                  </tr>
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -417,11 +514,32 @@ function SemanalView({ curr }: { curr: VDData }) {
 }
 
 // ── DIARIO ──
-function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number; setSemana: (s: number) => void }) {
+function getDayLabels(month: string, semana: number): string[] {
+  const [year, mon] = month.split('-').map(Number)
   const days = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']
+  const startDay = semana * 7 + 1
+  const endDay = Math.min(startDay + 6, new Date(year, mon, 0).getDate())
+
+  const labels = days.map((d, dow) => {
+    for (let day = startDay; day <= endDay; day++) {
+      const date = new Date(year, mon - 1, day)
+      const dateDow = (date.getDay() + 6) % 7
+      if (dateDow === dow) return `${d} ${day}`
+    }
+    return d
+  })
+  return labels
+}
+
+function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number; setSemana: (s: number) => void }) {
+  const { month } = useMonthContext()
+  const dayLabels = getDayLabels(month, semana)
   const wd = curr.byWeekDay
   const w = semana
   const conv = wd.conversaciones[w]
+  const leadsNuevos = wd.leads_nuevos[w]
+  const seguimientos = wd.seguimientos[w]
+  const outbounds = wd.outbounds[w]
   const agendas = wd.agendas[w]
   const shows = wd.shows[w]
   const noShowsD = wd.noShows[w]
@@ -448,29 +566,48 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
   const sumFact = sum(facturacionD)
   const sumIng = sum(ingresos)
   const sumConv = sum(conv)
+  const sumLeadsNuevos = sum(leadsNuevos)
+  const sumSeguimientos = sum(seguimientos)
+  const sumOutbounds = sum(outbounds)
 
-  const rows = [
-    { label: 'Conversaciones', data: conv, total: sumConv },
-    { label: 'Agendas', data: agendas, total: sumAg },
-    { label: 'Shows', data: shows, total: sumSh },
-    { label: 'No Shows', data: noShowsD, total: sum(noShowsD) },
-    { label: 'Cierres', data: cierres, total: sumCi },
-    { label: 'Ingresos (reportes)', data: ingresos, total: sumIng, fmt: formatCash },
-    { label: 'T. Agendamiento', data: tasaAgD, total: sumConv > 0 ? (sumAg / sumConv) * 100 : 0, fmt: fP },
+  type DiarioRowGroup = DashboardRowGroup
+  type DiarioRow = {
+    label: string
+    data: number[]
+    total: number
+    group: DiarioRowGroup
+    fmt?: (v: number) => string
+  }
+
+  const rows: DiarioRow[] = [
+    { label: 'Conversaciones', data: conv, total: sumConv, group: 'setter' },
+    { label: 'Leads nuevos', data: leadsNuevos, total: sumLeadsNuevos, group: 'setter' },
+    { label: 'Seguimientos', data: seguimientos, total: sumSeguimientos, group: 'setter' },
+    { label: 'Outbounds', data: outbounds, total: sumOutbounds, group: 'setter' },
+    { label: 'Agendas', data: agendas, total: sumAg, group: 'setter' },
+    { label: 'Shows', data: shows, total: sumSh, group: 'closer' },
+    { label: 'No Shows', data: noShowsD, total: sum(noShowsD), group: 'closer' },
+    { label: 'Cierres', data: cierres, total: sumCi, group: 'closer' },
+    { label: 'Ingresos (reportes)', data: ingresos, total: sumIng, group: 'closer', fmt: formatCash },
+    { label: 'T. Agendamiento', data: tasaAgD, total: sumConv > 0 ? (sumAg / sumConv) * 100 : 0, group: 'rates', fmt: fP },
     {
       label: 'Show Up Rate',
       data: showUpD,
       total: sumAg > 0 ? (sumSh / sumAg) * 100 : sumSh > 0 ? Number.NaN : 0,
+      group: 'rates',
       fmt: fPOrDash,
     },
     {
       label: 'Close Rate',
       data: closeD,
       total: sumSh > 0 ? (sumCi / sumSh) * 100 : sumCi > 0 ? Number.NaN : 0,
+      group: 'rates',
       fmt: fPOrDash,
     },
-    { label: 'AOV', data: aovD, total: sumCi > 0 ? sumFact / sumCi : 0, fmt: formatCash },
+    { label: 'AOV', data: aovD, total: sumCi > 0 ? sumFact / sumCi : 0, group: 'rates', fmt: formatCash },
   ]
+
+  const totalColumns = dayLabels.length + 2
 
   return (
     <div className="space-y-6">
@@ -490,20 +627,41 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
           <thead>
             <tr className="border-b border-[var(--border)]">
               <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Metrica</th>
-              {days.map(d => <th key={d} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{d}</th>)}
+              {dayLabels.map((d) => (
+                <th key={d} className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+                  {d}
+                </th>
+              ))}
               <th className="px-5 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">Total</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.label} className="border-b border-[var(--border)]">
-                <td className="px-5 py-2.5 text-[13px] font-medium">{r.label}</td>
-                {r.data.map((v, i) => (
-                  <td key={i} className="px-5 py-2.5 font-mono-num text-[13px]">{r.fmt ? r.fmt(v) : fN(v)}</td>
-                ))}
-                <td className="px-5 py-2.5 font-mono-num text-[13px] text-[var(--accent)] font-semibold">{r.fmt ? r.fmt(r.total) : fN(r.total)}</td>
-              </tr>
-            ))}
+            {rows.map((r, idx) => {
+              const prevGroup = idx > 0 ? rows[idx - 1].group : null
+              const showGroupLabel = prevGroup !== r.group
+              return (
+                <Fragment key={r.label}>
+                  {showGroupLabel ? (
+                    <tr>
+                      <td colSpan={totalColumns} style={dashboardGroupHeaderStyle(r.group)}>
+                        {dashboardGroupLabel(r.group)}
+                      </td>
+                    </tr>
+                  ) : null}
+                  <tr className="border-b border-[var(--border)]" style={{ backgroundColor: dashboardRowBg(r.group) }}>
+                    <td className="px-5 py-2.5 text-[13px] font-medium">{r.label}</td>
+                    {r.data.map((v, i) => (
+                      <td key={i} className="px-5 py-2.5 font-mono-num text-[13px]">
+                        {r.fmt ? r.fmt(v) : fN(v)}
+                      </td>
+                    ))}
+                    <td className="px-5 py-2.5 font-mono-num text-[13px] text-[var(--accent)] font-semibold">
+                      {r.fmt ? r.fmt(r.total) : fN(r.total)}
+                    </td>
+                  </tr>
+                </Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -511,11 +669,11 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
       {/* Charts */}
       <div className="grid grid-cols-2 gap-4">
         <ChartCard title={`Agendas diarias — Semana ${semana + 1}`} value={String(agendas.reduce((s, v) => s + v, 0))} subtitle="total">
-          <Bar data={{ labels: days, datasets: [{ data: agendas, backgroundColor: 'rgba(245,158,11,0.25)', hoverBackgroundColor: '#F59E0B', borderRadius: 6, borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.8 }] }}
+          <Bar data={{ labels: dayLabels, datasets: [{ data: agendas, backgroundColor: 'rgba(245,158,11,0.25)', hoverBackgroundColor: '#F59E0B', borderRadius: 6, borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.8 }] }}
             options={{ responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.6)', font: { size: 11 } } }, y: { grid: { color: 'rgba(255,255,255,0.03)', drawTicks: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.4)', font: { size: 10 }, padding: 8, maxTicksLimit: 4 } } }, plugins: { tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, cornerRadius: 8, displayColors: false } } }} />
         </ChartCard>
         <ChartCard title="Ingresos diarios" value={formatCash(ingresos.reduce((s, v) => s + v, 0))} subtitle="closer ventas + seguimiento">
-          <Bar data={{ labels: days, datasets: [{ data: ingresos, backgroundColor: 'rgba(34,197,94,0.25)', hoverBackgroundColor: '#22C55E', borderRadius: 6, borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.8 }] }}
+          <Bar data={{ labels: dayLabels, datasets: [{ data: ingresos, backgroundColor: 'rgba(34,197,94,0.25)', hoverBackgroundColor: '#22C55E', borderRadius: 6, borderSkipped: false, barPercentage: 0.6, categoryPercentage: 0.8 }] }}
             options={{ responsive: true, maintainAspectRatio: false, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.6)', font: { size: 11 } } }, y: { grid: { color: 'rgba(255,255,255,0.03)', drawTicks: false }, border: { display: false }, ticks: { color: 'rgba(161,161,170,0.4)', font: { size: 10 }, padding: 8, maxTicksLimit: 4, callback: (v: string | number) => '$' + (Number(v) >= 1000 ? (Number(v) / 1000).toFixed(0) + 'k' : v) } } }, plugins: { tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', padding: 10, cornerRadius: 8, displayColors: false, callbacks: { label: (ctx: { parsed: { y: number | null } }) => formatCash(ctx.parsed.y ?? 0) } } } }} />
         </ChartCard>
       </div>
