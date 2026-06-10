@@ -75,3 +75,85 @@ class DiscordServices:
             return resp.is_success
         except Exception:
             return False
+
+    def is_closer_ventas_webhook_configured(self) -> bool:
+        return bool((config("DISCORD_CLOSER_VENTAS_WEBHOOK_URL", default="") or "").strip())
+
+    def send_closer_ventas_to_discord(self, member_name: str, body: dict[str, Any]) -> bool:
+        webhook_url = (config("DISCORD_CLOSER_VENTAS_WEBHOOK_URL", default="") or "").strip()
+        if not webhook_url:
+            return False
+
+        embed = {
+            "title": f"REPORTE CLOSER · VENTAS · {member_name.upper()} · {str(body.get('fecha'))}",
+            "color": 0xE74C3C,
+            "fields": [
+                {
+                    "name": "MÉTRICAS",
+                    "value": (
+                        f"Llamadas agendadas: **{body.get('llamadas_agendadas', 0)}**\n"
+                        f"Shows: **{body.get('shows', 0)}**\n"
+                        f"Cierres: **{body.get('cierres', 0)}**\n"
+                        f"Calificados: **{body.get('calificados', 0)}**\n"
+                        f"Descalificados: **{body.get('descalificados', 0)}**\n"
+                        f"Ingreso: **${body.get('ingreso', 0)}**"
+                    ),
+                    "inline": False,
+                },
+                {
+                    "name": "NOTAS",
+                    "value": body.get("notas") or "—",
+                    "inline": False,
+                },
+            ],
+        }
+
+        try:
+            resp = httpx.post(webhook_url, json={"embeds": [embed]}, timeout=5.0)
+            return resp.is_success
+        except Exception:
+            return False
+
+    def is_closer_marketing_webhook_configured(self) -> bool:
+        return bool((config("DISCORD_CLOSER_MARKETING_WEBHOOK_URL", default="") or "").strip())
+
+    def send_closer_marketing_to_discord(self, member_name: str, body: dict[str, Any]) -> bool:
+        webhook_url = (config("DISCORD_CLOSER_MARKETING_WEBHOOK_URL", default="") or "").strip()
+        if not webhook_url:
+            return False
+
+        embed = {
+            "title": f"REPORTE CLOSER · MARKETING · {member_name.upper()} · {str(body.get('fecha'))}",
+            "color": 0x5865F2,
+            "fields": [
+                {
+                    "name": "LEAD",
+                    "value": (
+                        f"Nombre: **{body.get('nombre_lead') or '—'}**\n"
+                        f"Estado final: **{body.get('estado_final_llamada') or '—'}**\n"
+                        f"Perfil: **{body.get('perfil_lead') or '—'}**"
+                    ),
+                    "inline": False,
+                },
+                {
+                    "name": "CUALITATIVO",
+                    "value": (
+                        f"Objeción/Miedo: {body.get('objecion_miedo') or '—'}\n"
+                        f"Dolores en llamada: {body.get('dolores_llamada') or '—'}\n"
+                        f"Razón de compra: {body.get('razon_compra_final') or '—'}"
+                    ),
+                    "inline": False,
+                },
+                {
+                    "name": "INSIGHTS MARKETING",
+                    "value": body.get("insights_marketing_llamada") or "—",
+                    "inline": False,
+                },
+            ],
+        }
+
+        try:
+            resp = httpx.post(webhook_url, json={"embeds": [embed]}, timeout=5.0)
+            return resp.is_success
+        except Exception:
+            return False

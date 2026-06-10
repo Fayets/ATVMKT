@@ -119,6 +119,16 @@ function pdfAniosOpciones(): number[] {
   return out
 }
 
+function reportDiscordEndpoint(r: ReportRow): string | null {
+  if (r.kind === 'setter') return `/team/setter-reports/${r.id}/discord`
+  if (r.kind === 'closer') return `/team/closer-reports/${r.id}/discord`
+  return null
+}
+
+function reportDiscordKey(r: ReportRow): string {
+  return `${r.kind}-${r.id}`
+}
+
 /** Formatea avatar_tipo_agendas (JSON o texto legacy) para el historial. */
 function formatAvatarAgendas(raw: string): string {
   const t = raw.trim()
@@ -343,7 +353,7 @@ export default function TeamHistorialReportesPage() {
   const [pdfDesdeModal, setPdfDesdeModal] = useState('')
   const [pdfHastaModal, setPdfHastaModal] = useState('')
   const [pdfFiltro, setPdfFiltro] = useState<ReporteFiltro>('todos')
-  const [discordSendingId, setDiscordSendingId] = useState<number | null>(null)
+  const [discordSendingId, setDiscordSendingId] = useState<string | null>(null)
 
   const fetchReports = useCallback(async () => {
     if (!ready || !userId) {
@@ -481,15 +491,18 @@ export default function TeamHistorialReportesPage() {
     void runPdfDownload(pdfDesdeModal, pdfHastaModal)
   }
 
-  const sendSetterReportToDiscord = useCallback(
-    async (reportId: number) => {
+  const sendReportToDiscord = useCallback(
+    async (r: ReportRow) => {
       if (!userId) {
         toast('Iniciá sesión')
         return
       }
-      setDiscordSendingId(reportId)
+      const endpoint = reportDiscordEndpoint(r)
+      if (!endpoint) return
+      const key = reportDiscordKey(r)
+      setDiscordSendingId(key)
       try {
-        const res = await apiFetch(`/team/setter-reports/${reportId}/discord`, { method: 'POST' })
+        const res = await apiFetch(endpoint, { method: 'POST' })
         if (!res.ok) {
           toast(errMessage(await res.json().catch(() => ({}))))
           return
@@ -731,20 +744,20 @@ export default function TeamHistorialReportesPage() {
               <details key={`${r.kind}-${r.id}`} className="group bg-[var(--bg2)]/30 open:bg-[var(--bg3)]/40">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5 text-[11px] font-extrabold uppercase leading-snug tracking-wide text-[var(--text)] transition-colors hover:bg-[var(--nav-hover)] marker:content-none [&::-webkit-details-marker]:hidden">
                   <span className="min-w-0 flex-1 select-none">{reportListTitle(r)}</span>
-                  {r.kind === 'setter' ? (
+                  {reportDiscordEndpoint(r) ? (
                     <button
                       type="button"
                       title="Enviar reporte a Discord"
-                      disabled={discordSendingId === r.id}
+                      disabled={discordSendingId === reportDiscordKey(r)}
                       onMouseDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
-                        void sendSetterReportToDiscord(r.id)
+                        void sendReportToDiscord(r)
                       }}
                       className="shrink-0 rounded-lg border border-[#5865F2]/40 bg-[#5865F2]/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-[#949cf0] transition-colors hover:border-[#5865F2] hover:bg-[#5865F2]/20 hover:text-[#c5c9ff] disabled:opacity-50"
                     >
-                      {discordSendingId === r.id ? 'Enviando…' : 'Discord'}
+                      {discordSendingId === reportDiscordKey(r) ? 'Enviando…' : 'Discord'}
                     </button>
                   ) : null}
                 </summary>
