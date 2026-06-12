@@ -33,6 +33,7 @@ export function SalesDashboardPage() {
       chats: analytics.chats,
       chatsReels: analytics.chatsReels,
       chatsStories: analytics.chatsStories,
+      leads_nuevos: analytics.leads_nuevos,
       agendasByWeek: analytics.byWeek.agendas,
       conversacionesByWeek: analytics.byWeek.conversaciones,
       showsByWeek: analytics.byWeek.shows,
@@ -134,17 +135,19 @@ function VDFunnel({ d }: { d: VDData }) {
   const steps = [
     { label: 'CHATS', value: d.chats },
     { label: 'CONVERSACIONES', value: d.conversaciones },
+    { label: 'LEADS NUEVOS', value: d.leads_nuevos },
     { label: 'AGENDAS', value: d.agendas },
     { label: 'SHOWS', value: d.shows },
     { label: 'CIERRES', value: d.cierres },
   ]
   const rates = [
     { label: 'Tasa de conversación', rate: d.chats > 0 ? (d.conversaciones / d.chats) * 100 : 0 },
+    { label: 'Tasa ag. leads nuevos', rate: d.leads_nuevos > 0 ? (d.agendas / d.leads_nuevos) * 100 : 0 },
     { label: 'Tasa de agendamiento', rate: d.tasaAgendamiento },
     { label: 'Tasa de show', rate: d.showUpRate },
     { label: 'Tasa de cierre', rate: d.closeRate },
   ]
-  const widths = [100, 75, 55, 42, 28]
+  const widths = [100, 82, 68, 55, 42, 28]
 
   return (
     <div className="glass-card p-6">
@@ -421,6 +424,7 @@ function SemanalView({ curr }: { curr: VDData }) {
     return ci > 0 ? Number.NaN : 0
   })
   const tasaAgend = curr.conversacionesByWeek.map((c, i) => c > 0 ? (curr.agendasByWeek[i] / c) * 100 : 0)
+  const tasaAgLeads = curr.byWeek.leads_nuevos.map((ln, i) => ln > 0 ? (curr.agendasByWeek[i] / ln) * 100 : 0)
   const aovW = curr.cierresByWeek.map((c, i) =>
     c > 0 ? (curr.byWeek.facturacion[i] ?? 0) / c : 0,
   )
@@ -443,6 +447,7 @@ function SemanalView({ curr }: { curr: VDData }) {
     { label: 'No Shows', data: curr.noShowsByWeek, group: 'closer' },
     { label: 'Cierres', data: curr.cierresByWeek, group: 'closer' },
     { label: 'Ingresos (reportes)', data: curr.ingresosByWeek, group: 'closer', fmt: formatCash },
+    { label: 'Tasa ag. leads nuevos', data: tasaAgLeads, group: 'rates', fmt: fP },
     { label: 'T. Agendamiento %', data: tasaAgend, group: 'rates', fmt: fP },
     { label: 'Show Up Rate %', data: showUpRates, group: 'rates', fmt: fPOrDash },
     { label: 'Close Rate %', data: closeRates, group: 'rates', fmt: fPOrDash },
@@ -557,6 +562,7 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
     return c > 0 ? Number.NaN : 0
   })
   const tasaAgD = conv.map((c, i) => c > 0 ? (agendas[i] / c) * 100 : 0)
+  const tasaAgLeadsD = leadsNuevos.map((ln, i) => ln > 0 ? (agendas[i] / ln) * 100 : 0)
   const aovD = cierres.map((c, i) => (c > 0 ? facturacionD[i] / c : 0))
 
   const sum = (arr: number[]) => arr.reduce((s, v) => s + v, 0)
@@ -589,6 +595,13 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
     { label: 'No Shows', data: noShowsD, total: sum(noShowsD), group: 'closer' },
     { label: 'Cierres', data: cierres, total: sumCi, group: 'closer' },
     { label: 'Ingresos (reportes)', data: ingresos, total: sumIng, group: 'closer', fmt: formatCash },
+    {
+      label: 'Tasa ag. leads nuevos',
+      data: tasaAgLeadsD,
+      total: sumLeadsNuevos > 0 ? (sumAg / sumLeadsNuevos) * 100 : 0,
+      group: 'rates',
+      fmt: fP,
+    },
     { label: 'T. Agendamiento', data: tasaAgD, total: sumConv > 0 ? (sumAg / sumConv) * 100 : 0, group: 'rates', fmt: fP },
     {
       label: 'Show Up Rate',

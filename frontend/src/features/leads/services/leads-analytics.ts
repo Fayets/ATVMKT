@@ -12,6 +12,7 @@ export type LeadsFunnel = {
   chatsReels: number
   chatsStories: number
   conversaciones: number
+  leads_nuevos: number
   agendas: number
   shows: number
   noShows: number
@@ -84,6 +85,7 @@ export function calcFunnel(leads: LeadRow[], conversaciones?: number): LeadsFunn
     chatsReels: 0,
     chatsStories: 0,
     conversaciones: conv,
+    leads_nuevos: 0,
     agendas, shows, noShows, cierres, ingresos, facturacion,
     ticketPromedio: cierres > 0 ? ingresos / cierres : 0,
     closeRate: shows > 0 ? (cierres / shows) * 100 : 0,
@@ -275,6 +277,7 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     reports.reduce((s, r) => s + (Number(r[field]) || 0), 0)
 
   const conversaciones = sumField(setterReports, 'conversaciones')
+  const leadsNuevos = sumField(setterReports, 'leads_nuevos')
   const agendas = sumField(setterReports, 'agendas')
   const shows = sumField(closerReports, 'shows')
   const cierres = sumField(closerReports, 'cierres')
@@ -334,6 +337,7 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     chatsReels,
     chatsStories,
     conversaciones,
+    leads_nuevos: leadsNuevos,
     agendas,
     shows,
     noShows,
