@@ -182,6 +182,22 @@ class Lead(db.Entity):
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
+class HotLead(db.Entity):
+    _table_ = "hot_lead"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    nombre = Optional(str, default="")
+    ig = Optional(str, default="")
+    avatar = Optional(str, default="")
+    seguidores = Optional(str, default="")
+    calidad = Optional(str, default="")
+    fecha = Optional(date)
+    status = Optional(str, default="Prospectar")
+    notas = Optional(str, default="")
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
 class TeamMember(db.Entity):
     _table_ = "teammember"
 

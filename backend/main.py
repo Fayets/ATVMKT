@@ -20,6 +20,7 @@ from src.controllers.master_lists_controller import router as master_lists_route
 from src.controllers.programs_controller import router as programs_router
 from src.controllers.keywords_controller import router as keywords_router
 from src.controllers.leads_controller import router as leads_router
+from src.controllers.hot_leads_controller import router as hot_leads_router
 from src.controllers.reels_controller import router as reels_router
 from src.controllers.stories_controller import router as stories_router
 from src.controllers.sync_settings_controller import router as sync_settings_router
@@ -141,6 +142,7 @@ app.include_router(conexiones_router)
 app.include_router(master_lists_router)
 app.include_router(programs_router)
 app.include_router(leads_router)
+app.include_router(hot_leads_router)
 app.include_router(keywords_router)
 app.include_router(reels_router)
 app.include_router(bio_router)

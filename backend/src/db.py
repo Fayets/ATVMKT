@@ -855,6 +855,53 @@ def _migrate_postgres_seguimiento_report() -> None:
         conn.close()
 
 
+def _migrate_postgres_hot_lead() -> None:
+    """Crea `hot_lead` en Postgres."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hot_lead (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    nombre TEXT NOT NULL DEFAULT '',
+                    ig TEXT NOT NULL DEFAULT '',
+                    avatar TEXT NOT NULL DEFAULT '',
+                    seguidores TEXT NOT NULL DEFAULT '',
+                    calidad TEXT NOT NULL DEFAULT '',
+                    fecha DATE,
+                    status TEXT NOT NULL DEFAULT 'Prospectar',
+                    notas TEXT NOT NULL DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            try:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_hot_lead_user_id ON hot_lead(user_id)"
+                )
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     import src.models  # noqa: F401 — registrar entidades Pony antes del mapping
 
@@ -872,6 +919,7 @@ def init_db() -> None:
     _migrate_postgres_closer_report_marketing_multiple_per_day()
     _migrate_postgres_offered_program()
     _migrate_postgres_seguimiento_report()
+    _migrate_postgres_hot_lead()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()
     _migrate_agendo_en_default_chat_when_agendado()

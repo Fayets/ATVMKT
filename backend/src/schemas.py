@@ -614,3 +614,47 @@ class SyncSettingsPatch(BaseModel):
         default=None,
         description="Minutos entre refresh automático de métricas de reels.",
     )
+
+
+class HotLeadOut(BaseModel):
+    id: str
+    nombre: str = ""
+    ig: str = ""
+    avatar: str = ""
+    seguidores: str = ""
+    calidad: str = ""
+    fecha: str | None = None
+    status: str = "Prospectar"
+    notas: str = ""
+    created_at: str
+    month: str | None = None
+
+
+class HotLeadsListResponse(BaseModel):
+    hot_leads: list[HotLeadOut] = Field(default_factory=list)
+
+
+class HotLeadCreateRequest(BaseModel):
+    nombre: str = Field(default="", max_length=500)
+    ig: str | None = None
+    avatar: str | None = None
+    seguidores: str | None = None
+    calidad: str | None = None
+    fecha: str | None = Field(default=None, description="YYYY-MM-DD")
+    status: str | None = Field(default="Prospectar")
+    notas: str | None = None
+    month: str | None = Field(
+        default=None,
+        description="YYYY-MM mes operativo para anclar fecha si se omite.",
+    )
+
+
+class HotLeadPatchRequest(BaseModel):
+    nombre: str | None = None
+    ig: str | None = None
+    avatar: str | None = None
+    seguidores: str | None = None
+    calidad: str | None = None
+    fecha: str | None = None
+    status: str | None = None
+    notas: str | None = None

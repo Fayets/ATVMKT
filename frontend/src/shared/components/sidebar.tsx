@@ -48,6 +48,7 @@ const dataGroups: NavGroup[] = [
     title: 'Trackeo de ventas', icon: '💰',
     items: [
       { label: 'Leads', href: '/leads' },
+      { label: 'Hot Leads', href: '/hot-leads' },
     ],
   },
   {
