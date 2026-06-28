@@ -658,3 +658,32 @@ class HotLeadPatchRequest(BaseModel):
     fecha: str | None = None
     status: str | None = None
     notas: str | None = None
+
+
+class AgentResumenProgramaOut(BaseModel):
+    nombre: str
+    ventas: int
+    ingresos: float
+
+
+class AgentResumenPorSemanaOut(BaseModel):
+    agendas: list[int] = Field(default_factory=lambda: [0, 0, 0, 0])
+    cierres: list[int] = Field(default_factory=lambda: [0, 0, 0, 0])
+
+
+class AgentResumenOut(BaseModel):
+    month: str
+    conversaciones: int
+    leads_nuevos: int
+    agendas: int
+    shows: int
+    cierres: int
+    ingresos: float
+    facturacion: float
+    close_rate: float
+    show_rate: float
+    tasa_agendamiento: float
+    ticket_promedio: float
+    cash_por_chat: float
+    programas: list[AgentResumenProgramaOut] = Field(default_factory=list)
+    por_semana: AgentResumenPorSemanaOut
