@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from src.agent_auth import get_agent_auth, get_agent_user_id
-from src.schemas import AgentResumenOut
+from src.schemas import AgentContenidoOut, AgentResumenOut
 from src.services.agent_analytics_service import build_miembro, build_resumen, current_month_ar
+from src.services.agent_content_service import build_contenido
 
 router = APIRouter(prefix="/api/agent", tags=["agent"], redirect_slashes=False)
 
@@ -37,6 +38,20 @@ def agent_resumen(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return AgentResumenOut(**payload)
+
+
+@router.get("/contenido", response_model=AgentContenidoOut)
+def agent_contenido(
+    _: Annotated[None, Depends(get_agent_auth)],
+    month: str | None = Query(default=None, description="YYYY-MM; default mes actual (Argentina)"),
+) -> AgentContenidoOut:
+    uid = get_agent_user_id()
+    ym = _parse_month_param(month)
+    try:
+        payload = build_contenido(uid, ym)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return AgentContenidoOut(**payload)
 
 
 @router.get("/miembro")

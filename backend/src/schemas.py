@@ -687,3 +687,58 @@ class AgentResumenOut(BaseModel):
     cash_por_chat: float
     programas: list[AgentResumenProgramaOut] = Field(default_factory=list)
     por_semana: AgentResumenPorSemanaOut
+
+
+class AgentContenidoReelTopOut(BaseModel):
+    label: str
+    fecha: str
+    plays: int
+    reach: int
+    chats: int
+    cash: float
+
+
+class AgentContenidoReelsOut(BaseModel):
+    piezas_publicadas: int = 0
+    chats_generados: int = 0
+    reels_con_cta: int = 0
+    reels_sin_cta: int = 0
+    top: list[AgentContenidoReelTopOut] = Field(default_factory=list)
+
+
+class AgentContenidoHistoriasOut(BaseModel):
+    secuencias: int = 0
+    chats_generados: int = 0
+    secuencias_con_cta: int = 0
+    cash: float = 0
+
+
+class AgentContenidoYoutubeOut(BaseModel):
+    videos: int = 0
+    views: int = 0
+    chats_generados: int = 0
+    cash: float = 0
+
+
+class AgentContenidoBioOut(BaseModel):
+    total_leads: int = 0
+    agendaron: int = 0
+    cerrados: int = 0
+    tasa_agenda: float = 0
+    tasa_conversion: float = 0
+    cash: float = 0
+
+
+class AgentContenidoKeywordTopOut(BaseModel):
+    keyword: str
+    leads: int
+    reel_label: str
+
+
+class AgentContenidoOut(BaseModel):
+    month: str
+    reels: AgentContenidoReelsOut
+    historias: AgentContenidoHistoriasOut
+    youtube: AgentContenidoYoutubeOut
+    bio: AgentContenidoBioOut
+    keywords_top: list[AgentContenidoKeywordTopOut] = Field(default_factory=list)
