@@ -9,6 +9,8 @@ from pony.orm import db_session
 
 from src.models import AuthUser
 from src.schemas import (
+    AuthChangePasswordRequest,
+    AuthChangePasswordResponse,
     AuthLoginRequest,
     AuthMeResponse,
     AuthRegisterRequest,
@@ -94,3 +96,48 @@ def get_current_user_id(username: str = Depends(get_current_username)) -> int:
 @router.get("/me", response_model=AuthMeResponse)
 def me(username: str = Depends(get_current_username)):
     return AuthMeResponse(username=username)
+
+
+@router.post("/change-password", response_model=AuthChangePasswordResponse)
+def change_password(
+    body: AuthChangePasswordRequest,
+    username: str = Depends(get_current_username),
+):
+    current_password = body.current_password
+    new_password = body.new_password
+    if not current_password or not new_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="current_password and new_password are required",
+        )
+    if len(new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La nueva contraseña debe tener al menos 6 caracteres",
+        )
+
+    with db_session:
+        user = AuthUser.get(username=username)
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+        valid_password = bcrypt.checkpw(
+            current_password.encode("utf-8"),
+            user.password_hash.encode("utf-8"),
+        )
+        if not valid_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Contraseña actual incorrecta",
+            )
+
+        if bcrypt.checkpw(new_password.encode("utf-8"), user.password_hash.encode("utf-8")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La nueva contraseña debe ser distinta a la actual",
+            )
+
+        user.password_hash = bcrypt.hashpw(new_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+        user.updated_at = datetime.utcnow()
+
+    return AuthChangePasswordResponse()

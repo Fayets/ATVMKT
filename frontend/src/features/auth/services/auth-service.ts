@@ -7,6 +7,17 @@ const loginSchema = z.object({
   password: z.string().min(6, 'Minimo 6 caracteres'),
 })
 
+const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Ingresa tu contraseña actual'),
+    newPassword: z.string().min(6, 'Minimo 6 caracteres'),
+    confirmPassword: z.string().min(1, 'Confirma la nueva contraseña'),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'Las contraseñas no coinciden',
+    path: ['confirmPassword'],
+  })
+
 export type AuthResult = {
   error?: string
   ok?: boolean
@@ -70,6 +81,52 @@ export async function login(username: string, password: string): Promise<AuthRes
 
 export async function signup(): Promise<AuthResult> {
   return { error: 'Registro deshabilitado. Crear usuarios desde Swagger /auth/register.' }
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+  confirmPassword: string,
+): Promise<AuthResult> {
+  const parsed = changePasswordSchema.safeParse({
+    currentPassword,
+    newPassword,
+    confirmPassword,
+  })
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message }
+  }
+
+  const token =
+    typeof window !== 'undefined'
+      ? sessionStorage.getItem('evoluciona_token') ||
+        sessionStorage.getItem('access_token') ||
+        sessionStorage.getItem('auth_token')
+      : null
+
+  if (!token) {
+    return { error: 'Sesion expirada. Inicia sesion de nuevo.' }
+  }
+
+  const response = await fetch(`${BACKEND_BASE}/auth/change-password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      current_password: parsed.data.currentPassword,
+      new_password: parsed.data.newPassword,
+    }),
+  })
+  const data = (await response.json().catch(() => null)) as { detail?: string } | null
+
+  if (!response.ok) {
+    return { error: data?.detail || 'No se pudo cambiar la contraseña' }
+  }
+
+  return { ok: true }
 }
 
 export async function logout() {

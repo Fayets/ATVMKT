@@ -128,13 +128,27 @@ export function Sidebar() {
           <span className="min-w-0 truncate font-medium text-[var(--text2)]" title={displayName}>
             {displayName}
           </span>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="shrink-0 rounded-md border border-[var(--border2)] bg-transparent px-2 py-1 text-[10px] font-medium text-[var(--text3)] transition-all hover:border-[var(--accent)] hover:bg-[var(--accent-faint)] hover:text-[var(--accent)]"
-          >
-            Salir
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Link
+              href="/ajustes/cuenta"
+              title="Mi cuenta"
+              aria-label="Mi cuenta"
+              className={`flex h-7 w-7 items-center justify-center rounded-md border text-[13px] transition-all ${
+                pathname === '/ajustes/cuenta'
+                  ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--accent)]'
+                  : 'border-[var(--border2)] bg-transparent text-[var(--text3)] hover:border-[var(--accent)] hover:bg-[var(--accent-faint)] hover:text-[var(--accent)]'
+              }`}
+            >
+              ⚙
+            </Link>
+            <button
+              type="button"
+              onClick={onLogout}
+              className="rounded-md border border-[var(--border2)] bg-transparent px-2 py-1 text-[10px] font-medium text-[var(--text3)] transition-all hover:border-[var(--accent)] hover:bg-[var(--accent-faint)] hover:text-[var(--accent)]"
+            >
+              Salir
+            </button>
+          </div>
         </div>
         © 2025-2026 ATV
       </div>

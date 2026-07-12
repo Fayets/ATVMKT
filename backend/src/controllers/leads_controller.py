@@ -107,11 +107,11 @@ def _normalize_via_value(user_id_int: int, raw: str | None) -> str:
 
 
 def _lead_effective_dt(row: LeadEntity) -> datetime | None:
-    """Fecha para mes AR y orden en listados: conversación bot o alta.
-
-    `primer_contacto` es solo un dato de control en la UI; no debe mover el lead
-    de mes al editarlo (GET /leads ?month=, campo `month` en la respuesta)."""
-    return row.fecha_bot or row.created_at
+    """Fecha para mes AR y orden en listados.
+    Prioridad: call (fecha real de la llamada) > agendo > fecha_bot > created_at.
+    Un lead que agenda en junio pero tiene la llamada en julio aparece en julio,
+    porque el cierre y la facturación pertenecen al mes de la llamada."""
+    return row.call or row.agendo or row.fecha_bot or row.created_at
 
 
 def _lead_month_ar(row: LeadEntity) -> tuple[int, int] | None:

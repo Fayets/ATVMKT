@@ -28,6 +28,15 @@ class AuthMeResponse(BaseModel):
     username: str
 
 
+class AuthChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class AuthChangePasswordResponse(BaseModel):
+    status: str = "ok"
+
+
 class MasterListUpsertRequest(BaseModel):
     items: list[str] = Field(default_factory=list)
 

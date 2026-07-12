@@ -20,6 +20,8 @@ const titles: Record<string, string> = {
   '/listas': 'Listas Maestras',
   '/programas': 'Programas',
   '/conexiones': 'Conexiones API',
+  '/ajustes/cuenta': 'Mi cuenta',
+  '/ajustes/tasa-refresco': 'Tasa de refresco',
 }
 
 const subtitles: Record<string, string> = {
@@ -32,6 +34,8 @@ const subtitles: Record<string, string> = {
   '/listas': 'Configuracion',
   '/programas': 'Configuracion',
   '/conexiones': 'Configuracion',
+  '/ajustes/cuenta': 'Ajustes',
+  '/ajustes/tasa-refresco': 'Ajustes',
 }
 
 export function Topbar() {
@@ -45,6 +49,8 @@ export function Topbar() {
     '/listas',
     '/programas',
     '/conexiones',
+    '/ajustes/cuenta',
+    '/ajustes/tasa-refresco',
     '/team',
     '/team/reportes',
     '/team/historial-reportes',
