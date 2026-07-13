@@ -49,6 +49,7 @@ const dataGroups: NavGroup[] = [
     items: [
       { label: 'Leads', href: '/leads' },
       { label: 'Hot Leads', href: '/hot-leads' },
+      { label: 'Reporte calls', href: '/reporte-calls' },
     ],
   },
   {

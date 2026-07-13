@@ -278,3 +278,23 @@ class SeguimientoReport(db.Entity):
     nombre_lead = Required(str)
     monto = Required(float, default=0)
     created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class CallReport(db.Entity):
+    """Análisis de llamada Fathom (1 link = 1 reporte)."""
+
+    _table_ = "call_report"
+
+    id = PrimaryKey(int, auto=True)
+    lead_id = Required(int, index=True)
+    fathom_url = Required(str, unique=True)
+    estado = Required(str, default="pendiente")
+    error_msg = Optional(str, default="")
+    closer_report = Optional(str, default="")
+    dolores_llamada = Optional(str, default="")
+    razon_compra = Optional(str, default="")
+    program_offered = Optional(str, default="")
+    status_llamada = Optional(str, default="")
+    user_id = Required(int, index=True)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)

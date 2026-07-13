@@ -3,11 +3,11 @@ from datetime import date, datetime, timezone
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
-from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent
+from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent, CallReport
 from src.schemas import (
     LeadCreateRequest,
     LeadOut,
@@ -18,6 +18,11 @@ from src.schemas import (
 from src.services.programs_services import (
     build_program_norm_price_map,
     program_price_usd_for_prog_raw,
+)
+from src.services.call_report_service import (
+    analyze_call_report,
+    is_fathom_link,
+    normalize_fathom_url,
 )
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
@@ -430,6 +435,7 @@ def leads_metrics(
 def patch_lead(
     lead_id: str,
     body: LeadPatchRequest,
+    background: BackgroundTasks,
     user_id: Annotated[str, Depends(require_user_id)],
 ) -> LeadOut:
     try:
@@ -441,6 +447,8 @@ def patch_lead(
     data = body.model_dump(exclude_unset=True)
     if not data:
         raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
+
+    report_id_to_analyze: int | None = None
 
     with db_session:
         try:
@@ -500,7 +508,19 @@ def patch_lead(
             else:
                 row.agendo_en = raw or "Chat"
         if "call_link" in data:
+            prev_link = normalize_fathom_url(row.link_llamada or "")
             row.link_llamada = data["call_link"] or ""
+            nuevo_link = normalize_fathom_url(row.link_llamada or "")
+            if is_fathom_link(nuevo_link) and nuevo_link != prev_link:
+                existing = CallReport.get(fathom_url=nuevo_link)
+                if existing is None:
+                    cr = CallReport(
+                        lead_id=lid,
+                        fathom_url=nuevo_link,
+                        user_id=uid,
+                        estado="pendiente",
+                    )
+                    report_id_to_analyze = int(cr.id)
         if "program_offered" in data:
             row.programa_ofrecido = data["program_offered"] or ""
         if "programada_ofrecido_llamada" in data:
@@ -531,7 +551,12 @@ def patch_lead(
         _sync_dias_para_agendar(row)
 
         norm_prices = build_program_norm_price_map(uid)
-        return _to_lead_out(row, norm_prices)
+        result = _to_lead_out(row, norm_prices)
+
+    if report_id_to_analyze is not None:
+        background.add_task(analyze_call_report, report_id_to_analyze)
+
+    return result
 
 
 @router.delete("/{lead_id}")

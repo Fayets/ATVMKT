@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pony.orm import db_session
 
+from src.controllers.call_reports_controller import router as call_reports_router
 from src.controllers.agent_controller import router as agent_router
 from src.controllers.auth_controller import router as auth_router
 from src.controllers.bio_controller import router as bio_router
@@ -145,6 +146,7 @@ app.include_router(master_lists_router)
 app.include_router(programs_router)
 app.include_router(leads_router)
 app.include_router(hot_leads_router)
+app.include_router(call_reports_router)
 app.include_router(keywords_router)
 app.include_router(reels_router)
 app.include_router(bio_router)

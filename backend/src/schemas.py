@@ -660,6 +660,36 @@ class HotLeadPatchRequest(BaseModel):
     notas: str | None = None
 
 
+class CallReportOut(BaseModel):
+    id: str
+    lead_id: str
+    lead_nombre: str = ""
+    fathom_url: str
+    estado: str
+    error_msg: str | None = None
+    closer_report: str | None = None
+    dolores_llamada: str | None = None
+    razon_compra: str | None = None
+    program_offered: str | None = None
+    status_llamada: str | None = None
+    created_at: str
+    updated_at: str | None = None
+
+
+class CallReportsListResponse(BaseModel):
+    call_reports: list[CallReportOut] = Field(default_factory=list)
+
+
+class CallReportAnalyzeRequest(BaseModel):
+    lead_id: int
+    fathom_url: str
+
+
+class CallReportAnalyzeResponse(BaseModel):
+    report_id: int
+    estado: str
+
+
 class AgentResumenProgramaOut(BaseModel):
     nombre: str
     ventas: int

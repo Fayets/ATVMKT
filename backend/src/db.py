@@ -902,6 +902,57 @@ def _migrate_postgres_hot_lead() -> None:
         conn.close()
 
 
+def _migrate_postgres_call_report() -> None:
+    """Crea `call_report` en Postgres."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS call_report (
+                    id SERIAL PRIMARY KEY,
+                    lead_id INTEGER NOT NULL,
+                    fathom_url TEXT NOT NULL UNIQUE,
+                    estado TEXT NOT NULL DEFAULT 'pendiente',
+                    error_msg TEXT DEFAULT '',
+                    closer_report TEXT DEFAULT '',
+                    dolores_llamada TEXT DEFAULT '',
+                    razon_compra TEXT DEFAULT '',
+                    program_offered TEXT DEFAULT '',
+                    status_llamada TEXT DEFAULT '',
+                    user_id INTEGER NOT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
+                    updated_at TIMESTAMP NULL
+                )
+                """
+            )
+            for ddl in (
+                "CREATE INDEX IF NOT EXISTS idx_call_report_lead_id ON call_report (lead_id)",
+                "CREATE INDEX IF NOT EXISTS idx_call_report_user_id ON call_report (user_id)",
+            ):
+                try:
+                    cur.execute(ddl)
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     import src.models  # noqa: F401 — registrar entidades Pony antes del mapping
 
@@ -920,6 +971,7 @@ def init_db() -> None:
     _migrate_postgres_offered_program()
     _migrate_postgres_seguimiento_report()
     _migrate_postgres_hot_lead()
+    _migrate_postgres_call_report()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()
     _migrate_agendo_en_default_chat_when_agendado()
