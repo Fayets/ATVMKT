@@ -287,9 +287,18 @@ class CallReport(db.Entity):
 
     id = PrimaryKey(int, auto=True)
     lead_id = Required(int, index=True)
+    lead_nombre = Optional(str, default="")
     fathom_url = Required(str, unique=True)
     estado = Required(str, default="pendiente")
     error_msg = Optional(str, default="")
+    participantes = Optional(str, default="")
+    motivo_reunion = Optional(str, default="")
+    resumen = Optional(str, default="")
+    hubo_objeciones = Optional(str, default="")
+    tipo_perfil = Optional(str, default="")
+    ingresos_estimados = Optional(str, default="")
+    situacion_y_deseo = Optional(str, default="")
+    # Campos legacy (reportes anteriores); ya no se usan en el formato nuevo.
     closer_report = Optional(str, default="")
     dolores_llamada = Optional(str, default="")
     razon_compra = Optional(str, default="")

@@ -5,7 +5,7 @@ from decouple import config
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from pony.orm import db_session
+from pony.orm import db_session, flush
 
 from src.models import AuthUser
 from src.schemas import (
@@ -46,6 +46,7 @@ def register_user(
 
         password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
         user = AuthUser(username=username, password_hash=password_hash, updated_at=datetime.utcnow())
+        flush()
         uid = user.id
 
     return AuthTokenResponse(access_token=_create_access_token(username), user_id=uid)

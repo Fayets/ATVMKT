@@ -6,13 +6,45 @@ from pony.orm import *
 
 db = Database()
 
-db.bind(
-    provider=config("DB_PROVIDER"),
-    user=config("DB_USER"),
-    password=config("DB_PASS"),
-    host=config("DB_HOST"),
-    database=config("DB_NAME"),
-)
+
+def _postgres_bind_kwargs() -> dict:
+    """Credenciales Pony; sslmode opcional (Neon / cloud)."""
+    kwargs: dict = {
+        "provider": config("DB_PROVIDER"),
+        "user": config("DB_USER"),
+        "password": config("DB_PASS"),
+        "host": config("DB_HOST"),
+        "database": config("DB_NAME"),
+    }
+    port = (config("DB_PORT", default="") or "").strip()
+    if port:
+        kwargs["port"] = int(port)
+    sslmode = (config("DB_SSLMODE", default="") or "").strip()
+    if sslmode:
+        kwargs["sslmode"] = sslmode
+    return kwargs
+
+
+db.bind(**_postgres_bind_kwargs())
+
+
+def _psycopg2_connect():
+    """Conexión psycopg2 con las mismas credenciales / SSL que Pony (migraciones)."""
+    import psycopg2
+
+    kw: dict = {
+        "user": config("DB_USER"),
+        "password": config("DB_PASS"),
+        "host": config("DB_HOST"),
+        "dbname": config("DB_NAME"),
+    }
+    port = (config("DB_PORT", default="") or "").strip()
+    if port:
+        kw["port"] = int(port)
+    sslmode = (config("DB_SSLMODE", default="") or "").strip()
+    if sslmode:
+        kw["sslmode"] = sslmode
+    return psycopg2.connect(**kw)
 
 
 def _migrate_postgres_lead_call_to_timestamp() -> None:
@@ -27,12 +59,7 @@ def _migrate_postgres_lead_call_to_timestamp() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -114,12 +141,7 @@ def _migrate_postgres_lead_agendo_to_timestamp() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -206,12 +228,7 @@ def _migrate_postgres_drop_pago_en_llamada() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -261,12 +278,7 @@ def _migrate_postgres_drop_canal_agendo() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -300,12 +312,7 @@ def _migrate_postgres_lead_setter_closer() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -350,12 +357,7 @@ def _migrate_postgres_lead_closer_report() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -399,12 +401,7 @@ def _migrate_postgres_lead_programada_ofrecido_llamada() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -448,12 +445,7 @@ def _migrate_postgres_youtube_content() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -506,12 +498,7 @@ def _migrate_postgres_storyslide_views_shares() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -549,12 +536,7 @@ def _migrate_postgres_setter_report_text_columns() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -597,12 +579,7 @@ def _migrate_postgres_closer_report_tipo() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -655,12 +632,7 @@ def _migrate_postgres_closer_report_marketing_multiple_per_day() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -779,12 +751,7 @@ def _migrate_postgres_offered_program() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -821,12 +788,7 @@ def _migrate_postgres_seguimiento_report() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -864,12 +826,7 @@ def _migrate_postgres_hot_lead() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -903,7 +860,7 @@ def _migrate_postgres_hot_lead() -> None:
 
 
 def _migrate_postgres_call_report() -> None:
-    """Crea `call_report` en Postgres."""
+    """Crea `call_report` en Postgres y columnas del formato actual."""
     if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
         return
     try:
@@ -911,12 +868,7 @@ def _migrate_postgres_call_report() -> None:
     except ImportError:
         return
     try:
-        conn = psycopg2.connect(
-            user=config("DB_USER"),
-            password=config("DB_PASS"),
-            host=config("DB_HOST"),
-            dbname=config("DB_NAME"),
-        )
+        conn = _psycopg2_connect()
     except Exception:
         return
     try:
@@ -927,9 +879,17 @@ def _migrate_postgres_call_report() -> None:
                 CREATE TABLE IF NOT EXISTS call_report (
                     id SERIAL PRIMARY KEY,
                     lead_id INTEGER NOT NULL,
+                    lead_nombre TEXT DEFAULT '',
                     fathom_url TEXT NOT NULL UNIQUE,
                     estado TEXT NOT NULL DEFAULT 'pendiente',
                     error_msg TEXT DEFAULT '',
+                    participantes TEXT DEFAULT '',
+                    motivo_reunion TEXT DEFAULT '',
+                    resumen TEXT DEFAULT '',
+                    hubo_objeciones TEXT DEFAULT '',
+                    tipo_perfil TEXT DEFAULT '',
+                    ingresos_estimados TEXT DEFAULT '',
+                    situacion_y_deseo TEXT DEFAULT '',
                     closer_report TEXT DEFAULT '',
                     dolores_llamada TEXT DEFAULT '',
                     razon_compra TEXT DEFAULT '',
@@ -944,6 +904,14 @@ def _migrate_postgres_call_report() -> None:
             for ddl in (
                 "CREATE INDEX IF NOT EXISTS idx_call_report_lead_id ON call_report (lead_id)",
                 "CREATE INDEX IF NOT EXISTS idx_call_report_user_id ON call_report (user_id)",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS lead_nombre TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS participantes TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS motivo_reunion TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS resumen TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS hubo_objeciones TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS tipo_perfil TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS ingresos_estimados TEXT DEFAULT ''",
+                "ALTER TABLE call_report ADD COLUMN IF NOT EXISTS situacion_y_deseo TEXT DEFAULT ''",
             ):
                 try:
                     cur.execute(ddl)

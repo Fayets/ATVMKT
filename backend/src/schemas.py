@@ -667,6 +667,13 @@ class CallReportOut(BaseModel):
     fathom_url: str
     estado: str
     error_msg: str | None = None
+    participantes: str | None = None
+    motivo_reunion: str | None = None
+    resumen: str | None = None
+    hubo_objeciones: str | None = None
+    tipo_perfil: str | None = None
+    ingresos_estimados: str | None = None
+    situacion_y_deseo: str | None = None
     closer_report: str | None = None
     dolores_llamada: str | None = None
     razon_compra: str | None = None
@@ -688,6 +695,10 @@ class CallReportAnalyzeRequest(BaseModel):
 class CallReportAnalyzeResponse(BaseModel):
     report_id: int
     estado: str
+
+
+class CallReportBulkIdsRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
 
 
 class AgentResumenProgramaOut(BaseModel):

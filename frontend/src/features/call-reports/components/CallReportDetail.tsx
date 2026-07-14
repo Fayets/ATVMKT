@@ -2,9 +2,12 @@
 
 import type { CallReport } from '../types'
 import { formatIsoDateDdMmYyyy } from '@/shared/lib/format-utils'
+import { downloadCallReport } from '../services/call-reports-service'
 
 type Props = {
   report: CallReport
+  onBusy?: (busy: boolean) => void
+  onError?: (msg: string) => void
 }
 
 function FieldBlock({ label, value }: { label: string; value: string | null | undefined }) {
@@ -18,7 +21,16 @@ function FieldBlock({ label, value }: { label: string; value: string | null | un
   )
 }
 
-export function CallReportDetail({ report }: Props) {
+function HeaderItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text3)]">{label}</div>
+      <div className="mt-0.5 break-words text-[13px] text-[var(--text)]">{value || '—'}</div>
+    </div>
+  )
+}
+
+export function CallReportDetail({ report, onBusy, onError }: Props) {
   if (report.estado === 'error') {
     return (
       <div className="rounded-lg border border-[var(--red)]/30 bg-[var(--red)]/5 p-4 text-[13px] text-[var(--red)]">
@@ -37,13 +49,58 @@ export function CallReportDetail({ report }: Props) {
     )
   }
 
+  const resumen =
+    (report.resumen || '').trim() || (report.closer_report || '').trim() || null
+
+  async function handleDownload(format: 'pdf' | 'txt') {
+    onBusy?.(true)
+    try {
+      await downloadCallReport(report.id, format)
+    } catch (e) {
+      onError?.(e instanceof Error ? e.message : 'Error al descargar.')
+    } finally {
+      onBusy?.(false)
+    }
+  }
+
   return (
     <div className="space-y-4 border-t border-[var(--border)] pt-4">
-      <FieldBlock label="Estado de la llamada" value={report.status_llamada} />
-      <FieldBlock label="Programa ofrecido" value={report.program_offered} />
-      <FieldBlock label="Reporte del closer" value={report.closer_report} />
-      <FieldBlock label="Dolores de la llamada" value={report.dolores_llamada} />
-      <FieldBlock label="Razón de compra" value={report.razon_compra} />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="rounded-md border border-[var(--border)] bg-[var(--bg2)] px-3 py-1.5 text-[12px] text-[var(--text2)] hover:bg-[var(--bg3)]"
+          onClick={() => void handleDownload('pdf')}
+        >
+          Descargar PDF
+        </button>
+        <button
+          type="button"
+          className="rounded-md border border-[var(--border)] bg-[var(--bg2)] px-3 py-1.5 text-[12px] text-[var(--text2)] hover:bg-[var(--bg3)]"
+          onClick={() => void handleDownload('txt')}
+        >
+          Descargar TXT
+        </button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <HeaderItem label="Fecha" value={formatReportDate(report.created_at)} />
+        <HeaderItem label="Lead" value={report.lead_nombre || 'Sin nombre'} />
+        <HeaderItem label="Link de la grabación" value={report.fathom_url || '—'} />
+        <HeaderItem label="Participantes" value={(report.participantes || '').trim() || '—'} />
+        <HeaderItem
+          label="Motivo de la reunión"
+          value={(report.motivo_reunion || '').trim() || '—'}
+        />
+      </div>
+
+      <FieldBlock label="Resumen de la reunión" value={resumen} />
+      <FieldBlock label="¿Hubo objeciones en la llamada?" value={report.hubo_objeciones} />
+      <FieldBlock label="¿Qué tipo de perfil tiene el lead?" value={report.tipo_perfil} />
+      <FieldBlock label="Ingresos estimados del lead" value={report.ingresos_estimados} />
+      <FieldBlock
+        label="¿Qué situación puntual está viviendo y qué le gustaría vivir en los próximos 3 meses?"
+        value={report.situacion_y_deseo}
+      />
     </div>
   )
 }

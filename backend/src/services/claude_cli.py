@@ -4,33 +4,50 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+from pathlib import Path
 
-# Port del prompt en fathom-transcript-analyzer.ts (instrucciones; transcript por stdin).
-ANALYSIS_INSTRUCTIONS = """Sos un analista de ventas experto. Vas a recibir por stdin la transcripción completa de una llamada de ventas entre un closer y un lead (formato "Hablante: texto").
 
-Los programas que se ofrecen son: "Boost", "Advantage", "Mentoria".
-Los estados posibles del lead son: "Cerrado", "Seña", "Seguimiento", "No show", "Descalificado", "Pendiente".
-Si el lead cerró, agregá el monto entre paréntesis. Ej: "Cerrado (1600usd)"
+def _resolve_claude_bin() -> str:
+    """En Windows los wrappers npm (.cmd/.ps1) rompen stdin/stdout; usar el .exe."""
+    configured = (os.getenv("CLAUDE_CLI_PATH") or "").strip()
+    if configured and Path(configured).exists():
+        return configured
+    npm_claude = (
+        Path(os.environ.get("APPDATA", ""))
+        / "npm"
+        / "node_modules"
+        / "@anthropic-ai"
+        / "claude-code"
+        / "bin"
+        / "claude.exe"
+    )
+    if npm_claude.exists():
+        return str(npm_claude)
+    which = shutil.which("claude")
+    if which and not which.lower().endswith((".ps1", ".cmd", ".bat")):
+        return which
+    if which:
+        return which
+    return "claude"
 
-Extraé la siguiente información en español y generá la FICHA DE ANÁLISIS DE LLAMADA (NO devuelvas la transcripción):
 
-1. **REPORTE DEL CLOSER** (closer_report): Generá la ficha con EXACTAMENTE estas secciones, separadas por saltos de línea:
+ANALYSIS_INSTRUCTIONS = """Sos un analista de ventas experto. Vas a recibir por stdin la transcripción completa de una reunión/llamada (formato "Hablante: texto").
 
-📋 FICHA DE ANÁLISIS DE LLAMADA\\n\\nFecha: [fecha de la llamada o "No mencionado"]\\nNombre del lead: [nombre completo]\\nEstado: [status con monto si cerró]\\n\\n¿Qué lo motivó a estar dentro de la llamada?:\\n[Contexto completo]\\n\\n¿Cuál fue su mayor objeción o miedo? ¿Cómo la expresó?:\\n[Objeción con citas textuales]\\n\\n¿Qué tipo de perfil tiene el lead?:\\n[Perfil profesional]\\n\\nIngresos netos estimados del lead:\\n[Monto USD]\\n\\n¿Este lead representa al avatar ideal?:\\n[Sí/No]\\n\\n¿Qué puedo aportar para marketing desde la llamada?:\\n[Insights]\\n\\n¿Qué situación puntual está viviendo y qué le gustaría vivir en los próximos 3 meses?:\\nSituación actual: [...]\\nDeseo: [...]\\n\\n¿Cuáles fueron sus principales dolores?:\\n[Lista]\\n\\nDinero generado en la llamada:\\n[Monto o "No se generó dinero"]\\n\\nPrograma ofrecido al lead:\\n[Nombre, duración, precio]
+Extraé SOLO la siguiente información en español. NO devolvas la transcripción completa.
 
-2. **DOLORES DE LA LLAMADA** (dolores_llamada): cada dolor con "• " al inicio y en línea separada.
-
-3. **RAZÓN DE COMPRA** (razon_compra): Si cerró, por qué. Si no, "No cerró" y motivo.
-
-4. **PROGRAMA OFRECIDO** (program_offered): "Boost", "Advantage", "Mentoria", o "".
-
-5. **STATUS** (status): "Cerrado", "Seña", "Seguimiento", "Descalificado", "Pendiente", o "No show".
+1. **resumen**: resumen detallado de lo que se habló en la reunión (2-6 párrafos si hay material suficiente; claro y concreto).
+2. **hubo_objeciones**: ¿Hubo objeciones en la llamada? Respondé Sí/No y explicá brevemente cuáles (con citas si hay).
+3. **tipo_perfil**: ¿Qué tipo de perfil tiene el lead? (rol, negocio, experiencia, avatar).
+4. **ingresos_estimados**: ingresos estimados del lead (monto USD o "No mencionado").
+5. **situacion_y_deseo**: ¿Qué situación puntual está viviendo y qué le gustaría vivir en los próximos 3 meses?
+   Formato: "Situación actual: ...\\nDeseo: ..."
 
 Respondé EXACTAMENTE en este formato JSON (sin markdown, sin backticks):
-{"closer_report": "...", "dolores_llamada": "...", "razon_compra": "...", "program_offered": "...", "status": "..."}
+{"resumen":"...","hubo_objeciones":"...","tipo_perfil":"...","ingresos_estimados":"...","situacion_y_deseo":"..."}
 
-IMPORTANTE: En closer_report usá \\n entre secciones. En dolores_llamada usá "• " y \\n. Incluí citas del lead cuando sea posible.
+SIEMPRE devolvés ese JSON aunque la grabación sea una prueba, vacía o no sea una call de ventas (indicá "No aplica" / "No mencionado" donde corresponda). Nunca respondas en prosa fuera del JSON.
 """
 
 
@@ -53,39 +70,86 @@ def _truncate_transcript(text: str, max_chars: int = 80000) -> str:
     return text[:max_chars] + "\n\n[...transcripción truncada por longitud]"
 
 
+def _extract_result_text(stdout: str) -> str:
+    raw = (stdout or "").strip()
+    if not raw:
+        raise RuntimeError("claude stdout vacío")
+    for line in reversed(raw.splitlines()):
+        line = line.strip()
+        if line.startswith("{") and '"type"' in line:
+            try:
+                envelope = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if envelope.get("type") == "result":
+                if envelope.get("subtype") != "success":
+                    raise RuntimeError(
+                        f"claude subtype={envelope.get('subtype')}: {line[:800]}"
+                    )
+                return str(envelope.get("result") or "")
+    try:
+        envelope = json.loads(raw)
+        if isinstance(envelope, dict) and envelope.get("type") == "result":
+            if envelope.get("subtype") != "success":
+                raise RuntimeError(
+                    f"claude subtype={envelope.get('subtype')}: {raw[:800]}"
+                )
+            return str(envelope.get("result") or "")
+    except json.JSONDecodeError:
+        pass
+    return raw
+
+
 def run_claude_analysis(transcript_text: str) -> dict:
-    payload = _truncate_transcript(transcript_text)
-    proc = subprocess.run(
-        [
-            "claude",
-            "-p",
-            ANALYSIS_INSTRUCTIONS,
-            "--output-format",
-            "json",
-            "--model",
-            "sonnet",
-        ],
-        input=payload,
-        capture_output=True,
-        text=True,
-        timeout=300,
-        env={**os.environ},
+    payload = (
+        ANALYSIS_INSTRUCTIONS
+        + "\n\n--- TRANSCRIPCIÓN ---\n\n"
+        + _truncate_transcript(transcript_text)
     )
+    claude_bin = _resolve_claude_bin()
+    prompt = (
+        "Analizá la transcripción del stdin según las instrucciones del inicio. "
+        "Respondé solo el JSON pedido (sin markdown)."
+    )
+    try:
+        proc = subprocess.run(
+            [
+                claude_bin,
+                "-p",
+                prompt,
+                "--output-format",
+                "json",
+                "--model",
+                "sonnet",
+            ],
+            input=payload,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=300,
+            env={**os.environ},
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "Claude CLI no está instalado o no está en el PATH. "
+            "Instalá con: npm install -g @anthropic-ai/claude-code "
+            "y luego ejecutá: claude auth login"
+        ) from exc
     if proc.returncode != 0:
         stderr = (proc.stderr or "")[:800]
         raise RuntimeError(f"claude returncode={proc.returncode}: {stderr}")
+    result_text = _extract_result_text(proc.stdout or "")
     try:
-        envelope = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"claude stdout no es JSON: {(proc.stdout or '')[:800]}") from exc
-    if envelope.get("subtype") != "success":
-        raise RuntimeError(f"claude subtype={envelope.get('subtype')}: {(proc.stdout or '')[:800]}")
-    result_text = envelope.get("result") or ""
-    parsed = _parse_json_lenient(str(result_text))
+        parsed = _parse_json_lenient(str(result_text))
+    except (ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Claude no devolvió la ficha JSON: {str(result_text)[:800]}"
+        ) from exc
     return {
-        "closer_report": str(parsed.get("closer_report") or ""),
-        "dolores_llamada": str(parsed.get("dolores_llamada") or ""),
-        "razon_compra": str(parsed.get("razon_compra") or ""),
-        "program_offered": str(parsed.get("program_offered") or ""),
-        "status": str(parsed.get("status") or "Pendiente"),
+        "resumen": str(parsed.get("resumen") or ""),
+        "hubo_objeciones": str(parsed.get("hubo_objeciones") or ""),
+        "tipo_perfil": str(parsed.get("tipo_perfil") or ""),
+        "ingresos_estimados": str(parsed.get("ingresos_estimados") or ""),
+        "situacion_y_deseo": str(parsed.get("situacion_y_deseo") or ""),
     }

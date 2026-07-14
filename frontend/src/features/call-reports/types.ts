@@ -7,6 +7,13 @@ export type CallReport = {
   fathom_url: string
   estado: CallReportEstado | string
   error_msg: string | null
+  participantes: string | null
+  motivo_reunion: string | null
+  resumen: string | null
+  hubo_objeciones: string | null
+  tipo_perfil: string | null
+  ingresos_estimados: string | null
+  situacion_y_deseo: string | null
   closer_report: string | null
   dolores_llamada: string | null
   razon_compra: string | null

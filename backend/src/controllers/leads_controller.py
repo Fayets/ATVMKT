@@ -7,7 +7,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
-from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent, CallReport
+from src.models import CallReport as CallReportEntity
+from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent
 from src.schemas import (
     LeadCreateRequest,
     LeadOut,
@@ -21,6 +22,7 @@ from src.services.programs_services import (
 )
 from src.services.call_report_service import (
     analyze_call_report,
+    get_or_create_report,
     is_fathom_link,
     normalize_fathom_url,
 )
@@ -448,7 +450,7 @@ def patch_lead(
     if not data:
         raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
 
-    report_id_to_analyze: int | None = None
+    fathom_to_analyze: str | None = None
 
     with db_session:
         try:
@@ -512,15 +514,7 @@ def patch_lead(
             row.link_llamada = data["call_link"] or ""
             nuevo_link = normalize_fathom_url(row.link_llamada or "")
             if is_fathom_link(nuevo_link) and nuevo_link != prev_link:
-                existing = CallReport.get(fathom_url=nuevo_link)
-                if existing is None:
-                    cr = CallReport(
-                        lead_id=lid,
-                        fathom_url=nuevo_link,
-                        user_id=uid,
-                        estado="pendiente",
-                    )
-                    report_id_to_analyze = int(cr.id)
+                fathom_to_analyze = nuevo_link
         if "program_offered" in data:
             row.programa_ofrecido = data["program_offered"] or ""
         if "programada_ofrecido_llamada" in data:
@@ -553,8 +547,10 @@ def patch_lead(
         norm_prices = build_program_norm_price_map(uid)
         result = _to_lead_out(row, norm_prices)
 
-    if report_id_to_analyze is not None:
-        background.add_task(analyze_call_report, report_id_to_analyze)
+    if fathom_to_analyze:
+        report_id, created = get_or_create_report(lid, fathom_to_analyze, uid)
+        if created:
+            background.add_task(analyze_call_report, report_id)
 
     return result
 
@@ -564,7 +560,10 @@ def delete_lead(
     lead_id: str,
     user_id: Annotated[str, Depends(require_user_id)],
 ) -> dict[str, str]:
-    """Elimina un lead (cliente) si pertenece al usuario autenticado."""
+    """Elimina un lead (cliente) si pertenece al usuario autenticado.
+
+    Los CallReport asociados se conservan; se guarda un snapshot del nombre del lead.
+    """
     try:
         lid = int(lead_id)
         uid = int(user_id)
@@ -578,6 +577,12 @@ def delete_lead(
             raise HTTPException(status_code=404, detail="Lead no encontrado.") from e
         if int(row.user_id) != uid:
             raise HTTPException(status_code=404, detail="Lead no encontrado.")
+        nombre_snap = lead_display_nombre(row.nombre, row.ig) or (row.nombre or "").strip() or "Sin nombre"
+        for report in CallReportEntity.select(lambda r: r.lead_id == lid):
+            if int(report.user_id) != uid:
+                continue
+            if not (report.lead_nombre or "").strip():
+                report.lead_nombre = nombre_snap
         row.delete()
 
     return {"status": "ok", "id": str(lid)}
