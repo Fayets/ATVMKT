@@ -4,15 +4,14 @@ import { apiFetch } from '@/lib/api'
 // TYPES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-export type LeadRow = Record<string, unknown>
+export type LeadRow = Record<string, unknown> & {
+  email?: string | null
+  ingresos_rango?: string | null
+}
 
 export type LeadsFunnel = {
-  /** Reels + stories del mes (`/reels/metrics` + `/stories/metrics`). */
   chats: number
-  chatsReels: number
-  chatsStories: number
   conversaciones: number
-  leads_nuevos: number
   agendas: number
   shows: number
   noShows: number
@@ -31,14 +30,11 @@ export type LeadsFunnel = {
 export type WeekMetrics = {
   agendas: number[]
   conversaciones: number[]
-  leads_nuevos: number[]
-  seguimientos: number[]
-  outbounds: number[]
   shows: number[]
   cierres: number[]
   /** Cash por bucket: reportes closer ventas (`ingreso`) + formularios seguimiento. El embudo mensual `ingresos` sigue siendo Pagó + seguimiento. */
   ingresos: number[]
-  /** Facturación USD (mismo criterio que `funnel.facturacion` / `leadFacturacionUsd`) por bucket semanal. */
+  /** Facturación en euros (mismo criterio que `funnel.facturacion` / `leadFacturacionUsd`) por bucket semanal. */
   facturacion: number[]
   noShows: number[]
 }
@@ -51,6 +47,17 @@ export type CashCollectedComposition = {
 }
 
 export type LeadsAnalytics = LeadsFunnel & {
+  chatsStories: number
+  chatsReels: number
+  conversacionesStories: number
+  conversacionesReels: number
+  agendasStories: number
+  agendasReels: number
+  agendasAds: number
+  showsOrganico: number
+  showsAds: number
+  cierresOrganico: number
+  cierresAds: number
   programas: { nombre: string; ventas: number; ingresos: number }[]
   byWeek: WeekMetrics
   byWeekDay: { [K in keyof WeekMetrics]: number[][] } // [4 weeks][7 days]
@@ -66,26 +73,107 @@ export type MemberMetrics = LeadsFunnel & {
 // CORE CALCULATIONS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+export function leadHasAgenda(l: LeadRow): boolean {
+  const ag = l.agendo
+  const hasAgendo = ag != null && String(ag).trim() !== ''
+  return !!(l.scheduled_at || l.call_at || l.call || hasAgendo)
+}
+
+export function leadHasShow(l: LeadRow): boolean {
+  const st = String(l.status ?? '').trim().toLowerCase()
+  return leadHasAgenda(l) && st !== 'no show'
+}
+
+export function leadIsCierre(l: LeadRow): boolean {
+  return String(l.status ?? '').trim().toLowerCase() === 'cerrado'
+}
+
+function textLooksLikeBioTraffic(s: string): boolean {
+  const t = String(s || '').trim().toLowerCase()
+  if (!t) return false
+  if (t === 'bio') return true
+  if (t.includes('información') || t.includes('informacion')) return true
+  if (/\binfo\b/.test(t)) return true
+  if ((t.includes('link') || t.includes('enlace')) && (t.includes('bio') || t.includes('biografía') || t.includes('perfil'))) return true
+  if (t.includes('link en bio') || t.includes('link del perfil') || t.includes('desde perfil')) return true
+  return false
+}
+
+export type LeadChatSource = 'Historias' | 'Reels' | 'Perfil' | 'YouTube' | 'Otros'
+
+export function classifyLeadChatSource(l: LeadRow): LeadChatSource {
+  const url = String(l.content_url || '').toLowerCase()
+  if (url.includes('/reel/') || url.includes('instagram.com/reel')) return 'Reels'
+  const candidates = [
+    l.agenda_point,
+    l.entry_channel,
+    l.entry_funnel,
+    l.keyword,
+    l.origin,
+  ].map(v => String(v || '').trim().toLowerCase())
+  for (const s of candidates) {
+    if (!s) continue
+    if (s.startsWith('story:') || s.includes('historia') || /\bstor(y|ies)\b/.test(s)) return 'Historias'
+    if (s.includes('reel') || /^\d+$/.test(s)) return 'Reels'
+    if (textLooksLikeBioTraffic(s) || s === 'perfil') return 'Perfil'
+    if (s === 'youtube' || s.startsWith('youtube:')) return 'YouTube'
+  }
+  const origin = String(l.origin || '').trim().toLowerCase()
+  if (origin === 'youtube') return 'YouTube'
+  const entryChannel = String(l.entry_channel || '').trim().toLowerCase()
+  if (entryChannel === 'youtube') return 'YouTube'
+  return 'Otros'
+}
+
+export type FunnelLeadStep = 'CHATS' | 'CONVERSACIONES' | 'AGENDAS' | 'SHOWS' | 'CIERRES'
+
+export function filterLeadsForFunnelStep(leads: LeadRow[], step: FunnelLeadStep): LeadRow[] {
+  switch (step) {
+    case 'CHATS':
+    case 'CONVERSACIONES':
+      return leads
+    case 'AGENDAS':
+      return leads.filter(leadHasAgenda)
+    case 'SHOWS':
+      return leads.filter(leadHasShow)
+    case 'CIERRES':
+      return leads.filter(leadIsCierre)
+    default:
+      return leads
+  }
+}
+
+export function sortLeadsForFunnelStep(leads: LeadRow[], step: FunnelLeadStep): LeadRow[] {
+  const ts = (l: LeadRow, keys: string[]) => {
+    for (const k of keys) {
+      const n = Date.parse(String(l[k] ?? ''))
+      if (!Number.isNaN(n)) return n
+    }
+    return 0
+  }
+  const keysByStep: Record<FunnelLeadStep, string[]> = {
+    CHATS: ['fecha_bot', 'date', 'first_contact_at'],
+    CONVERSACIONES: ['fecha_bot', 'date', 'first_contact_at'],
+    AGENDAS: ['agendo', 'scheduled_at', 'call_at', 'call'],
+    SHOWS: ['call', 'scheduled_at', 'call_at', 'agendo'],
+    CIERRES: ['agendo', 'call', 'scheduled_at', 'date'],
+  }
+  const keys = keysByStep[step]
+  return [...leads].sort((a, b) => ts(b, keys) - ts(a, keys))
+}
+
 export function calcFunnel(leads: LeadRow[], conversaciones?: number): LeadsFunnel {
-  const cerrados = leads.filter(l => l.status === 'Cerrado')
-  const agendas = leads.filter(l => {
-    const ag = l.agendo
-    const hasAgendo = ag != null && String(ag).trim() !== ''
-    return !!(l.scheduled_at || l.call_at || hasAgendo)
-  }).length
-  const noShows = leads.filter(l => l.status === 'No show').length
-  const shows = Math.max(0, agendas - noShows)
-  const cierres = cerrados.length
+  const agendas = leads.filter(leadHasAgenda).length
+  const noShows = leads.filter(l => String(l.status ?? '').trim().toLowerCase() === 'no show').length
+  const shows = leads.filter(leadHasShow).length
+  const cierres = leads.filter(leadIsCierre).length
   const ingresos = leads.reduce((s, l) => s + (Number(l.payment) || 0), 0)
   const facturacion = leads.reduce((s, l) => s + (Number(l.revenue) || 0), 0)
   const conv = conversaciones ?? leads.length
 
   return {
     chats: 0,
-    chatsReels: 0,
-    chatsStories: 0,
     conversaciones: conv,
-    leads_nuevos: 0,
     agendas, shows, noShows, cierres, ingresos, facturacion,
     ticketPromedio: cierres > 0 ? ingresos / cierres : 0,
     closeRate: shows > 0 ? (cierres / shows) * 100 : 0,
@@ -144,7 +232,7 @@ function leadMetricDateIso(l: LeadRow): string | null {
   return null
 }
 
-function monthRangeIso(month: string): { desde: string; hasta: string } | null {
+export function monthRangeIso(month: string): { desde: string; hasta: string } | null {
   const m = /^(\d{4})-(\d{2})$/.exec(month.trim())
   if (!m) return null
   const y = Number(m[1])
@@ -165,12 +253,13 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const range = monthRangeIso(month)
   let seguimientoEntries: { fecha: string; monto: number }[] = []
   let seguimientoTotal = 0
-  let chats = 0
   let chatsReels = 0
   let chatsStories = 0
   try {
     const leadsReq = apiFetch(`/leads?month=${encodeURIComponent(month)}`)
     const programsReq = apiFetch('/programs')
+    const reelsMetricsReq = apiFetch(`/reels/metrics?month=${encodeURIComponent(month)}`)
+    const storiesMetricsReq = apiFetch(`/stories/metrics?month=${encodeURIComponent(month)}`)
     const segReq =
       range != null
         ? apiFetch(`/team/seguimiento-reports/month?month=${encodeURIComponent(month)}`)
@@ -181,8 +270,6 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
             `/team/reports?desde=${encodeURIComponent(range.desde)}&hasta=${encodeURIComponent(range.hasta)}`,
           )
         : Promise.resolve(new Response('', { status: 400 }))
-    const reelsMetricsReq = apiFetch(`/reels/metrics?month=${encodeURIComponent(month)}`)
-    const storiesMetricsReq = apiFetch(`/stories/metrics?month=${encodeURIComponent(month)}`)
     const [leadsRes, repRes, progRes, segRes, reelsMetricsRes, storiesMetricsRes] = await Promise.all([
       leadsReq,
       reportsReq,
@@ -236,9 +323,11 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
               date: fecha,
               conversaciones: Number(r.conversaciones) || 0,
               agendas: Number(r.agendas) || 0,
-              leads_nuevos: Number(r.leads_nuevos) || 0,
-              seguimientos: Number(r.seguimientos) || 0,
-              outbounds: Number(r.outbounds) || 0,
+              conversaciones_stories: Number(r.conversaciones_stories) || 0,
+              conversaciones_reels: Number(r.conversaciones_reels) || 0,
+              agendas_stories: Number(r.agendas_stories) || 0,
+              agendas_reels: Number(r.agendas_reels) || 0,
+              agendas_ads: Number(r.agendas_ads) || 0,
               shows: 0,
               cierres: 0,
               ingreso: 0,
@@ -250,6 +339,11 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
               agendas: 0,
               shows: Number(r.shows) || 0,
               cierres: Number(r.cierres) || 0,
+              shows_organico: Number(r.shows_organico) || 0,
+              shows_ads: Number(r.shows_ads) || 0,
+              cierres_organico: Number(r.cierres_organico) || 0,
+              cierres_ads: Number(r.cierres_ads) || 0,
+              reservas: Number(r.reservas) || 0,
               ingreso: Number(r.ingreso) || 0,
             })
           }
@@ -257,30 +351,41 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
       }
     }
 
-    const reelsMetricsData = reelsMetricsRes.ok
-      ? ((await reelsMetricsRes.json().catch(() => ({}))) as { chats_del_mes?: unknown })
-      : {}
-    const storiesMetricsData = storiesMetricsRes.ok
-      ? ((await storiesMetricsRes.json().catch(() => ({}))) as { chats_del_mes?: unknown })
-      : {}
-    const reelsChats = Number(reelsMetricsData?.chats_del_mes ?? 0) || 0
-    const storiesChats = Number(storiesMetricsData?.chats_del_mes ?? 0) || 0
-    chatsReels = reelsChats
-    chatsStories = storiesChats
-    chats = chatsReels + chatsStories
+    if (reelsMetricsRes.ok) {
+      const reelsMetricsData = (await reelsMetricsRes.json().catch(() => ({}))) as {
+        chats_del_mes?: number
+      }
+      chatsReels = reelsMetricsData?.chats_del_mes ?? 0
+    }
+    if (storiesMetricsRes.ok) {
+      const storiesMetricsData = (await storiesMetricsRes.json().catch(() => ({}))) as {
+        chats_del_mes?: number
+      }
+      chatsStories = storiesMetricsData?.chats_del_mes ?? 0
+    }
   } catch {
     /* red / sin sesión: seguimos con arrays vacíos */
   }
+
+  const chats = chatsReels + chatsStories
 
   // Embudo y series: reportes diarios setter + closer (ventas); programas y revenue desde leads
   const sumField = (reports: Record<string, unknown>[], field: string) =>
     reports.reduce((s, r) => s + (Number(r[field]) || 0), 0)
 
   const conversaciones = sumField(setterReports, 'conversaciones')
-  const leadsNuevos = sumField(setterReports, 'leads_nuevos')
   const agendas = sumField(setterReports, 'agendas')
   const shows = sumField(closerReports, 'shows')
   const cierres = sumField(closerReports, 'cierres')
+  const conversacionesStories = sumField(setterReports, 'conversaciones_stories')
+  const conversacionesReels = sumField(setterReports, 'conversaciones_reels')
+  const agendasStories = sumField(setterReports, 'agendas_stories')
+  const agendasReels = sumField(setterReports, 'agendas_reels')
+  const agendasAds = sumField(setterReports, 'agendas_ads')
+  const showsOrganico = sumField(closerReports, 'shows_organico')
+  const showsAds = sumField(closerReports, 'shows_ads')
+  const cierresOrganico = sumField(closerReports, 'cierres_organico')
+  const cierresAds = sumField(closerReports, 'cierres_ads')
   /** Ingreso declarado en reportes closer (solo fallback facturación si no hay programa en leads). */
   const ingresosReports = sumField(closerReports, 'ingreso')
   const cashFromLeadsPayments = leads.reduce((s, l) => s + (Number(l.payment) || 0), 0)
@@ -334,10 +439,7 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
 
   const funnel: LeadsFunnel = {
     chats,
-    chatsReels,
-    chatsStories,
     conversaciones,
-    leads_nuevos: leadsNuevos,
     agendas,
     shows,
     noShows,
@@ -385,9 +487,6 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const byWeek: WeekMetrics = {
     agendas: [0, 0, 0, 0],
     conversaciones: [0, 0, 0, 0],
-    leads_nuevos: [0, 0, 0, 0],
-    seguimientos: [0, 0, 0, 0],
-    outbounds: [0, 0, 0, 0],
     shows: [0, 0, 0, 0],
     cierres: [0, 0, 0, 0],
     ingresos: [0, 0, 0, 0],
@@ -398,9 +497,6 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const byWeekDay: LeadsAnalytics['byWeekDay'] = {
     conversaciones: [z7(), z7(), z7(), z7()],
     agendas: [z7(), z7(), z7(), z7()],
-    leads_nuevos: [z7(), z7(), z7(), z7()],
-    seguimientos: [z7(), z7(), z7(), z7()],
-    outbounds: [z7(), z7(), z7(), z7()],
     shows: [z7(), z7(), z7(), z7()],
     cierres: [z7(), z7(), z7(), z7()],
     ingresos: [z7(), z7(), z7(), z7()],
@@ -417,18 +513,12 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
 
     const conv = Number(r.conversaciones) || 0
     const ag = Number(r.agendas) || 0
-    const leadsNuevos = Number(r.leads_nuevos ?? 0) || 0
-    const seguimientosN = Number(r.seguimientos ?? 0) || 0
-    const outboundsN = Number(r.outbounds ?? 0) || 0
     const sh = Number(r.shows) || 0
     const ci = Number(r.cierres) || 0
     const ing = Number(r.ingreso) || 0
 
     byWeek.conversaciones[w] += conv; byWeekDay.conversaciones[w][dow] += conv
     byWeek.agendas[w] += ag;         byWeekDay.agendas[w][dow] += ag
-    byWeek.leads_nuevos[w] += leadsNuevos; byWeekDay.leads_nuevos[w][dow] += leadsNuevos
-    byWeek.seguimientos[w] += seguimientosN; byWeekDay.seguimientos[w][dow] += seguimientosN
-    byWeek.outbounds[w] += outboundsN; byWeekDay.outbounds[w][dow] += outboundsN
     byWeek.shows[w] += sh;           byWeekDay.shows[w][dow] += sh
     byWeek.cierres[w] += ci;         byWeekDay.cierres[w][dow] += ci
     byWeek.ingresos[w] += ing;       byWeekDay.ingresos[w][dow] += ing
@@ -475,6 +565,17 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     conversaciones,
     analytics: {
       ...funnel,
+      chatsStories,
+      chatsReels,
+      conversacionesStories,
+      conversacionesReels,
+      agendasStories,
+      agendasReels,
+      agendasAds,
+      showsOrganico,
+      showsAds,
+      cierresOrganico,
+      cierresAds,
       programas,
       byWeek,
       byWeekDay,

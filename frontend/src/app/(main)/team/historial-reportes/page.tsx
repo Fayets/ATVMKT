@@ -175,10 +175,6 @@ function SetterReportDetail({ r }: { r: Extract<ReportRow, { kind: 'setter' }> }
             <span className="font-mono-num text-[var(--text)]">{r.links_enviados}</span>
           </div>
           <div>
-            <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Leads nuevos</span>
-            <span className="font-mono-num text-[var(--text)]">{r.leads_nuevos ?? 0}</span>
-          </div>
-          <div>
             <span className="block text-[10px] uppercase tracking-wide text-[var(--text3)]">Seguimientos</span>
             <span className="font-mono-num text-[var(--text)]">{r.seguimientos ?? 0}</span>
           </div>

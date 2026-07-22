@@ -10,6 +10,7 @@ const titles: Record<string, string> = {
   '/historias': 'Historias',
   '/youtube': 'YouTube',
   '/leads': 'Leads',
+  '/reporte-calls': 'Reporte calls',
   '/hot-leads': 'Hot Leads',
   '/sales-dashboard': 'Ventas',
   '/team': 'Equipo',
@@ -19,6 +20,7 @@ const titles: Record<string, string> = {
   '/objetivos': 'Objetivos',
   '/listas': 'Listas Maestras',
   '/programas': 'Programas',
+  '/avatares': 'Avatares',
   '/conexiones': 'Conexiones API',
   '/ajustes/cuenta': 'Mi cuenta',
   '/ajustes/tasa-refresco': 'Tasa de refresco',
@@ -33,12 +35,17 @@ const subtitles: Record<string, string> = {
   '/diferidos': 'Atribucion cruzada',
   '/listas': 'Configuracion',
   '/programas': 'Configuracion',
+  '/avatares': 'Configuracion',
   '/conexiones': 'Configuracion',
   '/ajustes/cuenta': 'Ajustes',
   '/ajustes/tasa-refresco': 'Ajustes',
 }
 
-export function Topbar() {
+type TopbarProps = {
+  onMenuClick?: () => void
+}
+
+export function Topbar({ onMenuClick }: TopbarProps) {
   const pathname = usePathname()
   const hideTitleForPath = [
     '/reels',
@@ -48,6 +55,7 @@ export function Topbar() {
     '/bio',
     '/listas',
     '/programas',
+    '/avatares',
     '/conexiones',
     '/ajustes/cuenta',
     '/ajustes/tasa-refresco',
@@ -59,8 +67,22 @@ export function Topbar() {
   const subtitle = subtitles[pathname]
 
   return (
-    <header className="sticky top-0 z-10 flex min-h-[56px] items-center justify-between gap-4 border-b border-[var(--border)] bg-[var(--topbar-bg)] px-8 py-4 backdrop-blur-xl">
+    <header className="sticky top-0 z-10 flex min-h-[56px] items-center justify-between gap-4 border-b border-[var(--border)] bg-[var(--topbar-bg)] px-4 py-3 backdrop-blur-xl sm:px-6 lg:px-8 lg:py-4">
       <div className="flex min-w-0 flex-1 items-center gap-3">
+        {onMenuClick ? (
+          <button
+            type="button"
+            onClick={onMenuClick}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border2)] text-[var(--text2)] hover:bg-[var(--nav-hover)] md:hidden"
+            aria-label="Abrir menú"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
+            </svg>
+          </button>
+        ) : null}
         {!hideTitleForPath && (
           <h1 className="text-[15px] font-semibold tracking-tight">
             {title}

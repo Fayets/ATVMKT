@@ -1,3 +1,8 @@
+import {
+  AVATAR_COLORS,
+  AVATAR_OPTIONS,
+} from '@/shared/constants/avatar-defaults'
+
 export type Lead = {
   id: string
   /** user_id del dueño en BD (Pony Lead.user_id) */
@@ -45,6 +50,7 @@ export type Lead = {
   dolores_setting: string | null
   dolores_llamada: string | null
   razon_compra: string | null
+  ingresos_rango?: string | null
   /** Días desde 1er contacto hasta formulario Calendly (API calculado). */
   dias_agendamiento: number | null
   ingresos_mensuales: number
@@ -63,6 +69,7 @@ export type Lead = {
 export type ColumnDef = {
   key: string
   label: string
+  title?: string
   width: number
   type: 'text' | 'number' | 'date' | 'select' | 'badge' | 'link' | 'currency'
   editable?: boolean
@@ -93,15 +100,7 @@ export const STATUS_COLORS: Record<string, string> = {
   Pendiente: '#94A3B8',
 }
 
-export const AVATAR_COLORS: Record<string, string> = {
-  'Experto en info': '#3B82F6',
-  'Dueño de agencia': '#A855F7',
-  'Dueño de negocio': '#F59E0B',
-  'Habilidades de alto valor': '#EC4899',
-  'Creador de contenido': '#22C55E',
-  'Creador con infoproducto': '#06B6D4',
-  'Otro': '#6B7280',
-}
+export { AVATAR_COLORS, AVATAR_OPTIONS }
 
 export const PROGRAM_COLORS: Record<string, string> = {
   Boost: '#F59E0B',
@@ -110,7 +109,6 @@ export const PROGRAM_COLORS: Record<string, string> = {
 }
 
 export const STATUS_OPTIONS = ['Pendiente', 'Seguimiento', 'Seña', 'Cerrado', 'No show', 'Re-agenda', 'Descalificado']
-export const AVATAR_OPTIONS = ['', 'Experto en info', 'Dueño de agencia', 'Dueño de negocio', 'Habilidades de alto valor', 'Creador de contenido', 'Creador con infoproducto', 'Otro']
 export const PROGRAM_OPTIONS = ['', 'Boost', 'Advantage', 'Mentoria']
 export const ORIGIN_OPTIONS = ['Referido', 'Setter', 'Youtube', 'Lead viejo (seguimiento)'] as const
 
@@ -191,16 +189,19 @@ export function buildColumns(
   setterNames: string[],
   closerNames: string[],
   programOffered?: { options: string[]; colors: Record<string, string> },
+  avatarMeta?: { options: string[]; colors: Record<string, string> },
 ): ColumnDef[] {
   const progOpts = programOffered?.options ?? PROGRAM_OPTIONS
   const progColors = { ...PROGRAM_COLORS, ...(programOffered?.colors ?? {}) }
+  const avatarOpts = avatarMeta?.options ?? AVATAR_OPTIONS
+  const avatarColors = { ...AVATAR_COLORS, ...(avatarMeta?.colors ?? {}) }
   return [
     // Datos de contacto
     { key: 'client_name', label: 'Nombre', width: 160, type: 'text', editable: true, sticky: true, defaultVisible: true },
     { key: 'ig_handle', label: 'IG', width: 130, type: 'text', editable: true, defaultVisible: true },
     { key: 'phone', label: 'Tel', width: 140, type: 'text', editable: true, defaultVisible: true },
     { key: 'email', label: 'Email', width: 180, type: 'text', editable: false, defaultVisible: true },
-    { key: 'avatar_type', label: 'Avatar', width: 170, type: 'badge', editable: true, options: AVATAR_OPTIONS, colors: AVATAR_COLORS, defaultVisible: true },
+    { key: 'avatar_type', label: 'Avatar', width: 170, type: 'badge', editable: true, options: avatarOpts, colors: avatarColors, defaultVisible: true },
     // Estado y equipo
     { key: 'status', label: 'Status', width: 130, type: 'select', editable: true, options: STATUS_OPTIONS, colors: STATUS_COLORS, defaultVisible: true },
     { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
@@ -217,14 +218,15 @@ export function buildColumns(
     { key: 'call_at', label: 'Fecha call (alt.)', width: 110, type: 'date', editable: true, defaultVisible: false },
     // Setting (pre-llamada)
     { key: 'setter', label: 'Setter', width: 110, type: 'badge', editable: true, options: ['', ...setterNames], colors: Object.fromEntries(setterNames.map(n => [n, '#3B82F6'])), defaultVisible: true },
-    { key: 'dolores_setting', label: 'Dolores setting', width: 200, type: 'text', editable: true, defaultVisible: true },
+    { key: 'dolores_setting', label: 'Dolores setting', width: 200, type: 'text', editable: true, defaultVisible: false },
     // Llamada (closer)
     { key: 'closer', label: 'Closer', width: 110, type: 'badge', editable: true, options: ['', ...closerNames], colors: Object.fromEntries(closerNames.map(n => [n, '#8B5CF6'])), defaultVisible: true },
-    { key: 'closer_report', label: 'Reporte closer', width: 200, type: 'text', editable: true, defaultVisible: true },
-    { key: 'call_link', label: 'Link de llamada', width: 110, type: 'link', editable: true, defaultVisible: true },
-    { key: 'dolores_llamada', label: 'Dolores llamada', width: 200, type: 'text', editable: true, defaultVisible: true },
-    { key: 'razon_compra', label: 'Razón compra', width: 200, type: 'text', editable: true, defaultVisible: true },
-    { key: 'ingresos_mensuales', label: 'Ingresos lead', width: 130, type: 'currency', editable: true, defaultVisible: true },
+    { key: 'closer_report', label: 'Reporte closer', width: 200, type: 'text', editable: true, defaultVisible: false },
+    { key: 'call_link', label: 'Link de llamada', width: 130, type: 'link', editable: true, defaultVisible: true },
+    { key: 'dolores_llamada', label: 'Dolores llamada', width: 200, type: 'text', editable: true, defaultVisible: false },
+    { key: 'razon_compra', label: 'Razón compra', width: 100, type: 'text', editable: true, defaultVisible: false },
+    { key: 'ingresos_lead', label: 'Ingresos', width: 160, type: 'text', editable: false, defaultVisible: true },
+    { key: 'ingresos_mensuales', label: 'Ingresos lead ($)', width: 130, type: 'currency', editable: true, defaultVisible: false },
     // Venta
     {
       key: 'programada_ofrecido_llamada',
@@ -246,7 +248,7 @@ export function buildColumns(
     // Extras
     { key: 'revenue', label: 'Facturación', width: 110, type: 'currency', editable: true, defaultVisible: false },
     { key: 'date', label: 'Fecha', width: 110, type: 'date', editable: true, defaultVisible: false },
-    { key: 'notes', label: 'Notas', width: 200, type: 'text', editable: true, defaultVisible: false },
+    { key: 'notes', label: 'Notas', width: 200, type: 'text', editable: false, defaultVisible: false },
     { key: 'calendly_event_uri', label: 'Calendly (evento)', width: 160, type: 'link', editable: true, defaultVisible: false },
     { key: 'calendly_invitee_uri', label: 'Calendly (invitado)', width: 160, type: 'link', editable: true, defaultVisible: false },
     // Paridad con modelo Pony Lead (Neon)

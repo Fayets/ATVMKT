@@ -43,6 +43,13 @@
   /* Semantic */
   --green: #22C55E;
   --amber: #F59E0B;
+
+  /* Embudo ventas */
+  --funnel-layer-0: rgba(230, 57, 70, 0.35);
+  --funnel-layer-1: rgba(230, 57, 70, 0.28);
+  --funnel-layer-2: rgba(230, 57, 70, 0.21);
+  --funnel-layer-3: rgba(230, 57, 70, 0.14);
+  --funnel-layer-4: rgba(230, 57, 70, 0.07);
 }
 
 [data-theme='light'] {
@@ -103,6 +110,39 @@
 }
 
 @layer components {
+  .segment-group {
+    display: inline-flex;
+    gap: 0.25rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border2);
+    background: var(--bg3);
+    padding: 0.25rem;
+  }
+  .segment-tab {
+    border-radius: 0.375rem;
+    padding: 0.5rem 1rem;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--text2);
+    transition: color 0.15s ease, background-color 0.15s ease;
+  }
+  .segment-tab:hover {
+    color: var(--text);
+    background: var(--nav-hover);
+  }
+  .segment-tab-active {
+    background-color: var(--accent);
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(230, 57, 70, 0.3);
+  }
+  .segment-tab-active:hover {
+    background-color: var(--red-light);
+    color: #ffffff;
+    opacity: 1;
+  }
+
   /* ── Dark Glass with Red Accent ── */
   .glass-card {
     background: linear-gradient(

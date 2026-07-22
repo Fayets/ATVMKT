@@ -143,7 +143,7 @@ def _serialize_sequence(sequence: StorySequence, user_id: str) -> dict[str, Any]
         "cash_manual": cash_manual_i,
         "cash_leads": cash_leads_i,
         "agendas": agendas_n,
-        "has_cta": bool(sequence.has_cta),
+        "has_cta": _has_cta(sequence),
         "chats": sum(int(s.replies or 0) for s in sequence.slides),
         "slides": [_serialize_slide(s) for s in slides],
         "created_at": sequence.created_at.isoformat(),
@@ -157,12 +157,131 @@ def _has_cta(sequence: StorySequence) -> bool:
     return normalized not in {"no", "sin cta", "ninguno", "none", "false", "0", "n/a"}
 
 
+def _instagram_api_error_detail(e: urllib.error.HTTPError) -> tuple[int, str]:
+    """Traduce errores HTTP de Meta a status + mensaje legible para el cliente."""
+    meta_msg = ""
+    error_code: int | None = None
+    error_subcode: int | None = None
+    try:
+        raw = e.read().decode("utf-8")
+        data = json.loads(raw) if raw else {}
+        err = data.get("error") if isinstance(data, dict) else None
+        if isinstance(err, dict):
+            meta_msg = str(err.get("message") or "").strip()
+            sub = str(err.get("error_user_msg") or "").strip()
+            if sub:
+                meta_msg = f"{meta_msg} — {sub}" if meta_msg else sub
+            try:
+                error_code = int(err.get("code")) if err.get("code") is not None else None
+            except (TypeError, ValueError):
+                error_code = None
+            try:
+                error_subcode = int(err.get("error_subcode")) if err.get("error_subcode") is not None else None
+            except (TypeError, ValueError):
+                error_subcode = None
+    except Exception:
+        pass
+
+    code = e.code
+    meta_lower = meta_msg.lower()
+
+    if "access blocked" in meta_lower or "api access blocked" in meta_lower:
+        status, hint = 403, (
+            "Meta bloqueó el acceso a la API. Revisá: (1) app activa en Meta for Developers, "
+            "(2) token nuevo con permisos instagram_basic, instagram_manage_insights, "
+            "pages_show_list y pages_read_engagement, (3) cuenta Instagram Profesional vinculada "
+            "a una página de Facebook, (4) si la app está en modo Desarrollo, tu usuario debe ser "
+            "administrador o tester de la app. Guía: Configuración → token de Instagram."
+        )
+    elif error_subcode == 2207050 or "account is restricted" in meta_lower or "user access is restricted" in meta_lower:
+        status, hint = 403, (
+            "La cuenta de Instagram está restringida o con verificación pendiente. "
+            "Ingresá a instagram.com desde el navegador (no solo la app móvil), completá cualquier "
+            "aviso de seguridad y volvé a sincronizar en unas horas."
+        )
+    elif code == 401:
+        if "application has been deleted" in meta_lower or "application was deleted" in meta_lower:
+            status, hint = 401, (
+                "La app de Meta vinculada al token fue eliminada. "
+                "Creá una app nueva en Meta for Developers, generá un token con permisos de Instagram "
+                "y cargalo en Conexiones (guía en Configuración)."
+            )
+        else:
+            status, hint = 401, (
+                "El token de Instagram expiró o no es válido. "
+                "Generá un token nuevo en Conexiones (guía en Configuración)."
+            )
+    elif code == 403:
+        status, hint = 403, (
+            "El token no tiene permisos para leer historias. "
+            "Necesitás permisos como instagram_manage_insights (y acceso a la cuenta profesional)."
+        )
+    elif code in (400, 404):
+        if "unsupported get request" in meta_lower or "object with id" in meta_lower:
+            status, hint = 400, (
+                "El Instagram User ID no es válido o no corresponde a una cuenta Business/Creator. "
+                "En Graph API Explorer probá GET /me/accounts y luego el instagram_business_account.id "
+                "de la página vinculada; ese número va en Conexiones."
+            )
+        else:
+            status, hint = 400, "Revisá instagram_user_id y el token en Conexiones."
+    else:
+        status, hint = 502, f"Instagram API devolvió HTTP {code}. Verificá credenciales y permisos."
+
+    detail = f"{hint} {meta_msg}".strip() if meta_msg else hint
+    if error_code is not None:
+        detail = f"{detail} (código Meta: {error_code})"
+    return status, detail
+
+
 def _http_json(url: str, headers: dict[str, str]) -> dict[str, Any]:
     req = urllib.request.Request(url, headers=headers, method="GET")
     ssl_ctx = ssl.create_default_context(cafile=certifi.where())
     with urllib.request.urlopen(req, timeout=45, context=ssl_ctx) as response:
         payload = response.read().decode("utf-8")
     return json.loads(payload) if payload else {}
+
+
+    return json.loads(payload) if payload else {}
+
+
+def _extract_insight_value(item: dict[str, Any]) -> int | None:
+    """Extrae un entero de un ítem de insights (values[] o total_value / breakdowns)."""
+    values = item.get("values")
+    if isinstance(values, list) and values:
+        first = values[0]
+        if isinstance(first, dict) and first.get("value") is not None:
+            try:
+                return int(first["value"])
+            except (TypeError, ValueError):
+                pass
+    total = item.get("total_value")
+    if isinstance(total, dict):
+        if total.get("value") is not None:
+            try:
+                return int(total["value"])
+            except (TypeError, ValueError):
+                pass
+        breakdowns = total.get("breakdowns")
+        if isinstance(breakdowns, list):
+            acc = 0
+            found = False
+            for bd in breakdowns:
+                if not isinstance(bd, dict):
+                    continue
+                results = bd.get("results")
+                if not isinstance(results, list):
+                    continue
+                for row in results:
+                    if isinstance(row, dict) and row.get("value") is not None:
+                        try:
+                            acc += int(row["value"])
+                            found = True
+                        except (TypeError, ValueError):
+                            continue
+            if found:
+                return acc
+    return None
 
 
 def _parse_insights_data(payload: dict[str, Any]) -> dict[str, int]:
@@ -174,55 +293,107 @@ def _parse_insights_data(payload: dict[str, Any]) -> dict[str, int]:
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
-        values = item.get("values")
-        value = None
-        if isinstance(values, list) and values:
-            first = values[0]
-            if isinstance(first, dict):
-                value = first.get("value")
-        try:
-            out[name] = int(value) if value is not None else 0
-        except (TypeError, ValueError):
-            out[name] = 0
+        if not name:
+            continue
+        val = _extract_insight_value(item)
+        if val is not None:
+            out[name] = val
     return out
 
 
-def _fetch_story_insights(story_id: str, headers: dict[str, str]) -> dict[str, int | None]:
-    """Métricas de story por Graph API. Puede fallar un subconjunto de métricas según versión de media.
+def _fetch_token_permissions(access_token: str, headers: dict[str, str]) -> dict[str, str]:
+    """Permisos reales del token según Graph API (`/me/permissions`)."""
+    token_q = urllib.parse.quote(access_token)
+    url = f"https://graph.facebook.com/v25.0/me/permissions?access_token={token_q}"
+    try:
+        payload = _http_json(url, headers=headers)
+    except Exception:
+        return {}
+    rows = payload.get("data")
+    if not isinstance(rows, list):
+        return {}
+    out: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get("permission") or "").strip()
+        status = str(row.get("status") or "").strip().lower()
+        if name:
+            out[name] = status
+    return out
 
-    `views` ≈ reproducciones; `reach` = cuentas únicas; `shares` = compartidos (p. ej. vía DM).
-    Los totales suelen ser estimados y no coinciden 1:1 con la app (latencia, agregación, ventana 24h).
-    """
+
+_INSIGHTS_SCOPES = (
+    "instagram_basic",
+    "instagram_manage_insights",
+    "pages_show_list",
+    "pages_read_engagement",
+)
+
+
+def _permissions_step_detail(perms: dict[str, str]) -> tuple[bool, str]:
+    granted = [p for p in _INSIGHTS_SCOPES if perms.get(p) == "granted"]
+    missing = [p for p in _INSIGHTS_SCOPES if perms.get(p) != "granted"]
+    if not perms:
+        return False, "No se pudieron leer los permisos del token."
+    if missing:
+        return (
+            False,
+            f"Otorgados: {', '.join(granted) or 'ninguno'}. "
+            f"Faltan: {', '.join(missing)}. "
+            "Las fotos usan instagram_basic; las métricas requieren instagram_manage_insights.",
+        )
+    return True, f"Permisos OK ({', '.join(granted)})"
+
+
+def _instagram_error_is_permission_denied(err_raw: str, http_code: int) -> bool:
+    try:
+        data = json.loads(err_raw) if err_raw else {}
+        err = data.get("error") if isinstance(data, dict) else {}
+        if isinstance(err, dict):
+            code = err.get("code")
+            msg = str(err.get("message") or "").lower()
+            return code == 10 or "does not have permission" in msg
+    except Exception:
+        pass
+    return http_code in (400, 403) and "permission" in err_raw.lower()
+
+
+def _fetch_story_insights(
+    story_id: str, access_token: str, headers: dict[str, str]
+) -> tuple[dict[str, int | None], bool]:
+    """Métricas de story por Graph API. Retorna (métricas, permission_denied)."""
     base = f"https://graph.facebook.com/v25.0/{urllib.parse.quote(story_id)}/insights"
-    # Intentar el set completo (v22+); si el media no soporta alguna métrica, reintentar mínimo.
-    for metric in (
-        "views,reach,replies,shares,navigation,profile_visits",
-        "reach,replies,navigation,profile_visits",
-    ):
-        url = f"{base}?metric={metric}"
-        try:
-            payload = _http_json(url, headers=headers)
-            row = _parse_insights_data(payload)
-            return {
-                "views": row.get("views"),
-                "reach": row.get("reach"),
-                "replies": row.get("replies"),
-                "shares": row.get("shares"),
-                "navigation": row.get("navigation"),
-                "profile_visits": row.get("profile_visits"),
-            }
-        except urllib.error.HTTPError:
-            continue
-        except Exception:
-            continue
-    return {
-        "views": None,
-        "reach": None,
-        "replies": None,
-        "shares": None,
-        "navigation": None,
-        "profile_visits": None,
-    }
+    token_q = urllib.parse.quote(access_token)
+    metric_names = ("reach", "views", "replies", "shares", "navigation", "profile_visits")
+    out: dict[str, int | None] = {m: None for m in metric_names}
+    permission_denied = False
+
+    for metric in metric_names:
+        url_variants = [
+            f"{base}?metric={metric}&metric_type=total_value&access_token={token_q}",
+            f"{base}?metric={metric}&access_token={token_q}",
+        ]
+        for url in url_variants:
+            try:
+                payload = _http_json(url, headers=headers)
+                row = _parse_insights_data(payload)
+                val = row.get(metric)
+                if val is not None:
+                    out[metric] = val
+                    break
+            except urllib.error.HTTPError as e:
+                try:
+                    err_raw = e.read().decode("utf-8", errors="replace")
+                except Exception:
+                    err_raw = ""
+                if _instagram_error_is_permission_denied(err_raw, e.code):
+                    permission_denied = True
+                continue
+            except Exception:
+                continue
+
+    return out, permission_denied
 
 
 async def download_story_image(url: str, user_id: str, story_id: str) -> str | None:
@@ -327,6 +498,32 @@ class StoriesService:
                     order_index=int(raw.get("order_index", 0)),
                     image_url=raw.get("image_url"),
                 )
+
+        sequence.updated_at = datetime.utcnow()
+        flush()
+        return _serialize_sequence(sequence, user_id)
+
+    @db_session
+    def patch_sequence(self, sequence_id: int, user_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        sequence = StorySequence.get(id=sequence_id)
+        if sequence is None or sequence.user_id != int(user_id):
+            raise HTTPException(status_code=404, detail="Secuencia no encontrada.")
+
+        if "dolor" in data:
+            sequence.dolor = str(data.get("dolor") or "").strip()
+        if "angulos" in data:
+            sequence.angulo = str(data.get("angulos") or "").strip()
+        if "angulo" in data:
+            sequence.angulo = str(data.get("angulo") or "").strip()
+        if "cta_text" in data:
+            sequence.cta = str(data.get("cta_text") or "").strip()
+            sequence.has_cta = _has_cta(sequence)
+        if "cta" in data and data["cta"] is not None:
+            sequence.has_cta = bool(data["cta"])
+        if "cash_manual" in data and data["cash_manual"] is not None:
+            sequence.cash = float(max(0, int(data["cash_manual"])))
+        if "chats" in data and data["chats"] is not None:
+            sequence.chats = max(0, int(data["chats"]))
 
         sequence.updated_at = datetime.utcnow()
         flush()
@@ -579,10 +776,11 @@ class StoriesService:
 
     @db_session
     def get_sync_status(self, user_id: str) -> dict[str, str | None]:
-        conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
+        try:
+            conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
+        except ObjectNotFound:
+            conn = None
         last = conn.last_sync_at if conn else None
-        # Contador: usar la próxima corrida real del job (evita mostrar 5 min si el proceso
-        # sigue con job de 30 min, o desvíos last+intervalo vs APScheduler).
         sched_next = next_auto_sync_stories_run_time()
         if sched_next is not None:
             next_sync = sched_next
@@ -591,17 +789,11 @@ class StoriesService:
                 last + timedelta(minutes=get_stories_interval_minutes()) if last else None
             )
 
-        token_saved_at: datetime | None = None
-        token_expires_at: datetime | None = None
-        creds = conn.credentials if conn and isinstance(conn.credentials, dict) else {}
-        token_saved_at = _parse_dt(creds.get("token_saved_at")) or (conn.updated_at if conn else None)
-        token_expires_at = _parse_dt(creds.get("token_expires_at"))
-        if token_expires_at is None:
-            if token_saved_at is not None:
-                token_expires_at = token_saved_at + timedelta(days=60)
-            else:
-                # Fallback solicitado: 59 días por defecto cuando no hay fecha guardada.
-                token_expires_at = datetime.now(AR_TZ) + timedelta(days=59)
+        from src.services.instagram_token_utils import resolve_instagram_token_dates
+
+        token_dates = resolve_instagram_token_dates(conn)
+        token_saved_at = _parse_dt(token_dates.get("token_saved_at"))
+        token_expires_at = _parse_dt(token_dates.get("token_expires_at"))
 
         return {
             "last_sync": _iso_dt(last),
@@ -610,7 +802,123 @@ class StoriesService:
             "token_expires_at": _iso_dt(token_expires_at),
         }
 
-    async def sync_instagram(self, user_id: str) -> dict[str, int]:
+    def test_instagram_connection(self, user_id: str) -> dict[str, Any]:
+        """Prueba token + instagram_user_id antes de sincronizar historias."""
+        access_token, ig_user_id = self._resolve_instagram_conn(user_id)
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        steps: list[dict[str, Any]] = []
+
+        perms = _fetch_token_permissions(access_token, headers)
+        perms_ok, perms_detail = _permissions_step_detail(perms)
+        steps.append({"step": "permisos", "ok": perms_ok, "detail": perms_detail})
+
+        profile_url = (
+            f"https://graph.facebook.com/v25.0/{urllib.parse.quote(ig_user_id)}"
+            "?fields=id,username,name"
+        )
+        try:
+            profile = _http_json(profile_url, headers=headers)
+            steps.append(
+                {
+                    "step": "perfil",
+                    "ok": True,
+                    "detail": f"Cuenta @{profile.get('username') or profile.get('name') or ig_user_id}",
+                }
+            )
+        except urllib.error.HTTPError as e:
+            _, detail = _instagram_api_error_detail(e)
+            steps.append({"step": "perfil", "ok": False, "detail": detail})
+            return {"ok": False, "instagram_user_id": ig_user_id, "steps": steps}
+
+        stories_url = (
+            f"https://graph.facebook.com/v25.0/{urllib.parse.quote(ig_user_id)}/stories"
+            "?fields=id&limit=1"
+        )
+        try:
+            stories_payload = _http_json(stories_url, headers=headers)
+            count = len(stories_payload.get("data") or [])
+            steps.append(
+                {
+                    "step": "stories",
+                    "ok": True,
+                    "detail": f"Acceso OK ({count} historia(s) activa(s) ahora)",
+                }
+            )
+            story_items = stories_payload.get("data") if isinstance(stories_payload.get("data"), list) else []
+            first_id = ""
+            if story_items and isinstance(story_items[0], dict):
+                first_id = str(story_items[0].get("id") or "").strip()
+            if first_id:
+                sample, perm_denied = _fetch_story_insights(first_id, access_token, headers)
+                has_metrics = any(v is not None for v in sample.values())
+                steps.append(
+                    {
+                        "step": "insights",
+                        "ok": has_metrics and not perm_denied,
+                        "detail": (
+                            "Falta permiso instagram_manage_insights. Regenerá el token en Conexiones "
+                            "con ese scope y volvé a conectar."
+                            if perm_denied
+                            else (
+                                f"Métricas OK (reach={sample.get('reach')}, views={sample.get('views')})"
+                                if has_metrics
+                                else (
+                                    "No se pudieron leer métricas. Revisá el permiso "
+                                    "instagram_manage_insights y que la historia siga activa (24h)."
+                                )
+                            )
+                        ),
+                    }
+                )
+            return {"ok": all(s["ok"] for s in steps), "instagram_user_id": ig_user_id, "steps": steps}
+        except urllib.error.HTTPError as e:
+            _, detail = _instagram_api_error_detail(e)
+            steps.append({"step": "stories", "ok": False, "detail": detail})
+            return {"ok": False, "instagram_user_id": ig_user_id, "steps": steps}
+
+    @db_session
+    def _refresh_stale_slide_metrics(
+        self,
+        user_id: str,
+        access_token: str,
+        active_story_ids: set[str],
+    ) -> int:
+        """Reintenta insights en slides activos que siguen sin métricas."""
+        if not active_story_ids:
+            return 0
+        uid = int(user_id)
+        headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+        refreshed = 0
+        for slide in list(StorySlide.select()):
+            if slide.sequence.user_id != uid:
+                continue
+            mid = str(slide.instagram_media_id or "").strip()
+            if not mid or mid not in active_story_ids:
+                continue
+            has_reach = slide.reach is not None and int(slide.reach) > 0
+            has_views = slide.views is not None and int(slide.views) > 0
+            if has_reach or has_views:
+                continue
+            metrics, _ = _fetch_story_insights(mid, access_token, headers)
+            if not any(v is not None for v in metrics.values()):
+                continue
+            slide.views = metrics.get("views") if metrics.get("views") is not None else slide.views
+            slide.reach = metrics.get("reach") if metrics.get("reach") is not None else slide.reach
+            slide.shares = metrics.get("shares") if metrics.get("shares") is not None else slide.shares
+            slide.replies = metrics.get("replies") if metrics.get("replies") is not None else slide.replies
+            slide.navigation = (
+                metrics.get("navigation") if metrics.get("navigation") is not None else slide.navigation
+            )
+            slide.profile_visits = (
+                metrics.get("profile_visits")
+                if metrics.get("profile_visits") is not None
+                else slide.profile_visits
+            )
+            slide.synced_at = datetime.now(AR_TZ)
+            refreshed += 1
+        return refreshed
+
+    async def sync_instagram(self, user_id: str) -> dict[str, Any]:
         async with _sync_lock:
             try:
                 access_token, ig_user_id = self._resolve_instagram_conn(user_id)
@@ -645,6 +953,7 @@ class StoriesService:
                 sequences_created = 0
                 not_matched = 0
                 errors = 0
+                insights_permission_denied = False
 
                 for story_day, day_stories in grouped.items():
                     day_stories.sort(key=lambda s: str(s.get("timestamp") or ""))
@@ -667,7 +976,9 @@ class StoriesService:
                             source_url = thumb_url if media_type == "VIDEO" and thumb_url else media_url or thumb_url
                             image_url = await download_story_image(source_url, user_id, story_id) if source_url else None
 
-                            metrics = _fetch_story_insights(story_id, headers)
+                            metrics, perm_denied = _fetch_story_insights(story_id, access_token, headers)
+                            if perm_denied:
+                                insights_permission_denied = True
                             print(f"[sync] insights para story {story_id}:", metrics)
 
                             slide_ids = self._get_slide_ids_to_update(user_id, story_id)
@@ -698,14 +1009,28 @@ class StoriesService:
                             errors += 1
                             continue
 
+                active_story_ids = {
+                    str(r.get("id") or "").strip()
+                    for r in story_rows
+                    if isinstance(r, dict) and str(r.get("id") or "").strip()
+                }
+                metrics_refreshed = self._refresh_stale_slide_metrics(user_id, access_token, active_story_ids)
+
                 self._touch_last_sync(user_id)
-                return {
+                result: dict[str, Any] = {
                     "synced": synced,
                     "created": created,
                     "sequences_created": sequences_created,
                     "not_matched": not_matched,
                     "errors": errors,
+                    "metrics_refreshed": metrics_refreshed,
                 }
+                if insights_permission_denied:
+                    result["warning"] = (
+                        "El token de Instagram no tiene permiso instagram_manage_insights. "
+                        "Regenerá el Access Token en Conexiones con ese scope."
+                    )
+                return result
             except HTTPException:
                 raise
             except urllib.error.HTTPError as e:

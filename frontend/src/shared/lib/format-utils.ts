@@ -19,6 +19,14 @@ export function formatCash(n: number): string {
   return '$' + Math.round(n).toLocaleString('es-AR')
 }
 
+/** Eje compacto de gráficos ($1k, $500, …). */
+export function formatCashAxisShort(v: string | number): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return formatCash(0)
+  if (Math.abs(n) >= 1000) return `$${Math.round(n / 1000)}k`
+  return formatCash(n)
+}
+
 export function formatK(n: number): string {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
   if (n >= 1000) return Math.round(n / 1000) + 'K'

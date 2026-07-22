@@ -588,6 +588,75 @@ def _migrate_postgres_setter_report_text_columns() -> None:
         conn.close()
 
 
+def _migrate_postgres_team_report_breakdown() -> None:
+    """Desglose setter/closer para dashboard ventas (paridad Paula-lorena)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            for table, columns in (
+                (
+                    "setter_report",
+                    (
+                        ("conversaciones_stories", "integer NOT NULL DEFAULT 0"),
+                        ("conversaciones_reels", "integer NOT NULL DEFAULT 0"),
+                        ("agendas_stories", "integer NOT NULL DEFAULT 0"),
+                        ("agendas_reels", "integer NOT NULL DEFAULT 0"),
+                        ("agendas_ads", "integer NOT NULL DEFAULT 0"),
+                        ("links_enviados_stories", "integer NOT NULL DEFAULT 0"),
+                        ("links_enviados_reels", "integer NOT NULL DEFAULT 0"),
+                    ),
+                ),
+                (
+                    "closer_report",
+                    (
+                        ("shows_organico", "integer NOT NULL DEFAULT 0"),
+                        ("shows_ads", "integer NOT NULL DEFAULT 0"),
+                        ("cierres_organico", "integer NOT NULL DEFAULT 0"),
+                        ("cierres_ads", "integer NOT NULL DEFAULT 0"),
+                        ("reservas", "integer NOT NULL DEFAULT 0"),
+                        ("seguimiento", "integer NOT NULL DEFAULT 0"),
+                        ("facturacion", "DOUBLE PRECISION NOT NULL DEFAULT 0"),
+                    ),
+                ),
+            ):
+                cur.execute(
+                    """
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public' AND lower(table_name) = %s
+                    """,
+                    (table,),
+                )
+                tr = cur.fetchone()
+                if not tr:
+                    continue
+                physical = tr[0]
+                sql_table = f'"{physical}"' if physical != physical.lower() else physical
+                for col, tipo in columns:
+                    try:
+                        cur.execute(
+                            f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS {col} {tipo}"
+                        )
+                    except Exception:
+                        pass
+    finally:
+        conn.close()
+
+
 def _migrate_postgres_closer_report_tipo() -> None:
     """Añade reporte_tipo (ventas | marketing) para dos reportes diarios por closer."""
     if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
@@ -812,6 +881,49 @@ def _migrate_postgres_offered_program() -> None:
         conn.close()
 
 
+def _migrate_postgres_avatar_type() -> None:
+    """Crea `avatar_type` en Postgres."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS avatar_type (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    nombre TEXT NOT NULL,
+                    color TEXT NOT NULL DEFAULT '#6B7280',
+                    activo BOOLEAN NOT NULL DEFAULT TRUE,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc')
+                )
+                """
+            )
+            try:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_avatar_type_user_id ON avatar_type (user_id)"
+                )
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+
 def _migrate_postgres_seguimiento_report() -> None:
     """Crea `seguimiento_report` en Postgres (cash por formulario de seguimiento)."""
     if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
@@ -902,6 +1014,121 @@ def _migrate_postgres_hot_lead() -> None:
         conn.close()
 
 
+def _migrate_postgres_lead_calendly_fields() -> None:
+    """Columnas Calendly en lead + intervalo auto-sync Calendly en app_sync_settings."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'lead'
+                """
+            )
+            tr = cur.fetchone()
+            if tr:
+                physical = tr[0]
+                sql_table = f'"{physical}"' if physical != physical.lower() else physical
+                for col, tipo in (
+                    ("ingresos_rango", "VARCHAR DEFAULT ''"),
+                    ("email", "VARCHAR DEFAULT ''"),
+                ):
+                    try:
+                        cur.execute(
+                            f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS {col} {tipo}"
+                        )
+                    except Exception:
+                        pass
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'app_sync_settings'
+                """
+            )
+            tr2 = cur.fetchone()
+            if tr2:
+                physical2 = tr2[0]
+                sql_table2 = f'"{physical2}"' if physical2 != physical2.lower() else physical2
+                try:
+                    cur.execute(
+                        f"ALTER TABLE {sql_table2} ADD COLUMN IF NOT EXISTS "
+                        f"calendly_interval_minutes INTEGER NOT NULL DEFAULT 360"
+                    )
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
+def _migrate_postgres_call_report_fields() -> None:
+    """Columnas del formato nuevo (calificación/coaching) en call_report."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'call_report'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            for col in (
+                "lead_nombre",
+                "nivel_dolor",
+                "capacidad_decision",
+                "capacidad_economica",
+                "fit_real",
+                "objecion_diagnostico",
+                "cambio_energia",
+                "objecion_no_manejada",
+                "razon_real_no_cerrar",
+                "compromisos_prometidos",
+                "patrones_y_mejoras",
+            ):
+                try:
+                    cur.execute(
+                        f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT ''"
+                    )
+                except Exception:
+                    pass
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     import src.models  # noqa: F401 — registrar entidades Pony antes del mapping
 
@@ -915,11 +1142,15 @@ def init_db() -> None:
     _migrate_postgres_youtube_content()
     _migrate_postgres_storyslide_views_shares()
     _migrate_postgres_setter_report_text_columns()
+    _migrate_postgres_team_report_breakdown()
     _migrate_postgres_closer_report_tipo()
     _migrate_postgres_closer_report_marketing_multiple_per_day()
     _migrate_postgres_offered_program()
+    _migrate_postgres_avatar_type()
     _migrate_postgres_seguimiento_report()
     _migrate_postgres_hot_lead()
+    _migrate_postgres_lead_calendly_fields()
+    _migrate_postgres_call_report_fields()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()
     _migrate_agendo_en_default_chat_when_agendado()

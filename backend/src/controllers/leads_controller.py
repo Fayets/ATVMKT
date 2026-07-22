@@ -3,10 +3,11 @@ from datetime import date, datetime, timezone
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.lead_display_utils import compute_dias_para_agendar, lead_display_nombre
+from src.models import CallReport as CallReportEntity
 from src.models import Lead as LeadEntity, ReelContent, StorySequence, YoutubeContent
 from src.schemas import (
     LeadCreateRequest,
@@ -18,6 +19,12 @@ from src.schemas import (
 from src.services.programs_services import (
     build_program_norm_price_map,
     program_price_usd_for_prog_raw,
+)
+from src.services.call_report_service import (
+    analyze_call_report,
+    get_or_create_report,
+    is_fathom_link,
+    normalize_fathom_url,
 )
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
@@ -255,12 +262,13 @@ def _to_lead_out(row: LeadEntity, norm_prices: dict[str, float] | None = None) -
         notes=row.notas,
         date=date_s,
         month=month_s,
-        email=None,
+        email=(row.email or "").strip() or None,
         dolores_setting=row.dolores_setting,
         dolores_llamada=row.dolores_llamada,
         razon_compra=row.razon_compra,
         dias_agendamiento=compute_dias_para_agendar(row.primer_contacto, row.agendo),
         ingresos_mensuales=ing,
+        ingresos_rango=(row.ingresos_rango or "").strip() or None,
         compromiso=None,
         urgencia=None,
         disposicion_invertir=None,
@@ -286,6 +294,10 @@ def list_leads(
         default=None,
         description="YYYY-MM; filtra por fecha_bot o created_at (mes AR); primer contacto no afecta el mes",
     ),
+    include_all: bool = Query(
+        default=False,
+        description="Si true, incluye leads sin agendo (p. ej. conteos por origen en dashboard marketing).",
+    ),
 ) -> LeadsListResponse:
     try:
         uid = int(user_id)
@@ -303,8 +315,10 @@ def list_leads(
         rows = [
             r
             for r in list(LeadEntity.select())
-            if int(r.user_id) == uid and r.agendo is not None
+            if int(r.user_id) == uid
         ]
+        if not include_all:
+            rows = [r for r in rows if r.agendo is not None]
         if month_key is not None:
             year_m, month_m = month_key
             rows = [
@@ -313,7 +327,7 @@ def list_leads(
                 if (mb := _lead_month_ar(r)) is not None and mb == (year_m, month_m)
             ]
 
-        rows.sort(key=_lead_sort_ts, reverse=True)
+        rows.sort(key=_lead_sort_ts, reverse=False)
         out = [_to_lead_out(r, norm_prices) for r in rows]
 
     return LeadsListResponse(leads=out)
@@ -430,6 +444,7 @@ def leads_metrics(
 def patch_lead(
     lead_id: str,
     body: LeadPatchRequest,
+    background: BackgroundTasks,
     user_id: Annotated[str, Depends(require_user_id)],
 ) -> LeadOut:
     try:
@@ -441,6 +456,8 @@ def patch_lead(
     data = body.model_dump(exclude_unset=True)
     if not data:
         raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
+
+    fathom_to_analyze: str | None = None
 
     with db_session:
         try:
@@ -500,7 +517,11 @@ def patch_lead(
             else:
                 row.agendo_en = raw or "Chat"
         if "call_link" in data:
+            prev_link = normalize_fathom_url(row.link_llamada or "")
             row.link_llamada = data["call_link"] or ""
+            nuevo_link = normalize_fathom_url(row.link_llamada or "")
+            if is_fathom_link(nuevo_link) and nuevo_link != prev_link:
+                fathom_to_analyze = nuevo_link
         if "program_offered" in data:
             row.programa_ofrecido = data["program_offered"] or ""
         if "programada_ofrecido_llamada" in data:
@@ -523,6 +544,8 @@ def patch_lead(
             row.closer_report = data["closer_report"] or ""
         if "razon_compra" in data:
             row.razon_compra = data["razon_compra"] or ""
+        if "ingresos_rango" in data:
+            row.ingresos_rango = data["ingresos_rango"] or ""
         if "setter" in data:
             row.setter = (str(data["setter"]).strip() if data["setter"] is not None else "") or ""
         if "closer" in data:
@@ -531,7 +554,22 @@ def patch_lead(
         _sync_dias_para_agendar(row)
 
         norm_prices = build_program_norm_price_map(uid)
-        return _to_lead_out(row, norm_prices)
+        result = _to_lead_out(row, norm_prices)
+
+    if fathom_to_analyze:
+        report_id, created = get_or_create_report(lid, fathom_to_analyze, uid)
+        should_run = created
+        if not created:
+            with db_session:
+                report_row = CallReportEntity.get(id=report_id)
+                if report_row is not None and (report_row.estado or "") in ("error", "pendiente"):
+                    should_run = True
+                    report_row.estado = "pendiente"
+                    report_row.error_msg = ""
+        if should_run:
+            background.add_task(analyze_call_report, report_id)
+
+    return result
 
 
 @router.delete("/{lead_id}")
@@ -539,7 +577,7 @@ def delete_lead(
     lead_id: str,
     user_id: Annotated[str, Depends(require_user_id)],
 ) -> dict[str, str]:
-    """Elimina un lead (cliente) si pertenece al usuario autenticado."""
+    """Elimina un lead si pertenece al usuario. Los CallReport se conservan con snapshot del nombre."""
     try:
         lid = int(lead_id)
         uid = int(user_id)
@@ -553,6 +591,12 @@ def delete_lead(
             raise HTTPException(status_code=404, detail="Lead no encontrado.") from e
         if int(row.user_id) != uid:
             raise HTTPException(status_code=404, detail="Lead no encontrado.")
+        nombre_snap = lead_display_nombre(row.nombre, row.ig) or (row.nombre or "").strip() or "Sin nombre"
+        for report in CallReportEntity.select(lambda r: r.lead_id == lid):
+            if int(report.user_id) != uid:
+                continue
+            if not (report.lead_nombre or "").strip():
+                report.lead_nombre = nombre_snap
         row.delete()
 
     return {"status": "ok", "id": str(lid)}

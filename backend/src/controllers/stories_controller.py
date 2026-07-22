@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 import traceback
 
-from src.schemas import StoriesMetricsOut, StorySequenceIn, StorySequenceOut
+from src.schemas import StoriesMetricsOut, StorySequenceIn, StorySequenceOut, StorySequencePatchRequest
 from src.services.stories_service import StoriesService
 
 router = APIRouter(prefix="/api/stories", tags=["stories"], redirect_slashes=False)
@@ -78,6 +78,29 @@ def update_sequence(
         raise HTTPException(status_code=500, detail="Error inesperado al actualizar secuencia de historias.")
 
 
+@router.patch("/sequences/{sequence_id}", response_model=StorySequenceOut)
+def patch_sequence(
+    sequence_id: int,
+    body: StorySequencePatchRequest,
+    user_id: Annotated[str, Depends(get_current_user)],
+) -> StorySequenceOut:
+    try:
+        payload: dict[str, Any] = (
+            body.model_dump(exclude_unset=True)
+            if hasattr(body, "model_dump")
+            else body.dict(exclude_unset=True)
+        )
+        if not payload:
+            raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
+        return service.patch_sequence(sequence_id, user_id, payload)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        print(f"[stories] patch_sequence error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Error inesperado al actualizar secuencia de historias.")
+
+
 @router.delete("/sequences/{sequence_id}")
 def delete_sequence(
     sequence_id: int,
@@ -118,10 +141,22 @@ def get_metrics(
         raise HTTPException(status_code=500, detail="Error inesperado al obtener métricas de historias.")
 
 
+@router.get("/connection-test")
+def test_instagram_connection(
+    user_id: Annotated[str, Depends(get_current_user)],
+) -> dict[str, Any]:
+    try:
+        return service.test_instagram_connection(user_id)
+    except HTTPException as e:
+        raise e
+    except Exception:
+        raise HTTPException(status_code=500, detail="Error inesperado al probar la conexión de Instagram.")
+
+
 @router.post("/sync")
 async def sync_stories(
     user_id: Annotated[str, Depends(get_current_user)],
-) -> dict[str, int]:
+) -> dict[str, Any]:
     try:
         return await service.sync_instagram(user_id)
     except HTTPException as e:

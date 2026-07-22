@@ -1,9 +1,11 @@
 'use client'
 
+import Link from 'next/link'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
+import { resolveMediaUrl } from '@/shared/lib/backend-public-url'
 import { Line } from '@/shared/components/charts'
 import { apiFetch } from '@/lib/api'
 import { LineChart, Line as ReLine, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -82,13 +84,8 @@ type SyncStatus = {
 
 type YTVideo = { id: string; title: string }
 const UNDO_DURATION = 6000
-const getImageUrl = (url: string | null | undefined) => {
-  if (!url) return ''
-  if (url.startsWith('/media/')) {
-    return `${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'}${url}`
-  }
-  return url
-}
+const INSTAGRAM_TOKEN_WARN_DAYS_LEFT = 5
+const getImageUrl = (url: string | null | undefined) => resolveMediaUrl(url)
 const toNumber = (v: unknown) => {
   if (typeof v === 'number') return Number.isFinite(v) ? v : 0
   if (typeof v === 'string') {
@@ -311,17 +308,15 @@ export default function HistoriasPage() {
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [fetchMasterLists])
-  // Auto-classify unclassified secuencias on page load (once per session)
-  const [autoClassified, setAutoClassified] = useState(false)
+
   useEffect(() => {
-    if (!ready || autoClassified || loading) return
-    setAutoClassified(true)
-    fetch('/api/classify-all-secuencias', { method: 'POST' })
-      .then(r => r.json())
-      .then(d => { if (d.classified > 0) { toast(`${d.classified} secuencias clasificadas con IA`); fetchData() } })
-      .catch(() => {})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, loading, autoClassified])
+    const refresh = () => {
+      void fetchSyncStatus()
+      void fetchData()
+    }
+    window.addEventListener('stories-sync-settings-updated', refresh)
+    return () => window.removeEventListener('stories-sync-settings-updated', refresh)
+  }, [fetchSyncStatus, fetchData])
 
   // Group stories by date -> secuencias (includes manual secuencias without Metricool stories)
   const secuencias: Secuencia[] = useMemo(() => {
@@ -368,8 +363,9 @@ export default function HistoriasPage() {
         setSyncMessage(`Error: ${result.detail || 'No se pudo sincronizar Instagram'}`)
       } else {
         const okText = `Sincronizadas: ${Number(result.synced || 0)} | Sin match: ${Number(result.not_matched || 0)}`
-        setSyncMessage(okText)
+        setSyncMessage(result.warning ? `${okText} — ${result.warning}` : okText)
         toast(okText)
+        if (result.warning) toast(String(result.warning))
         await fetchData()
         await fetchSyncStatus()
       }
@@ -397,14 +393,6 @@ export default function HistoriasPage() {
     }, 1000)
     return () => clearInterval(interval)
   }, [syncStatus?.next_sync])
-
-  // Auto-classify all unclassified secuencias via server-side Vision API
-  const autoClassify = async () => {
-    try {
-      await fetch('/api/classify-all-secuencias', { method: 'POST' })
-    } catch { /* skip */ }
-    fetchData()
-  }
 
   // Crop stories from screenshot using AI grid info
   const cropStoriesFromImage = (imgSrc: string, gridInfo: { headerHeightPercent: number; rows: number; cols: number }, positions: number[]): Promise<string[]> => {
@@ -542,6 +530,31 @@ export default function HistoriasPage() {
     await fetchData()
   }
 
+  const patchSecuencia = async (
+    sec: Secuencia,
+    payload: {
+      dolor?: string
+      angulo?: string
+      cta?: boolean
+      cash_manual?: number
+      chats?: number
+    },
+  ) => {
+    const res = await apiFetch(`/stories/sequences/${sec.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      toast(`Error al guardar: ${body.detail || 'No se pudo actualizar'}`)
+      return false
+    }
+    toast('Secuencia guardada')
+    await fetchData()
+    return true
+  }
+
   const startEdit = (sec: Secuencia) => {
     setExpanded(sec.id)
     setForm({
@@ -586,11 +599,20 @@ export default function HistoriasPage() {
   const conCTA = metrics.secuencias_con_cta
   const sinCTA = metrics.secuencias_sin_cta
   const tokenExpiresAt = syncStatus?.token_expires_at ? new Date(syncStatus.token_expires_at) : null
-  const tokenDaysLeft = tokenExpiresAt ? Math.max(0, Math.floor((tokenExpiresAt.getTime() - Date.now()) / 86400000)) : 59
+  const tokenDaysLeft =
+    tokenExpiresAt && !Number.isNaN(tokenExpiresAt.getTime())
+      ? Math.max(0, Math.floor((tokenExpiresAt.getTime() - Date.now()) / 86400000))
+      : null
+  const showTokenRenewal =
+    tokenDaysLeft !== null && tokenDaysLeft <= INSTAGRAM_TOKEN_WARN_DAYS_LEFT
   const tokenStatusColor =
-    tokenDaysLeft < 5 ? 'text-[var(--red)]'
-      : tokenDaysLeft <= 10 ? 'text-[var(--amber)]'
-        : 'text-[var(--green)]'
+    tokenDaysLeft === null
+      ? 'text-[var(--text3)]'
+      : tokenDaysLeft < 5
+        ? 'text-[var(--red)]'
+        : tokenDaysLeft <= 10
+          ? 'text-[var(--amber)]'
+          : 'text-[var(--text3)]'
 
   if (!ready || loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
@@ -722,9 +744,33 @@ export default function HistoriasPage() {
               </span>
             )}
           </div>
-          <div className={`mt-1 flex items-center gap-2 ${tokenStatusColor}`}>
-            {tokenDaysLeft <= 10 && <span aria-hidden="true">⚠️</span>}
-            <span>Token Instagram: {tokenDaysLeft} días restantes</span>
+          <div className={`mt-1 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${tokenStatusColor}`}>
+            {tokenDaysLeft !== null ? (
+              <>
+                <span className="flex items-center gap-2">
+                  {showTokenRenewal && <span aria-hidden="true">⚠️</span>}
+                  {showTokenRenewal ? (
+                    tokenDaysLeft === 0 ? (
+                      'El token de Instagram venció. Renovalo para seguir sincronizando historias.'
+                    ) : (
+                      `Renová el token de Instagram: quedan ${tokenDaysLeft} día${tokenDaysLeft === 1 ? '' : 's'}.`
+                    )
+                  ) : (
+                    <>Token Instagram: {tokenDaysLeft} día{tokenDaysLeft === 1 ? '' : 's'} restantes (avisamos desde 5 días antes).</>
+                  )}
+                </span>
+                {showTokenRenewal ? (
+                  <div className="flex shrink-0 flex-wrap gap-3 text-[11px] font-semibold uppercase tracking-wide">
+                    <Link href="/conexiones" className="underline underline-offset-2 hover:opacity-80">
+                      Conexiones
+                    </Link>
+                    <Link href="/configuracion/instagram-token-guide" className="underline underline-offset-2 hover:opacity-80">
+                      Guía token
+                    </Link>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
           </div>
         </div>
       )}
@@ -1107,8 +1153,14 @@ export default function HistoriasPage() {
           onClose={() => setDetailSecuencia(null)}
           onDeleteSlide={(slideId) => handleDeleteSlide(slideId, { closeDetail: true })}
           onSave={async (payload) => {
-            await saveSecuencia(detailSecuencia, payload)
-            setDetailSecuencia(null)
+            const ok = await patchSecuencia(detailSecuencia, {
+              dolor: payload.dolor,
+              angulo: payload.angulo,
+              cta: hasCtaValue(payload.cta_text),
+              cash_manual: payload.cash_manual,
+              chats: payload.chats,
+            })
+            if (ok) setDetailSecuencia(null)
           }}
         />
       )}
@@ -1124,7 +1176,7 @@ function StorySequenceDetail({
 }: {
   sequence: Secuencia
   onClose: () => void
-  onSave: (payload: { dolor: string; angulo: string; cta_text: string; cash_generado: number; chats: number }) => Promise<void>
+  onSave: (payload: { dolor: string; angulo: string; cta_text: string; cash_manual: number; chats: number }) => Promise<void>
   onDeleteSlide?: (slideId: number) => Promise<void>
 }) {
   const [cash, setCash] = useState<number>(sequence.cash_manual || 0)
@@ -1258,7 +1310,7 @@ function StorySequenceDetail({
 
         <div className="flex gap-3">
           <button
-            onClick={() => onSave({ dolor, angulo, cta_text: ctaText, cash_generado: cash, chats })}
+            onClick={() => onSave({ dolor, angulo, cta_text: ctaText, cash_manual: cash, chats })}
             className="rounded-lg bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase text-white hover:opacity-90"
           >
             Guardar

@@ -138,6 +138,20 @@ class OfferedProgram(db.Entity):
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
+class AvatarType(db.Entity):
+    """Tipos de avatar/perfil de lead (nombre + color para badges en la grilla)."""
+
+    _table_ = "avatar_type"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    nombre = Required(str)
+    color = Required(str, default="#6B7280")
+    activo = Required(bool, default=True)
+    sort_order = Required(int, default=0)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
 class Lead(db.Entity):
     id = PrimaryKey(int, auto=True)
     user_id = Required(int, index=True)
@@ -145,6 +159,7 @@ class Lead(db.Entity):
     nombre = Optional(str, default="")
     ig = Optional(str, default="")
     telefono = Optional(str, default="")
+    email = Optional(str, default="")
     avatar = Optional(str, default="")
     origen = Optional(str, default="")
     keyword = Optional(str, default="")
@@ -169,6 +184,7 @@ class Lead(db.Entity):
     closer = Optional(str, default="")
     dolores_setting = Optional(str, default="")
     ingresos_lead = Optional(float, default=0)
+    ingresos_rango = Optional(str, default="")
     dolores_llamada = Optional(str, default="")
     closer_report = Optional(str, default="")
     razon_compra = Optional(str, default="")
@@ -226,6 +242,13 @@ class SetterReport(db.Entity):
     leads_nuevos = Required(int, default=0)
     seguimientos = Required(int, default=0)
     outbounds = Required(int, default=0)
+    conversaciones_stories = Required(int, default=0)
+    conversaciones_reels = Required(int, default=0)
+    agendas_stories = Required(int, default=0)
+    agendas_reels = Required(int, default=0)
+    agendas_ads = Required(int, default=0)
+    links_enviados_stories = Required(int, default=0)
+    links_enviados_reels = Required(int, default=0)
     dia_bueno_malo = Optional(str, default="")
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
@@ -241,6 +264,13 @@ class CloserReport(db.Entity):
     llamadas_agendadas = Required(int, default=0)
     shows = Required(int, default=0)
     cierres = Required(int, default=0)
+    shows_organico = Required(int, default=0)
+    shows_ads = Required(int, default=0)
+    cierres_organico = Required(int, default=0)
+    cierres_ads = Required(int, default=0)
+    reservas = Required(int, default=0)
+    seguimiento = Required(int, default=0)
+    facturacion = Required(float, default=0)
     calificados = Required(int, default=0)
     descalificados = Required(int, default=0)
     ingreso = Required(float, default=0)
@@ -255,6 +285,44 @@ class CloserReport(db.Entity):
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
+class CallReport(db.Entity):
+    """Análisis de llamada Fathom (1 link = 1 reporte)."""
+
+    _table_ = "call_report"
+
+    id = PrimaryKey(int, auto=True)
+    lead_id = Required(int, index=True)
+    lead_nombre = Optional(str, default="")
+    fathom_url = Required(str, unique=True)
+    estado = Required(str, default="pendiente")
+    error_msg = Optional(str, default="")
+    participantes = Optional(str, default="")
+    motivo_reunion = Optional(str, default="")
+    nivel_dolor = Optional(str, default="")
+    capacidad_decision = Optional(str, default="")
+    capacidad_economica = Optional(str, default="")
+    fit_real = Optional(str, default="")
+    objecion_diagnostico = Optional(str, default="")
+    cambio_energia = Optional(str, default="")
+    objecion_no_manejada = Optional(str, default="")
+    razon_real_no_cerrar = Optional(str, default="")
+    compromisos_prometidos = Optional(str, default="")
+    patrones_y_mejoras = Optional(str, default="")
+    resumen = Optional(str, default="")
+    hubo_objeciones = Optional(str, default="")
+    tipo_perfil = Optional(str, default="")
+    ingresos_estimados = Optional(str, default="")
+    situacion_y_deseo = Optional(str, default="")
+    closer_report = Optional(str, default="")
+    dolores_llamada = Optional(str, default="")
+    razon_compra = Optional(str, default="")
+    program_offered = Optional(str, default="")
+    status_llamada = Optional(str, default="")
+    user_id = Required(int, index=True)
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)
+
+
 class AppSyncSettings(db.Entity):
     """Config global del servidor: intervalos de sync automático (singleton id=1)."""
 
@@ -263,6 +331,7 @@ class AppSyncSettings(db.Entity):
     id = PrimaryKey(int)
     stories_interval_minutes = Required(int, default=5)
     reels_interval_minutes = Required(int, default=1440)
+    calendly_interval_minutes = Required(int, default=360)
     updated_at = Optional(datetime)
 
 

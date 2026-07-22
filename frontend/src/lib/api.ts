@@ -81,6 +81,21 @@ export function backendAuthHeaders(init?: HeadersInit): Headers {
   return headers
 }
 
+export function formatApiDetail(detail: unknown, fallback = 'Error en la solicitud'): string {
+  if (typeof detail === 'string' && detail.trim()) return detail.trim()
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item && typeof item === 'object' && 'msg' in item) return String((item as { msg: unknown }).msg)
+        return ''
+      })
+      .filter(Boolean)
+    if (parts.length) return parts.join('. ')
+  }
+  return fallback
+}
+
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const token = readSessionToken()
   const userId = readUserIdFromSession(token)

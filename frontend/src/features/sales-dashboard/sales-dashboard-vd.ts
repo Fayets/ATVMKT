@@ -3,9 +3,8 @@ import type { LeadsAnalytics } from '@/features/leads/services/leads-analytics'
 /** View-model for the sales dashboard: analytics plus week-series aliases used in charts */
 export type VDData = LeadsAnalytics & {
   chats: number
-  chatsReels: number
   chatsStories: number
-  leads_nuevos: number
+  chatsReels: number
   agendasByWeek: number[]
   conversacionesByWeek: number[]
   showsByWeek: number[]

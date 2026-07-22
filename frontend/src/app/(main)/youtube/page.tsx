@@ -22,7 +22,12 @@ type Video = {
   title: string | null
   metrics: VideoMetrics
   classification: VideoClassification
+  /** Total = cash_manual + cash_leads (alias legacy: `cash`). */
   cash: number
+  cash_manual?: number
+  cash_leads?: number
+  cash_total?: number
+  cpc?: number
   chats: number
   agendas?: number
   published_at: string | null
@@ -55,6 +60,10 @@ const emptyYoutubeAggregates: YoutubeListAggregates = {
 }
 
 const PAGE_SIZE = 12
+
+function videoCashTotal(v: Pick<Video, 'cash_total' | 'cash'>): number {
+  return Number(v.cash_total ?? v.cash) || 0
+}
 
 function prevMonth(ym: string): string | null {
   const [ys, ms] = ym.split('-')
@@ -249,7 +258,11 @@ export default function YouTubePage() {
     const rows = (await cr.json().catch(() => [])) as { platform: string; credentials: Record<string, string> }[]
     const conn = rows.find((r) => r.platform === 'youtube')
     const creds = conn?.credentials as Record<string, string> | null
-    if (!creds?.api_key || !creds?.channel_id) {
+    if (!creds?.api_key && !creds?.apiKey) {
+      toast('Configura YouTube en Conexiones API')
+      return
+    }
+    if (!creds?.channel_id && !creds?.channelId) {
       toast('Configura YouTube en Conexiones API')
       return
     }
@@ -304,6 +317,40 @@ export default function YouTubePage() {
 
   const updateField = async (id: string, field: string, value: unknown) => {
     setVideos(prev => prev.map(v => v.id !== id ? v : { ...v, [field]: value }))
+  }
+
+  const saveCashManual = async (id: string, cashManual: number) => {
+    if (!userId) return
+    try {
+      const res = await fetch(`${apiBase}/api/youtube/videos/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...backendAuthHeaders() },
+        body: JSON.stringify({ cash_manual: Math.max(0, Math.round(cashManual)) }),
+      })
+      const data = (await res.json().catch(() => ({}))) as Video & { detail?: string }
+      if (!res.ok) {
+        toast(`Error al guardar cash: ${data.detail || 'No se pudo actualizar'}`)
+        return
+      }
+      setVideos((prev) =>
+        prev.map((v) =>
+          v.id !== id
+            ? v
+            : {
+                ...v,
+                cash: Number(data.cash) || 0,
+                cash_manual: Number(data.cash_manual) || 0,
+                cash_leads: Number(data.cash_leads) || 0,
+                cash_total: Number(data.cash_total) || 0,
+                cpc: Number(data.cpc) || 0,
+                agendas: typeof data.agendas === 'number' ? data.agendas : v.agendas,
+              },
+        ),
+      )
+      void fetchData()
+    } catch (e) {
+      toast(`Error al guardar cash: ${(e as Error).message}`)
+    }
   }
 
   const deleteVideo = async (id: string) => {
@@ -486,7 +533,7 @@ export default function YouTubePage() {
           {videos.map(v => (
             <VideoCard key={v.id} video={v} isExpanded={expanded === v.id}
               onToggle={() => setExpanded(expanded === v.id ? null : v.id)}
-              onUpdate={updateField} onDelete={deleteVideo} leads={leads} />
+              onUpdate={updateField} onSaveCashManual={saveCashManual} onDelete={deleteVideo} leads={leads} />
           ))}
         </div>
       )}
@@ -598,13 +645,15 @@ export default function YouTubePage() {
 
 /* ---------- Video Card ---------- */
 
-function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }: {
+function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onSaveCashManual, onDelete, leads }: {
   video: Video; isExpanded: boolean; onToggle: () => void
   onUpdate: (id: string, field: string, value: unknown) => void
+  onSaveCashManual: (id: string, cashManual: number) => Promise<void>
   onDelete: (id: string) => void; leads: Lead[]
 }) {
   const cls = v.classification || {}
   const title = v.title || 'Sin titulo'
+  const cashManual = typeof v.cash_manual === 'number' ? v.cash_manual : v.cash || 0
   const relatedAgenda = leads.filter(
     (l) => String(l.agenda_point || '').trim().toLowerCase() === `youtube:${v.id}`.toLowerCase(),
   )
@@ -662,9 +711,20 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }
             <div className="font-mono-num text-[17px] font-bold tabular-nums text-[var(--text)]">{formatIntegerEsAr(comentarios)}</div>
           </div>
           <div className="rounded-lg bg-[var(--bg4)] p-3 text-center">
-            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Cash generado</div>
-            <input type="number" value={v.cash || 0} onChange={e => onUpdate(v.id, 'cash', Number(e.target.value) || 0)}
-              className="w-full bg-transparent text-center font-mono-num text-[17px] font-bold text-[var(--green)] outline-none tabular-nums" onClick={e => e.stopPropagation()} />
+            <div className="text-[8px] font-medium uppercase tracking-wider text-[var(--text3)]">Cash manual</div>
+            <input
+              type="number"
+              value={cashManual}
+              onChange={(e) => onUpdate(v.id, 'cash_manual', Number(e.target.value) || 0)}
+              onBlur={(e) => void onSaveCashManual(v.id, Number(e.target.value) || 0)}
+              className="w-full bg-transparent text-center font-mono-num text-[17px] font-bold text-[var(--green)] outline-none tabular-nums"
+              onClick={(e) => e.stopPropagation()}
+            />
+            {(v.cash_leads ?? 0) > 0 ? (
+              <div className="mt-1 text-[9px] text-[var(--text3)]">
+                Total {formatCash(videoCashTotal(v))} · leads {formatCash(Number(v.cash_leads) || 0)}
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -771,7 +831,7 @@ function VideoCard({ video: v, isExpanded, onToggle, onUpdate, onDelete, leads }
         </div>
         <div className="px-2 py-3 text-center sm:px-3">
           <div className="text-[8px] font-semibold uppercase tracking-wider text-[var(--text3)] sm:text-[9px]">Cash</div>
-          <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--green)] sm:text-lg">{formatCash(v.cash)}</div>
+          <div className="mt-0.5 font-mono-num text-sm font-bold tabular-nums text-[var(--green)] sm:text-lg">{formatCash(videoCashTotal(v))}</div>
         </div>
       </div>
       <div className="border-t border-[var(--border)] px-3 py-2.5">

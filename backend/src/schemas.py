@@ -73,6 +73,31 @@ class OfferedProgramPatchRequest(BaseModel):
     sort_order: int | None = None
 
 
+class AvatarTypeOut(BaseModel):
+    id: int
+    nombre: str
+    color: str
+    activo: bool
+    sort_order: int
+
+
+class AvatarTypesListResponse(BaseModel):
+    avatars: list[AvatarTypeOut] = Field(default_factory=list)
+
+
+class AvatarTypeCreateRequest(BaseModel):
+    nombre: str = ""
+    color: str = "#6B7280"
+    activo: bool = True
+
+
+class AvatarTypePatchRequest(BaseModel):
+    nombre: str | None = None
+    color: str | None = None
+    activo: bool | None = None
+    sort_order: int | None = None
+
+
 class ApiConnectionResponse(BaseModel):
     id: str
     user_id: str
@@ -292,6 +317,7 @@ class BioLeadsListResponse(BaseModel):
     leads: list[BioLeadResponse] = Field(default_factory=list)
     manychat_active: bool = True
     connected_to_airtable: bool = False
+    bio_profile_keyword: str = Field(default="info", description="Keyword de bio configurada en ManyChat")
 
 
 class BioLeadStatusPatchRequest(BaseModel):
@@ -347,6 +373,16 @@ class StorySequenceIn(BaseModel):
     slides: list[StorySlideIn] = Field(default_factory=list)
 
 
+class StorySequencePatchRequest(BaseModel):
+    dolor: str | None = None
+    angulos: str | None = None
+    angulo: str | None = None
+    cta: bool | None = None
+    cta_text: str | None = None
+    cash_manual: int | None = None
+    chats: int | None = None
+
+
 class StorySlideOut(BaseModel):
     id: int
     order_index: int
@@ -387,6 +423,10 @@ class StoriesMetricsOut(BaseModel):
     secuencias_con_cta: int
     secuencias_sin_cta: int
     stories_sincronizadas: int
+
+
+class YoutubeVideoPatchRequest(BaseModel):
+    cash_manual: int | None = None
 
 
 class LeadOut(BaseModel):
@@ -452,6 +492,7 @@ class LeadOut(BaseModel):
         description="Días desde 1er contacto hasta completar formulario Calendly (primer_contacto → agendo).",
     )
     ingresos_mensuales: float = 0
+    ingresos_rango: str | None = None
     compromiso: str | None = None
     urgencia: str | None = None
     disposicion_invertir: str | None = None
@@ -519,6 +560,7 @@ class LeadPatchRequest(BaseModel):
     dolores_llamada: str | None = None
     closer_report: str | None = None
     razon_compra: str | None = None
+    ingresos_rango: str | None = None
     setter: str | None = None
     closer: str | None = None
 
@@ -608,10 +650,14 @@ class KeywordsListResponse(BaseModel):
 class SyncSettingsOut(BaseModel):
     stories_interval_minutes: int
     reels_interval_minutes: int
+    calendly_interval_minutes: int = 360
     stories_next_sync: str | None = None
     reels_next_sync: str | None = None
+    calendly_next_sync: str | None = None
     min_interval_minutes: int = 1
     max_interval_minutes: int = 10080
+    min_calendly_interval_minutes: int = 60
+    max_calendly_interval_minutes: int = 10080
 
 
 class SyncSettingsPatch(BaseModel):
@@ -623,6 +669,73 @@ class SyncSettingsPatch(BaseModel):
         default=None,
         description="Minutos entre refresh automático de métricas de reels.",
     )
+    calendly_interval_minutes: int | None = Field(
+        default=None,
+        description="Minutos entre auto-check/sync de Calendly (p. ej. 360=6h).",
+    )
+
+
+class CallReportOut(BaseModel):
+    id: str
+    lead_id: str
+    lead_nombre: str = ""
+    fathom_url: str
+    estado: str
+    error_msg: str | None = None
+    participantes: str | None = None
+    motivo_reunion: str | None = None
+    nivel_dolor: str | None = None
+    capacidad_decision: str | None = None
+    capacidad_economica: str | None = None
+    fit_real: str | None = None
+    objecion_diagnostico: str | None = None
+    cambio_energia: str | None = None
+    objecion_no_manejada: str | None = None
+    razon_real_no_cerrar: str | None = None
+    compromisos_prometidos: str | None = None
+    patrones_y_mejoras: str | None = None
+    resumen: str | None = None
+    hubo_objeciones: str | None = None
+    tipo_perfil: str | None = None
+    ingresos_estimados: str | None = None
+    situacion_y_deseo: str | None = None
+    closer_report: str | None = None
+    dolores_llamada: str | None = None
+    razon_compra: str | None = None
+    program_offered: str | None = None
+    status_llamada: str | None = None
+    created_at: str
+    updated_at: str | None = None
+
+
+class CallReportsListResponse(BaseModel):
+    call_reports: list[CallReportOut] = Field(default_factory=list)
+
+
+class CallReportAnalyzeRequest(BaseModel):
+    lead_id: int
+    fathom_url: str
+
+
+class CallReportAnalyzeResponse(BaseModel):
+    report_id: int
+    estado: str
+
+
+class CallReportBulkIdsRequest(BaseModel):
+    ids: list[int] = Field(default_factory=list)
+
+
+class ClaudeApiStatusResponse(BaseModel):
+    status: str
+    message: str
+    api_key_masked: str | None = None
+
+
+class FathomApiStatusResponse(BaseModel):
+    status: str
+    message: str
+    api_key_masked: str | None = None
 
 
 class HotLeadOut(BaseModel):

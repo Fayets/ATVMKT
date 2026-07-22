@@ -7,7 +7,7 @@ import { Modal } from '@/shared/components/modal'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, backendAuthHeaders, formatApiDetail } from '@/lib/api'
 import { AgendaPointPickerModal } from './agenda-point-picker-modal'
 import {
   Lead,
@@ -20,6 +20,8 @@ import {
   ORIGIN_OPTIONS,
   AGENDO_EN_OPTIONS,
   PROGRAM_COLORS,
+  AVATAR_COLORS,
+  AVATAR_OPTIONS,
 } from '../types'
 
 type AgendaReelLookup = { title: string; publishedAt: string | null }
@@ -107,12 +109,42 @@ function programOfferedSelectOptions(
   return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
 }
 
+function avatarTypeSelectOptions(lead: Lead, parentOpts: string[]): string[] {
+  const v = String(lead.avatar_type || '').trim()
+  if (!v || parentOpts.includes(v)) return parentOpts
+  const rest = parentOpts.filter((x) => x !== '')
+  return ['', ...[...rest, v].sort((a, b) => a.localeCompare(b, 'es'))]
+}
+
 /** Columna Email (solo vista): extrae de `notes` la línea `Calendly email: …`. */
 function calendlyEmailFromNotes(notes: string | null | undefined): string | null {
   if (notes == null || !String(notes).trim()) return null
   const m = /Calendly email:\s*(.+)/.exec(String(notes))
   const cap = m?.[1]?.trim()
   return cap || null
+}
+
+function leadEmailDisplay(lead: Lead): string | null {
+  const direct = lead.email?.trim()
+  if (direct) return direct
+  return calendlyEmailFromNotes(lead.notes)
+}
+
+function ingresosFromNotes(notes: string | null | undefined): string | null {
+  if (notes == null || !String(notes).trim()) return null
+  const m = /Ingresos actuales:\s*(.+)/i.exec(String(notes))
+  const cap = m?.[1]?.trim().split('\n')[0]?.trim()
+  return cap || null
+}
+
+function leadIngresosDisplay(lead: Lead): string | null {
+  const rango = lead.ingresos_rango?.trim()
+  if (rango) return rango
+  const fromNotes = ingresosFromNotes(lead.notes)
+  if (fromNotes) return fromNotes
+  const n = lead.ingresos_mensuales
+  if (n != null && n > 0) return String(n)
+  return null
 }
 
 /** ISO `YYYY-MM-DD` o `…T00:00:00…` → solo fecha `dd/mm/aaaa`; si no parsea, null. */
@@ -193,6 +225,7 @@ export function LeadsPage() {
   const [setterNames, setSetterNames] = useState<string[]>([])
   const [closerNames, setCloserNames] = useState<string[]>([])
   const [offeredPrograms, setOfferedPrograms] = useState<{ id: number; name: string; price_usd: number }[]>([])
+  const [avatarTypes, setAvatarTypes] = useState<{ id: number; nombre: string; color: string; activo: boolean }[]>([])
 
   const programColumnMeta = useMemo(() => {
     const names = offeredPrograms
@@ -206,16 +239,32 @@ export function LeadsPage() {
     return { options: ['', ...names] as string[], colors }
   }, [offeredPrograms])
 
-  // Dynamic columns based on team members + programas (Ajustes)
+  const avatarColumnMeta = useMemo(() => {
+    const active = avatarTypes.filter((a) => a.activo !== false)
+    const apiNames = active
+      .map((a) => String(a.nombre ?? '').trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, 'es'))
+    const colors: Record<string, string> = { ...AVATAR_COLORS }
+    for (const a of avatarTypes) {
+      const n = String(a.nombre ?? '').trim()
+      if (n) colors[n] = a.color || '#6B7280'
+    }
+    const options =
+      apiNames.length > 0 ? (['', ...apiNames] as string[]) : AVATAR_OPTIONS
+    return { options, colors }
+  }, [avatarTypes])
+
+  // Dynamic columns based on team members + programas + avatares (Ajustes)
   const COLUMNS = useMemo(
-    () => buildColumns(setterNames, closerNames, programColumnMeta),
-    [setterNames, closerNames, programColumnMeta],
+    () => buildColumns(setterNames, closerNames, programColumnMeta, avatarColumnMeta),
+    [setterNames, closerNames, programColumnMeta, avatarColumnMeta],
   )
 
   // UI state
   const [statusTab, setStatusTab] = useState('Todos')
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<SortConfig>({ field: 'date', dir: 'desc' })
+  const [sort, setSort] = useState<SortConfig>({ field: 'date', dir: 'asc' })
   const [filters, setFilters] = useState<FilterConfig[]>([])
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() =>
     new Set(buildColumns([], []).filter(c => c.defaultVisible).map(c => c.key))
@@ -242,6 +291,7 @@ export function LeadsPage() {
   const [showGroupPanel, setShowGroupPanel] = useState(false)
   const [deleteConfirmIds, setDeleteConfirmIds] = useState<string[] | null>(null)
   const [deleteBusy, setDeleteBusy] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const [agendaLookups, setAgendaLookups] = useState<{
     reels: Record<string, AgendaReelLookup>
@@ -309,6 +359,26 @@ export function LeadsPage() {
     }
   }, [ready, userId])
 
+  const fetchAvatars = useCallback(async () => {
+    if (!ready || !userId) {
+      setAvatarTypes([])
+      return
+    }
+    try {
+      const res = await apiFetch('/avatars')
+      const data = (await res.json().catch(() => ({}))) as {
+        avatars?: { id: number; nombre: string; color: string; activo: boolean }[]
+      }
+      if (!res.ok) {
+        setAvatarTypes([])
+        return
+      }
+      setAvatarTypes(Array.isArray(data.avatars) ? data.avatars : [])
+    } catch {
+      setAvatarTypes([])
+    }
+  }, [ready, userId])
+
   const fetchLeads = useCallback(async () => {
     if (!ready || !userId) {
       setLeads([])
@@ -339,6 +409,39 @@ export function LeadsPage() {
       setLoading(false)
     }
   }, [ready, userId, month, toast])
+
+  const syncCalendlyLeads = useCallback(async () => {
+    if (!ready || !userId || syncing) return
+    setSyncing(true)
+    try {
+      const base =
+        (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
+      const res = await fetch(`${base}/calendly/sync`, {
+        method: 'POST',
+        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ month: month || null }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: unknown
+        error?: string
+        created?: number
+        updated?: number
+        synced?: number
+      }
+      if (!res.ok) {
+        toast(formatApiDetail(data.error ?? data.detail, 'Error al sincronizar Calendly'))
+        return
+      }
+      toast(
+        `Calendly (${month || 'todos'}): ${data.created ?? 0} creados, ${data.updated ?? 0} actualizados.`,
+      )
+      await fetchLeads()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Error al sincronizar Calendly')
+    } finally {
+      setSyncing(false)
+    }
+  }, [ready, userId, syncing, month, toast, fetchLeads])
 
   const loadAgendaLookups = useCallback(async () => {
     if (!ready || !userId) return
@@ -418,7 +521,8 @@ export function LeadsPage() {
   useEffect(() => {
     void fetchTeamMembers()
     void fetchPrograms()
-  }, [fetchTeamMembers, fetchPrograms])
+    void fetchAvatars()
+  }, [fetchTeamMembers, fetchPrograms, fetchAvatars])
 
   useEffect(() => {
     const refresh = () => {
@@ -427,6 +531,14 @@ export function LeadsPage() {
     window.addEventListener('offered-programs-updated', refresh)
     return () => window.removeEventListener('offered-programs-updated', refresh)
   }, [fetchPrograms])
+
+  useEffect(() => {
+    const refresh = () => {
+      void fetchAvatars()
+    }
+    window.addEventListener('avatar-types-updated', refresh)
+    return () => window.removeEventListener('avatar-types-updated', refresh)
+  }, [fetchAvatars])
   useEffect(() => { fetchLeads() }, [fetchLeads])
   useEffect(() => { setSelectedRows(new Set()) }, [month, statusTab])
 
@@ -791,9 +903,48 @@ export function LeadsPage() {
             />
           </div>
 
+          <button
+            type="button"
+            disabled={syncing || !ready || !userId}
+            onClick={() => void syncCalendlyLeads()}
+            title="Forzar sync de Calendly ahora (también corre automático según Ajustes → Tasa de refresco)"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-1.5 text-[12px] font-medium text-[var(--text2)] transition-colors hover:bg-[var(--nav-hover)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <svg
+              className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {syncing ? 'Sincronizando…' : 'Sincronizar'}
+          </button>
+
           <MonthSelector month={month} options={options} onChange={setMonth} />
         </div>
       </div>
+
+      {syncing && (
+        <div className="mb-3 glass-card p-4">
+          <div className="mb-2 flex items-center gap-2 text-[12px] text-[var(--text)]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
+            Sincronizando leads desde Calendly…
+          </div>
+          <div className="mb-2 h-2 w-full overflow-hidden rounded-full bg-[var(--bg4)]">
+            <div className="h-full w-full origin-left animate-pulse rounded-full bg-[var(--accent)]/70" />
+          </div>
+          <div className="text-[12px] text-[var(--text3)]">
+            Descargando agendas del mes {month || 'seleccionado'}…
+          </div>
+        </div>
+      )}
 
       {/* ━━ TABLE ━━ */}
       {loading ? (
@@ -1159,6 +1310,7 @@ function LeadsTable({
           {columns.map(col => (
             <th key={col.key}
               onClick={() => onToggleSort(col.key)}
+              title={col.title || col.label}
               className={`border-b border-[var(--border2)] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] hover:text-[var(--text2)] cursor-pointer select-none whitespace-nowrap transition-colors ${
                 stickyName && col.key === 'client_name'
                   ? 'leads-table__sticky-frozen leads-table__sticky-name'
@@ -1277,6 +1429,55 @@ function LeadsTable({
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LEAD TABLE CELL
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+/** Campos con respuesta larga: en la grilla solo «Abrir» → modal con texto completo. */
+const MODAL_TEXT_CELL_KEYS = ['ingresos_lead'] as const
+
+function AbrirTextoModalCell({
+  text,
+  label,
+  editable,
+  onPreviewText,
+  onStartEdit,
+}: {
+  text: string
+  label: string
+  editable?: boolean
+  onPreviewText: (title: string, body: string) => void
+  onStartEdit?: () => void
+}) {
+  const trimmed = text.trim()
+  if (!trimmed) {
+    return (
+      <span
+        onClick={editable ? onStartEdit : undefined}
+        className={`text-[12px] text-[var(--text3)] ${editable ? 'cursor-pointer hover:opacity-80' : ''}`}
+      >
+        —
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation()
+        onPreviewText(label, trimmed)
+      }}
+      onDoubleClick={
+        editable
+          ? (e) => {
+              e.stopPropagation()
+              onStartEdit?.()
+            }
+          : undefined
+      }
+      className="text-[12px] text-[var(--accent)] hover:underline"
+    >
+      Abrir
+    </button>
+  )
+}
+
 function LeadsTableCell({
   lead,
   col,
@@ -1315,8 +1516,10 @@ function LeadsTableCell({
       : col.key === 'agendo_en'
         ? agendoEnStoredValue(lead)
         : col.key === 'email'
-          ? calendlyEmailFromNotes(lead.notes)
-          : raw
+          ? leadEmailDisplay(lead)
+          : col.key === 'ingresos_lead'
+            ? leadIngresosDisplay(lead)
+            : raw
 
   if (readOnly) {
     if (col.key === 'client_name') {
@@ -1416,6 +1619,15 @@ function LeadsTableCell({
         </span>
       )
     }
+    if (MODAL_TEXT_CELL_KEYS.includes(col.key as (typeof MODAL_TEXT_CELL_KEYS)[number])) {
+      return (
+        <AbrirTextoModalCell
+          text={String(value ?? '')}
+          label={col.label}
+          onPreviewText={onPreviewText}
+        />
+      )
+    }
     if (longTextCellKeys.includes(col.key) && value) {
       const text = String(value)
       const preview =
@@ -1447,7 +1659,9 @@ function LeadsTableCell({
                 ? programOfferedSelectOptions(lead, 'program_offered', col.options!)
                 : col.key === 'programada_ofrecido_llamada'
                   ? programOfferedSelectOptions(lead, 'programada_ofrecido_llamada', col.options!)
-                  : col.options!
+                  : col.key === 'avatar_type'
+                    ? avatarTypeSelectOptions(lead, col.options!)
+                    : col.options!
       return (
         <select
           autoFocus
@@ -1465,7 +1679,7 @@ function LeadsTableCell({
         </select>
       )
     }
-    if (longTextCellKeys.includes(col.key)) {
+    if (longTextCellKeys.includes(col.key) || MODAL_TEXT_CELL_KEYS.includes(col.key as (typeof MODAL_TEXT_CELL_KEYS)[number])) {
       return (
         <textarea
           autoFocus
@@ -1660,6 +1874,18 @@ function LeadsTableCell({
       <span onClick={onStartEdit} className={`${cellClass} font-mono-num ${!value && value !== 0 ? 'text-[var(--text3)]' : ''}`}>
         {value != null ? String(value) : '—'}
       </span>
+    )
+  }
+
+  if (MODAL_TEXT_CELL_KEYS.includes(col.key as (typeof MODAL_TEXT_CELL_KEYS)[number])) {
+    return (
+      <AbrirTextoModalCell
+        text={String(value ?? '')}
+        label={col.label}
+        editable={col.editable}
+        onPreviewText={onPreviewText}
+        onStartEdit={onStartEdit}
+      />
     )
   }
 

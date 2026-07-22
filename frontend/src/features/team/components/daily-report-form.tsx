@@ -31,7 +31,6 @@ type DailyReport = {
   sentimiento_trafico: string
   avatar_counts: Record<string, number>
   insights_marketing: string
-  leads_nuevos: number
   seguimientos: number
   outbounds: number
   dia_bueno_malo: string
@@ -83,7 +82,7 @@ type Props = {
 
 type CloserKind = 'ventas' | 'marketing'
 
-type NumKey = 'conversaciones' | 'agendas' | 'calendly_links' | 'leads_nuevos' | 'seguimientos' | 'outbounds' | 'calls_scheduled' | 'shows' | 'cierres' | 'calificados' | 'descalificados' | 'ingreso'
+type NumKey = 'conversaciones' | 'agendas' | 'calendly_links' | 'seguimientos' | 'outbounds' | 'calls_scheduled' | 'shows' | 'cierres' | 'calificados' | 'descalificados' | 'ingreso'
 
 function errMessage(data: unknown): string {
   if (data && typeof data === 'object' && 'detail' in data) {
@@ -136,7 +135,6 @@ export function DailyReportSection({ role }: Props) {
     sentimiento_trafico: '',
     avatar_counts: emptyAvatarCounts(),
     insights_marketing: '',
-    leads_nuevos: 0,
     seguimientos: 0,
     outbounds: 0,
     dia_bueno_malo: '',
@@ -315,7 +313,6 @@ export function DailyReportSection({ role }: Props) {
             sentimiento_trafico: form.sentimiento_trafico.trim() || null,
             avatar_tipo_agendas: serializeAvatarCounts(form.avatar_counts),
             insights_marketing: form.insights_marketing.trim() || null,
-            leads_nuevos: form.leads_nuevos,
             seguimientos: form.seguimientos,
             outbounds: form.outbounds,
             dia_bueno_malo: form.dia_bueno_malo.trim() || null,
@@ -552,8 +549,7 @@ export function DailyReportSection({ role }: Props) {
                 {numField('agendas', 'Agendas', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
                 {numField('calendly_links', 'Calendlys enviados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
               </div>
-              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {numField('leads_nuevos', 'Leads nuevos', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {numField('seguimientos', 'Seguimientos', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
                 {numField('outbounds', 'Outbounds', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
               </div>

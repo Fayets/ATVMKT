@@ -1,10 +1,12 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import Link from 'next/link'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ConnectionCard } from '@/features/conexiones/connection-card'
+import { platformsForApp } from '@/features/conexiones/connection-platforms'
+import { backendAuthHeaders } from '@/lib/api'
+import { API_BASE } from '@/shared/lib/backend-public-url'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
-import { backendAuthHeaders } from '@/lib/api'
 
 type Connection = {
   id?: string
@@ -13,142 +15,13 @@ type Connection = {
   last_sync_at: string | null
 }
 
-type PlatformDef = {
-  key: string
-  label: string
-  icon: string
-  subtitle: string
-  fields: { key: string; label: string; placeholder?: string; type?: string; span?: 2 }[]
-  guide: { title: string; steps: string[] }
-  /** Solo guía: no guarda credenciales en el servidor (por ahora). */
-  infoOnly?: boolean
-}
-
-const PLATFORMS: PlatformDef[] = [
-  {
-    key: 'calendly', label: 'Calendly', icon: '📅', subtitle: 'Crea leads automaticamente cuando alguien agenda una sesion',
-    fields: [
-      { key: 'api_key', label: 'Personal Access Token de Calendly', placeholder: 'eyJraWQ...', type: 'password' },
-    ],
-    guide: {
-      title: 'Como configurar Calendly',
-      steps: [
-        'Anda a calendly.com → tu avatar → Integraciones → API & Webhooks',
-        'Genera un Personal Access Token con permisos de Webhooks + Programacion + Gestion de usuarios',
-        'Pegalo en el campo de arriba y dale Conectar',
-        'Se genera automaticamente un webhook token y la URL del webhook',
-        'Anda a calendly.com/integrations/api_webhooks → Add Webhook',
-        'Pega la URL del webhook que aparece abajo',
-        'Selecciona los eventos: invitee.created e invitee.canceled',
-        'Listo! Cuando alguien agende, el lead se crea automaticamente en tu tablero',
-      ],
-    },
-  },
-  {
-    key: 'fathom', label: 'Fathom', icon: '🎙️', subtitle: 'Analiza llamadas automaticamente con IA post-llamada del closer',
-    fields: [
-      { key: 'api_key', label: 'API Key de Fathom', placeholder: 'Tu API Key de fathom.video', type: 'password' },
-      { key: 'webhook_secret', label: 'Webhook Secret', placeholder: 'whsec_...', type: 'password' },
-    ],
-    guide: {
-      title: 'Como configurar Fathom',
-      steps: [
-        'Anda a fathom.video → Settings → API Access',
-        'Genera una API Key y un Webhook Secret',
-        'Pegá ambos en los campos de arriba y dale Conectar',
-        'Se genera automaticamente la URL del webhook',
-        'En Fathom, hace click en "Add Webhook" y pega la URL que aparece abajo',
-        'Activa los scopes: Summary, Action Items, y Transcript',
-        'Listo! Despues de cada llamada, la IA genera el reporte del closer automaticamente',
-      ],
-    },
-  },
-  {
-    key: 'manychat', label: 'ManyChat', icon: '💬', subtitle: 'Conecta tu keyword de bio para trackear chats automaticamente',
-    fields: [
-      { key: 'api_key', label: 'API Key de ManyChat', placeholder: 'Tu API Key de Settings → API', type: 'password' },
-    ],
-    guide: {
-      title: 'Como configurar ManyChat',
-      steps: [
-        'En ManyChat, anda a Settings (engranaje) → API → copia tu API Key y pegala aca',
-        'Dale a Conectar — se genera un token y una URL de webhook automaticamente',
-        'En ManyChat, anda a Automation → tu flow de keyword de bio',
-        'Agrega una accion "External Request" (POST) al final del flow',
-        'Pega la URL del webhook que aparece abajo',
-        'En el body JSON del request usa: {"webhook_token": "TU_TOKEN", "keyword": "{{last_input_text}}", "contact_name": "{{first_name}}", "contact_ig_username": "{{ig_username}}", "manychat_contact_id": "{{id}}"}',
-        'Listo! Los chats se loguean automaticamente y podes ver tus etiquetas desde BIO',
-      ],
-    },
-  },
-  {
-    key: 'instagram', label: 'Instagram', icon: '📸', subtitle: 'Sincroniza insights de stories directo con Instagram Graph API',
-    fields: [
-      { key: 'access_token', label: 'Access Token', placeholder: 'EAAG...', type: 'password' },
-      { key: 'instagram_user_id', label: 'Instagram User ID', placeholder: '1784...' },
-    ],
-    guide: {
-      title: 'Como configurar Instagram',
-      steps: [
-        'Abri Meta for Developers y conecta tu app con Instagram Graph API',
-        'Genera un Access Token con permisos para leer stories e insights',
-        'Copia el Instagram User ID de la cuenta que queres sincronizar',
-        'Pegá ambos datos y tocá Guardar',
-        'En Historias, usa el boton "SINCRONIZAR INSTAGRAM" para traer metricas',
-      ],
-    },
-  },
-  {
-    key: 'youtube',
-    label: 'YouTube',
-    icon: '▶️',
-    subtitle: 'Importá videos de tu canal con YouTube Data API v3 (API pública de Google).',
-    fields: [
-      { key: 'api_key', label: 'API Key de Google', placeholder: 'AIzaSy...', type: 'password' },
-      { key: 'channel_id', label: 'Channel ID', placeholder: 'UCxxxxxxxxxx' },
-    ],
-    guide: {
-      title: 'Como configurar YouTube (Data API v3 pública)',
-      steps: [
-        'Anda a console.cloud.google.com',
-        'Crea un proyecto nuevo (o usa uno existente)',
-        'Anda a APIs & Services → Library → busca "YouTube Data API v3" → Enable (API pública con cuota en Google Cloud)',
-        'Anda a APIs & Services → Credentials → Create Credentials → API Key',
-        'Copia la API Key y pegala aca',
-        'Para tu Channel ID: abri YouTube → tu canal → la URL tiene /channel/UCxxxxxxxxxx',
-        'Alternativa: busca "YouTube Channel ID finder" en Google y pega tu URL',
-        'Listo! Anda a YouTube y apreta sincronizar',
-      ],
-    },
-  },
-  {
-    key: 'youtube_analytics',
-    label: 'YouTube Analytics API',
-    icon: '▶️',
-    subtitle: 'Métricas avanzadas de canal y videos; habilitala en la misma consola de Google Cloud.',
-    fields: [],
-    infoOnly: true,
-    guide: {
-      title: 'YouTube Analytics API',
-      steps: [
-        'Usá el mismo proyecto de Google Cloud que para YouTube Data API v3.',
-        'Anda a APIs & Services → Library → busca "YouTube Analytics API" → Enable.',
-        'Esta API suele requerir OAuth 2.0 del propietario del canal; la integración desde acá puede sumarse en una próxima versión.',
-        'Por ahora el tablero de YouTube usa Data API v3 para listar videos y estadísticas básicas.',
-      ],
-    },
-  },
-]
+const PLATFORMS = platformsForApp()
 
 export default function ConexionesPage() {
   const { toast } = useToast()
   const { ready, userId } = useAuthUser()
   const [connections, setConnections] = useState<Record<string, Connection>>({})
   const [loading, setLoading] = useState(true)
-
-  // URL absoluta del API (prod / otro host) o proxy same-origin en dev: ver next.config → /api-backend
-  const apiBase =
-    (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
 
   const fetchConnections = useCallback(async () => {
     if (!ready) return
@@ -159,33 +32,38 @@ export default function ConexionesPage() {
     }
     setLoading(true)
     try {
-      const res = await fetch(`${apiBase}/conexiones`, {
-        headers: backendAuthHeaders(),
-      })
+      const res = await fetch(`${API_BASE}/conexiones`, { headers: backendAuthHeaders() })
       const raw = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const detail = typeof raw === 'object' && raw && 'detail' in raw
-          ? String((raw as { detail: unknown }).detail)
-          : res.statusText
+        const detail =
+          typeof raw === 'object' && raw && 'detail' in raw
+            ? String((raw as { detail: unknown }).detail)
+            : res.statusText
         toast(`Error al cargar conexiones: ${detail}`)
-        setLoading(false)
+        setConnections({})
+        return
+      }
+      if (!Array.isArray(raw)) {
+        toast('Error al cargar conexiones: respuesta inválida del servidor.')
+        setConnections({})
         return
       }
       const rows = raw as Array<{
         id: string
         platform: string
-        credentials: Record<string, string>
+        credentials: Record<string, unknown>
         last_sync_at: string | null
       }>
       const map: Record<string, Connection> = {}
       rows.forEach((row) => {
-        const creds = row.credentials || {}
-        const asStrings: Record<string, string> = {}
-        Object.entries(creds).forEach(([k, v]) => { asStrings[k] = v == null ? '' : String(v) })
+        const creds: Record<string, string> = {}
+        Object.entries(row.credentials || {}).forEach(([k, v]) => {
+          creds[k] = v == null ? '' : String(v)
+        })
         map[row.platform] = {
           id: row.id,
           platform: row.platform,
-          credentials: asStrings,
+          credentials: creds,
           last_sync_at: row.last_sync_at,
         }
       })
@@ -193,231 +71,69 @@ export default function ConexionesPage() {
     } finally {
       setLoading(false)
     }
-  }, [ready, userId, apiBase, toast])
+  }, [ready, userId, toast])
 
-  useEffect(() => { fetchConnections() }, [fetchConnections])
+  useEffect(() => {
+    void fetchConnections()
+  }, [fetchConnections])
 
-  const saveConnection = async (platform: string, credentials: Record<string, string>) => {
-    if (!userId) { toast('Iniciá sesión en la app para obtener tu ID de usuario (API).'); return }
-    const webhookPlatforms = ['manychat', 'calendly', 'fathom']
-    if (webhookPlatforms.includes(platform) && !credentials.webhook_token) {
-      credentials.webhook_token = crypto.randomUUID().replace(/-/g, '')
+  const saveConnection = useCallback(
+    async (platform: string, credentials: Record<string, string>) => {
+      if (!userId) {
+        toast('Iniciá sesión para guardar conexiones.')
+        return
+      }
+      const res = await fetch(`${API_BASE}/conexiones/${encodeURIComponent(platform)}`, {
+        method: 'PUT',
+        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ credentials }),
+      })
+      const raw = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const detail =
+          typeof raw === 'object' && raw && 'detail' in raw
+            ? String((raw as { detail: unknown }).detail)
+            : res.statusText
+        throw new Error(detail)
+      }
+      toast(`${platform} guardado ✓`)
+      await fetchConnections()
+    },
+    [userId, toast, fetchConnections],
+  )
+
+  const savers = useMemo(() => {
+    const map: Record<string, (creds: Record<string, string>) => Promise<void>> = {}
+    for (const p of PLATFORMS) {
+      map[p.key] = (creds) => saveConnection(p.key, creds)
     }
-    const res = await fetch(`${apiBase}/conexiones/${encodeURIComponent(platform)}`, {
-      method: 'PUT',
-      headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ credentials }),
-    })
-    const raw = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      const detail = typeof raw === 'object' && raw && 'detail' in raw
-        ? String((raw as { detail: unknown }).detail)
-        : res.statusText
-      toast(`Error: ${detail}`)
-      return
-    }
-    toast(`${platform} guardado ✓`)
-    fetchConnections()
+    return map
+  }, [saveConnection])
+
+  if (loading) {
+    return <div className="py-12 text-center text-[var(--text3)]">Cargando…</div>
   }
-
-  if (loading) return <div className="py-12 text-center text-[var(--text3)]">Cargando...</div>
 
   return (
     <div>
       <div className="mb-6">
         <h2 className="text-lg font-semibold tracking-tight">Conexiones API</h2>
-        <p className="mt-1 text-[12px] text-[var(--text3)]">Conecta tus cuentas y servicios para importar contenido automaticamente. Las credenciales se guardan de forma segura en tu cuenta.</p>
+        <p className="mt-1 text-[12px] text-[var(--text3)]">
+          Conectá tus cuentas para importar contenido. Las credenciales se guardan en tu instancia.
+        </p>
       </div>
-
-      <div className="space-y-4">
-        {PLATFORMS.map((p) => {
-          const conn = connections[p.key]
-          const isConnected =
-            !p.infoOnly && conn && Object.values(conn.credentials).some((v) => v)
-          return (
-            <ConnectionCard
-              key={p.key}
-              platform={p}
-              connection={conn}
-              isConnected={!!isConnected}
-              onSave={(creds) => saveConnection(p.key, creds)}
-              userId={userId || ''}
-              apiBase={apiBase}
-            />
-          )
-        })}
+      <div className="flex flex-col gap-4">
+        {PLATFORMS.map((p) => (
+          <ConnectionCard
+            key={p.key}
+            platform={p}
+            connection={connections[p.key]}
+            apiBase={API_BASE}
+            onSave={savers[p.key]}
+            onSyncComplete={fetchConnections}
+          />
+        ))}
       </div>
-    </div>
-  )
-}
-
-function ConnectionCard({
-  platform,
-  connection,
-  isConnected,
-  onSave,
-  userId,
-  apiBase,
-}: {
-  platform: PlatformDef
-  connection?: Connection
-  isConnected: boolean
-  onSave: (creds: Record<string, string>) => void
-  userId: string
-  apiBase: string
-}) {
-  const [form, setForm] = useState<Record<string, string>>({})
-  const [expanded, setExpanded] = useState(false)
-  const [showGuide, setShowGuide] = useState(false)
-
-  useEffect(() => {
-    if (connection?.credentials) setForm(connection.credentials)
-  }, [connection])
-
-  return (
-    <div className="glass-card p-5">
-      {/* Header */}
-      <div className="flex items-center gap-4 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--bg4)] text-lg">{platform.icon}</div>
-        <div className="flex-1">
-          <div className="text-[14px] font-semibold">{platform.label}</div>
-          <div className="text-[12px] text-[var(--text3)]">{platform.subtitle}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          {platform.infoOnly ? (
-            <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text3)]">Guía</span>
-          ) : (
-            <>
-              <div className={`h-2 w-2 rounded-full ${isConnected ? 'bg-[var(--green)] shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-[var(--text3)]'}`} />
-              <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text3)]">
-                {isConnected ? 'Conectado' : 'Desconectado'}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="mt-4 pt-4 border-t border-[var(--border)]">
-          {/* Guide toggle */}
-          <button
-            onClick={() => setShowGuide(!showGuide)}
-            className="mb-4 flex items-center gap-2 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-4 py-2.5 text-[12px] text-[var(--text2)] transition-all hover:border-[var(--accent)] hover:text-[var(--accent)] w-full text-left"
-          >
-            <span className="text-[14px]">{showGuide ? '▾' : '▸'}</span>
-            <span className="font-medium">Como configurar {platform.label} — paso a paso</span>
-          </button>
-
-          {/* Guide steps */}
-          {showGuide && (
-            <div className="mb-5 rounded-lg bg-[var(--bg3)] border border-[var(--border)] p-5">
-              <h4 className="text-[12px] font-semibold text-[var(--accent)] mb-3">{platform.guide.title}</h4>
-              <ol className="space-y-2.5">
-                {platform.guide.steps.map((step, i) => (
-                  <li key={i} className="flex gap-3 text-[12px] text-[var(--text2)] leading-relaxed">
-                    <span className="flex-shrink-0 flex items-center justify-center w-5 h-5 rounded-full bg-[var(--accent)] text-white text-[10px] font-bold mt-0.5">
-                      {i + 1}
-                    </span>
-                    <span>{step}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-
-          {/* Fields (non-ManyChat platforms) */}
-          {platform.fields.length > 0 && (
-            <div className="grid grid-cols-2 gap-3">
-              {platform.fields.map((f) => (
-                <div key={f.key} className={f.span === 2 ? 'col-span-2' : undefined}>
-                  <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">{f.label}</label>
-                  <input
-                    type={f.type || 'text'}
-                    value={form[f.key] || ''}
-                    onChange={(e) => setForm(prev => ({ ...prev, [f.key]: e.target.value }))}
-                    placeholder={f.placeholder}
-                    className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)] placeholder:text-[var(--text3)] placeholder:opacity-50"
-                  />
-                  {platform.key === 'instagram' && f.key === 'access_token' && (
-                    <Link
-                      href="/configuracion/instagram-token-guide"
-                      className="mt-2 inline-block text-[11px] text-[var(--accent)] hover:underline"
-                    >
-                      🔗 Cómo generar tu token de Instagram →
-                    </Link>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Save / Connect button */}
-          {!platform.infoOnly && (
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              {['manychat', 'calendly', 'fathom'].includes(platform.key) && !isConnected ? (
-                <button
-                  onClick={() => onSave({ ...form, webhook_token: crypto.randomUUID().replace(/-/g, '') })}
-                  className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
-                >
-                  Conectar {platform.label}
-                </button>
-              ) : (
-                <button
-                  onClick={() => onSave(form)}
-                  className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white hover:opacity-90"
-                >
-                  Guardar
-                </button>
-              )}
-              {connection?.last_sync_at && (
-                <span className="text-[11px] text-[var(--text3)]">
-                  Ultima sync: {new Date(connection.last_sync_at).toLocaleString('es-AR')}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* Webhook URL display for platforms with webhooks */}
-          {['manychat', 'calendly', 'fathom'].includes(platform.key) && connection?.credentials?.webhook_token && (
-            <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-4">
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-2">URL del Webhook (pegar en {platform.label})</div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 rounded bg-[var(--bg4)] px-3 py-2 text-[12px] text-[var(--accent)] break-all select-all">
-                  {(() => {
-                    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-                    const backendBase = apiBase.startsWith('http') ? apiBase.replace(/\/$/, '') : `${origin}${apiBase.replace(/\/$/, '')}`
-                    return platform.key === 'manychat'
-                      ? `${backendBase}/webhooks/manychat`
-                      : `${origin}/api/webhooks/${platform.key}`
-                  })()}
-                </code>
-                <button
-                  onClick={() => {
-                    const origin = typeof window !== 'undefined' ? window.location.origin : ''
-                    const backendBase = apiBase.startsWith('http') ? apiBase.replace(/\/$/, '') : `${origin}${apiBase.replace(/\/$/, '')}`
-                    const url = platform.key === 'manychat'
-                      ? `${backendBase}/webhooks/manychat`
-                      : `${origin}/api/webhooks/${platform.key}`
-                    navigator.clipboard.writeText(url)
-                  }}
-                  className="rounded-lg border border-[var(--border2)] px-3 py-2 text-[11px] text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                >
-                  Copiar
-                </button>
-              </div>
-              <div className="mt-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)] mb-1">Token</div>
-              <code className="block rounded bg-[var(--bg4)] px-3 py-2 text-[12px] text-[var(--text2)] break-all select-all">
-                {connection.credentials.webhook_token}
-              </code>
-              <p className="mt-2 text-[11px] text-[var(--text3)]">
-                {platform.key === 'manychat' && 'Incluí este token en el body del External Request de ManyChat como "webhook_token".'}
-                {platform.key === 'calendly' && 'Configurá este webhook en Calendly con los eventos invitee.created e invitee.canceled.'}
-                {platform.key === 'fathom' && 'Agregá este webhook en Fathom con los scopes: Summary, Action Items, y Transcript.'}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

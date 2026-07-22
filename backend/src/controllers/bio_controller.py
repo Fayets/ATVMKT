@@ -8,15 +8,15 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
-from src.models import Lead as LeadEntity
+from src.models import ApiConnection, Lead as LeadEntity
 from src.schemas import BioLeadResponse, BioLeadStatusPatchRequest, BioLeadsListResponse, BioMetricsResponse, BioViaOptionsResponse
 
 router = APIRouter(prefix="/api/bio", tags=["bio"], redirect_slashes=False)
 
 VIA_OPTIONS_FIXED = ["Perfil", "Automático - ManyChat", "Referido", "Otro"]
 
-# Keyword ManyChat del link en bio / perfil (no reels ni otros embudos).
-BIO_PROFILE_KEYWORD = "info"
+# Fallback si el usuario no configuró credentials["bio_keyword"] en ManyChat.
+BIO_PROFILE_KEYWORD_DEFAULT = "info"
 
 
 def require_user_id(
@@ -101,8 +101,28 @@ def _lead_keyword_tokens(raw: str | None) -> list[str]:
     return [t.strip().lower() for t in str(raw).split(",") if t.strip()]
 
 
-def _is_bio_profile_lead(row: LeadEntity) -> bool:
-    return BIO_PROFILE_KEYWORD in _lead_keyword_tokens(row.keyword)
+def _bio_profile_keyword_for_user(uid: int) -> str:
+    """Keyword de bio del usuario (ApiConnection manychat); fallback 'info'."""
+    with db_session:
+        try:
+            conn = ApiConnection.get(user_id=uid, platform="manychat")
+        except ObjectNotFound:
+            return BIO_PROFILE_KEYWORD_DEFAULT
+        creds = conn.credentials if isinstance(conn.credentials, dict) else {}
+        raw = str(creds.get("bio_keyword") or "").strip()
+        if not raw:
+            return BIO_PROFILE_KEYWORD_DEFAULT
+        return raw.lower()
+
+
+def _is_bio_profile_lead(
+    row: LeadEntity,
+    user_id: int,
+    *,
+    bio_keyword: str | None = None,
+) -> bool:
+    kw = (bio_keyword or _bio_profile_keyword_for_user(user_id)).lower()
+    return kw in _lead_keyword_tokens(row.keyword)
 
 
 def _lead_to_response(row: LeadEntity) -> BioLeadResponse:
@@ -145,7 +165,8 @@ def _rows_for_user_month(uid: int, month_key: tuple[int, int] | None) -> list[Le
     if month_key is not None:
         y, mn = month_key
         rows = [r for r in rows if _in_month_calendar(r, y, mn, max_day)]
-    return [r for r in rows if _is_bio_profile_lead(r)]
+    bio_kw = _bio_profile_keyword_for_user(uid)
+    return [r for r in rows if _is_bio_profile_lead(r, uid, bio_keyword=bio_kw)]
 
 
 @router.get("/leads", response_model=BioLeadsListResponse)
@@ -170,6 +191,7 @@ def list_bio_leads(
         leads=[_lead_to_response(r) for r in rows],
         manychat_active=True,
         connected_to_airtable=False,
+        bio_profile_keyword=_bio_profile_keyword_for_user(uid),
     )
 
 

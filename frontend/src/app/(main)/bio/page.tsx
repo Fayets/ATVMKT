@@ -49,6 +49,7 @@ type BioLeadsResponse = {
   leads?: BioLead[]
   manychat_active?: boolean
   connected_to_airtable?: boolean
+  bio_profile_keyword?: string
   detail?: string
 }
 
@@ -57,6 +58,7 @@ type BioViaOptionsResponse = {
 }
 
 const AR_TZ = 'America/Argentina/Buenos_Aires'
+const BIO_KEYWORD_DEFAULT = 'info'
 
 /** Fecha agendó: dd/mm/año en Argentina; si no es parseable, se muestra el texto tal cual. */
 function formatCashPorChat(n: number): string {
@@ -104,6 +106,7 @@ export default function BioPage() {
   const [viaFilter, setViaFilter] = useState<string>('all')
   const [viaOptionsFromApi, setViaOptionsFromApi] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState<string>('')
+  const [bioProfileKeyword, setBioProfileKeyword] = useState<string>(BIO_KEYWORD_DEFAULT)
 
   const apiBase =
     (process.env.NEXT_PUBLIC_BACKEND_URL || '').trim().replace(/\/$/, '') || '/api-backend'
@@ -127,6 +130,8 @@ export default function BioPage() {
         return
       }
       setRows(Array.isArray(data.leads) ? data.leads : [])
+      const kw = String(data.bio_profile_keyword || '').trim()
+      setBioProfileKeyword(kw || BIO_KEYWORD_DEFAULT)
     } finally {
       setLoading(false)
     }
@@ -218,7 +223,8 @@ export default function BioPage() {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">BIO</h2>
           <p className="mt-1 text-[12px] text-[var(--text3)]">
-            Leads que entraron por el perfil (keyword <span className="text-[var(--text2)]">info</span>) y respondieron el bot de ManyChat
+            Leads que entraron por el perfil (keyword{' '}
+            <span className="text-[var(--text2)]">{bioProfileKeyword}</span>) y respondieron el bot de ManyChat
           </p>
         </div>
         <div className="flex items-center gap-3">

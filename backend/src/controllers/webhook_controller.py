@@ -1,18 +1,13 @@
 import re
 from datetime import datetime
-from decouple import config
 from fastapi import APIRouter, HTTPException, Request
 from pony.orm import db_session
 
+from src.env_public import manychat_webhook_token
 from src.lead_display_utils import compute_dias_para_agendar
 from src.models import ApiConnection, Lead, ReelContent
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
-
-MANYCHAT_WEBHOOK_SECRET = config(
-    "MANYCHAT_WEBHOOK_TOKEN",
-    default="3720ab6c857a4d6992c457b5a2299190",
-)
 
 
 def _norm_kw(s: str) -> str:
@@ -117,7 +112,13 @@ async def manychat_webhook(request: Request) -> dict[str, str]:
     event = str(payload.get("event") or "").strip().lower()
     webhook_token = str(payload.get("webhook_token") or "").strip()
 
-    if str(webhook_token) != str(MANYCHAT_WEBHOOK_SECRET).strip():
+    expected = manychat_webhook_token()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="MANYCHAT_WEBHOOK_TOKEN no configurado en el servidor.",
+        )
+    if str(webhook_token) != expected:
         raise HTTPException(status_code=401, detail="Invalid webhook token")
 
     if event == "respondio_auto":
@@ -327,6 +328,66 @@ def _merge_calendly_email_notas(existing: str | None, email: str) -> str:
     return f"{base}\n{line}"
 
 
+def _calendly_questions(flat: dict, inner: dict | None = None) -> list[dict]:
+    sources = [flat]
+    if isinstance(inner, dict):
+        sources.append(inner)
+    for src in sources:
+        qa = src.get("questions_and_answers")
+        if isinstance(qa, list):
+            return [item for item in qa if isinstance(item, dict)]
+    return []
+
+
+def _find_calendly_answer(questions: list[dict], *keywords: str) -> str:
+    """Busca respuesta por substring en el texto de la pregunta (casefold)."""
+    kws = [k.casefold() for k in keywords if k]
+    for item in questions:
+        q = str(item.get("question") or "").casefold()
+        if not q:
+            continue
+        if any(kw in q for kw in kws):
+            return str(item.get("answer") or "").strip()
+    return ""
+
+
+def _extract_calendly_form_fields(flat: dict, inner: dict | None = None) -> dict[str, str]:
+    """Mapea Q&A del formulario Calendly → campos Lead."""
+    qa = _calendly_questions(flat, inner)
+    phone = (
+        _find_calendly_answer(qa, "número de teléfono", "numero de telefono", "teléfono", "telefono", "phone")
+        or str(flat.get("text_reminder_number") or (inner or {}).get("text_reminder_number") or "").strip()
+    )
+    return {
+        "phone": phone,
+        "ingresos_rango": _find_calendly_answer(
+            qa,
+            "con cuánto dinero",
+            "con cuanto dinero",
+            "cuánto dinero cuentas",
+            "cuanto dinero cuentas",
+            "inversión tanto de tiempo",
+            "inversion tanto de tiempo",
+        ),
+        "compromiso": _find_calendly_answer(qa, "comprometidas", "realmente comprometidas"),
+    }
+
+
+def _apply_calendly_form_fields(row: Lead, fields: dict[str, str]) -> None:
+    phone = (fields.get("phone") or "").strip()
+    if phone:
+        row.telefono = phone
+    ingresos = (fields.get("ingresos_rango") or "").strip()
+    if ingresos:
+        row.ingresos_rango = ingresos
+    compromiso = (fields.get("compromiso") or "").strip()
+    if compromiso:
+        marker = f"Compromiso Calendly: {compromiso}"
+        base = (row.notas or "").strip()
+        if marker not in base:
+            row.notas = f"{base}\n{marker}".strip() if base else marker
+
+
 def _find_lead_for_calendly(user_id: int, display_name: str, ig_hint: str) -> Lead | None:
     """Misma cuenta: prioriza coincidencia por IG, luego por nombre (normalizado)."""
     nkey = _norm_name_for_match(display_name)
@@ -403,6 +464,7 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
 
     start_raw_label = str(start_raw) if start_raw is not None else ""
     form_completed_at = _calendly_webhook_received_at(flat, inner_payload)
+    form_fields = _extract_calendly_form_fields(flat, inner_payload)
 
     with db_session:
         calendly_conns = [
@@ -427,6 +489,7 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
             if display_name:
                 row.nombre = display_name
             if email:
+                row.email = email
                 row.notas = _merge_calendly_email_notas(row.notas, email)
             if telefono:
                 row.telefono = telefono
@@ -436,6 +499,7 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
                 row.avatar = avatar_val
             if ingresos_lead_val is not None:
                 row.ingresos_lead = ingresos_lead_val
+            _apply_calendly_form_fields(row, form_fields)
             row.dias_para_agendar = compute_dias_para_agendar(row.primer_contacto, row.agendo)
         else:
             notas_parts = []
@@ -443,18 +507,20 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
                 notas_parts.append(f"Calendly email: {email}")
             if start_raw_label:
                 notas_parts.append(f"Cita: {start_raw_label}")
-            Lead(
+            row = Lead(
                 user_id=user_id,
                 nombre=display_name or (email.split("@")[0] if email else "Invitado Calendly"),
                 ig=ig_hint or "",
                 telefono=telefono or "",
                 avatar=avatar_val or "",
+                email=email or "",
                 ingresos_lead=ingresos_lead_val if ingresos_lead_val is not None else 0,
                 agendo=form_completed_at,
                 call=start_dt,
                 agendo_en="Chat",
                 notas="\n".join(notas_parts),
             )
+            _apply_calendly_form_fields(row, form_fields)
 
     return {"status": "ok"}
 

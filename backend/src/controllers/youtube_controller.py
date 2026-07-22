@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pony.orm import ObjectNotFound, db_session
 
 from src.db import db
+from src.schemas import YoutubeVideoPatchRequest
 from src.models import ApiConnection, Lead, YoutubeContent
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"], redirect_slashes=False)
@@ -152,6 +153,38 @@ AND trim(both from coalesce(l.punto_agenda, '')) = $tid"""
     return int(rows[0]) if rows else 0
 
 
+def _sum_pago_agenda_for_youtube(user_id: int, video_db_id: int) -> float:
+    """Suma `pago` de leads con punto_agenda = youtube:<id de fila YoutubeContent>."""
+    tid = f"youtube:{video_db_id}"
+    tbl = Lead._table_ or "lead"
+    sql = f"""coalesce(sum(coalesce(l.pago, 0)), 0) FROM {tbl} l
+WHERE l.user_id = $user_id
+AND trim(both from coalesce(l.punto_agenda, '')) = $tid"""
+    with db_session:
+        rows = db.select(sql, globals(), {"user_id": user_id, "tid": tid})
+    if not rows:
+        return 0.0
+    v = rows[0]
+    return float(v) if v is not None else 0.0
+
+
+def _cash_parts_for_youtube_row(
+    row: YoutubeContent,
+    *,
+    user_id: int,
+    skip_agg: bool = False,
+) -> tuple[float, float, float, int]:
+    """(cash_manual, cash_leads, cash_total, agendas)."""
+    vid = int(row.id)
+    cash_manual_f = float(row.cash or 0)
+    if skip_agg:
+        return cash_manual_f, 0.0, cash_manual_f, 0
+    cash_leads_f = _sum_pago_agenda_for_youtube(user_id, vid)
+    agendas_n = _count_agendas_for_youtube_video(user_id, vid)
+    cash_total_f = cash_manual_f + cash_leads_f
+    return cash_manual_f, cash_leads_f, cash_total_f, agendas_n
+
+
 def _row_to_video(row: YoutubeContent, *, user_id: int, skip_agg: bool = False) -> dict:
     ph = row.performance_history if isinstance(row.performance_history, list) else []
     cls = dict(row.classification) if isinstance(row.classification, dict) else {}
@@ -160,9 +193,13 @@ def _row_to_video(row: YoutubeContent, *, user_id: int, skip_agg: bool = False) 
         cls["description"] = raw_desc
     pub = row.published_at
     published_iso = pub.isoformat() if pub is not None else None
-    agendas_n = (
-        0 if skip_agg else _count_agendas_for_youtube_video(user_id, int(row.id))
+    cash_manual_f, cash_leads_f, cash_total_f, agendas_n = _cash_parts_for_youtube_row(
+        row, user_id=user_id, skip_agg=skip_agg
     )
+    cash_manual_i = int(round(cash_manual_f))
+    cash_leads_i = int(round(cash_leads_f))
+    cash_total_i = int(round(cash_total_f))
+    cpc = (cash_total_f / agendas_n) if agendas_n > 0 else 0.0
     return {
         "id": str(row.id),
         "title": row.title,
@@ -178,7 +215,11 @@ def _row_to_video(row: YoutubeContent, *, user_id: int, skip_agg: bool = False) 
             "performanceHistory": ph,
         },
         "classification": cls,
-        "cash": float(row.cash or 0),
+        "cash": float(cash_total_i),
+        "cash_manual": cash_manual_i,
+        "cash_leads": cash_leads_i,
+        "cash_total": cash_total_i,
+        "cpc": cpc,
         "chats": int(row.chats or 0),
         "published_at": published_iso,
         "url": row.url,
@@ -188,7 +229,12 @@ def _row_to_video(row: YoutubeContent, *, user_id: int, skip_agg: bool = False) 
     }
 
 
-def _aggregate_from_rows(video_rows: list[YoutubeContent]) -> dict[str, Any]:
+def _aggregate_from_rows(
+    video_rows: list[YoutubeContent],
+    *,
+    user_id: int,
+    skip_agg: bool = False,
+) -> dict[str, Any]:
     n = len(video_rows)
     if n == 0:
         return {
@@ -204,7 +250,10 @@ def _aggregate_from_rows(video_rows: list[YoutubeContent]) -> dict[str, Any]:
     total_views = sum(int(r.views or 0) for r in video_rows)
     total_likes = sum(int(r.likes or 0) for r in video_rows)
     total_comments = sum(int(r.comments_count or 0) for r in video_rows)
-    total_cash = sum(float(r.cash or 0) for r in video_rows)
+    total_cash = sum(
+        _cash_parts_for_youtube_row(r, user_id=user_id, skip_agg=skip_agg)[2]
+        for r in video_rows
+    )
     total_chats = sum(int(r.chats or 0) for r in video_rows)
     ctr_vals = [float(r.ctr) for r in video_rows if r.ctr is not None and float(r.ctr) > 0]
     avg_ctr = sum(ctr_vals) / len(ctr_vals) if ctr_vals else 0.0
@@ -423,7 +472,7 @@ def list_youtube_videos(
 
     filtered_rows.sort(key=_row_pub_sort, reverse=True)
 
-    aggregates = _aggregate_from_rows(filtered_rows)
+    aggregates = _aggregate_from_rows(filtered_rows, user_id=uid, skip_agg=skip_agg)
     total_count = len(filtered_rows)
     total_pages = (total_count + page_size - 1) // page_size if total_count else 0
     page_eff = page
@@ -483,7 +532,7 @@ def youtube_metrics(
     total_views = sum(int(r.views or 0) for r in month_rows)
     total_likes = sum(int(r.likes or 0) for r in month_rows)
     total_comments = sum(int(r.comments_count or 0) for r in month_rows)
-    total_cash = sum(float(r.cash or 0) for r in month_rows)
+    total_cash = sum(_cash_parts_for_youtube_row(r, user_id=uid, skip_agg=False)[2] for r in month_rows)
     total_chats = sum(int(r.chats or 0) for r in month_rows)
     ctr_vals = [float(r.ctr) for r in month_rows if r.ctr is not None and float(r.ctr) > 0]
     avg_ctr = sum(ctr_vals) / len(ctr_vals) if ctr_vals else 0.0
@@ -500,3 +549,29 @@ def youtube_metrics(
         "avg_views": (total_views / n) if n else 0.0,
         "avg_ctr": avg_ctr,
     }
+
+
+@router.patch("/videos/{video_id}")
+def patch_youtube_video(
+    video_id: int,
+    body: YoutubeVideoPatchRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> dict[str, Any]:
+    uid = _uid_int(user_id)
+    payload: dict[str, Any] = (
+        body.model_dump(exclude_unset=True)
+        if hasattr(body, "model_dump")
+        else body.dict(exclude_unset=True)
+    )
+    if not payload:
+        raise HTTPException(status_code=400, detail="Sin campos para actualizar.")
+    now = datetime.utcnow()
+    with db_session:
+        try:
+            row = YoutubeContent.get(id=video_id, user_id=uid)
+        except ObjectNotFound:
+            raise HTTPException(status_code=404, detail="Video no encontrado.")
+        if "cash_manual" in payload and payload["cash_manual"] is not None:
+            row.cash = float(max(0, int(payload["cash_manual"])))
+        row.updated_at = now
+        return _row_to_video(row, user_id=uid, skip_agg=False)

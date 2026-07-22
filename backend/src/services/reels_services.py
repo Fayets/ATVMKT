@@ -603,6 +603,18 @@ AND EXISTS (
             preview_n = len(_range_preview_media.get(user_id, []))
         if preview_n > 0:
             base["range_preview_count"] = preview_n
+        from src.services.instagram_token_utils import resolve_instagram_token_dates
+
+        try:
+            with db_session:
+                conn = ApiConnection.get(user_id=int(user_id), platform="instagram")
+            token_dates = resolve_instagram_token_dates(conn)
+            if token_dates.get("token_expires_at"):
+                base["token_expires_at"] = str(token_dates["token_expires_at"])
+            if token_dates.get("token_saved_at"):
+                base["token_saved_at"] = str(token_dates["token_saved_at"])
+        except ObjectNotFound:
+            pass
         return base
 
     def get_metrics(self, user_id: str, month: str | None, months_csv: str | None = None) -> dict[str, int]:
@@ -655,7 +667,7 @@ AND EXISTS (
         plays_result = 0
         for plays_metric in ["video_views", "views"]:
             plays_url = (
-                f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
+                f"https://graph.facebook.com/v25.0/{urllib.parse.quote(media_id)}/insights"
                 f"?metric={urllib.parse.quote(plays_metric)}"
                 f"&access_token={urllib.parse.quote(access_token)}"
             )
@@ -684,7 +696,7 @@ AND EXISTS (
             "total_interactions",
         ]:
             insights_url = (
-                f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}/insights"
+                f"https://graph.facebook.com/v25.0/{urllib.parse.quote(media_id)}/insights"
                 f"?metric={urllib.parse.quote(metric_name)}"
                 f"&access_token={urllib.parse.quote(access_token)}"
             )
@@ -709,7 +721,7 @@ AND EXISTS (
         if like_count is None or comments_count is None:
             try:
                 mf_url = (
-                    f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}"
+                    f"https://graph.facebook.com/v25.0/{urllib.parse.quote(media_id)}"
                     "?fields=like_count,comments_count"
                     f"&access_token={urllib.parse.quote(access_token)}"
                 )
@@ -801,7 +813,7 @@ AND EXISTS (
         headers = {"Accept": "application/json"}
         q_fields = urllib.parse.quote(self._ig_media_item_fields_brief(), safe=",")
         url = (
-            f"https://graph.facebook.com/v19.0/{urllib.parse.quote(media_id)}"
+            f"https://graph.facebook.com/v25.0/{urllib.parse.quote(media_id)}"
             f"?fields={q_fields}"
             f"&access_token={urllib.parse.quote(access_token)}"
         )
@@ -826,7 +838,7 @@ AND EXISTS (
         list_fields = "id,media_type,timestamp" if minimal_preview else self._ig_media_item_fields_brief()
         q_fields = urllib.parse.quote(list_fields, safe=",")
         media_url = (
-            f"https://graph.facebook.com/v19.0/{urllib.parse.quote(ig_user_id)}/media"
+            f"https://graph.facebook.com/v25.0/{urllib.parse.quote(ig_user_id)}/media"
             f"?fields={q_fields}"
             f"&access_token={urllib.parse.quote(access_token)}"
         )

@@ -1,4 +1,4 @@
-"""APScheduler: intervalos dinámicos para auto_sync_stories y auto_refresh_reels_metrics."""
+"""APScheduler: intervalos dinámicos para auto_sync_stories, auto_refresh_reels_metrics y Calendly."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.services.sync_settings_service import (
+    get_calendly_interval_minutes,
     get_reels_interval_minutes,
     get_stories_interval_minutes,
 )
@@ -16,6 +17,7 @@ from src.services.sync_settings_service import (
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
 STORIES_JOB_ID = "auto_sync_stories"
 REELS_JOB_ID = "auto_refresh_reels_metrics"
+CALENDLY_JOB_ID = "auto_sync_calendly"
 
 _scheduler: Any | None = None
 
@@ -40,6 +42,7 @@ def apply_sync_schedules(*, stories_run_immediately: bool = False) -> None:
         return
     stories_m = get_stories_interval_minutes()
     reels_m = get_reels_interval_minutes()
+    calendly_m = get_calendly_interval_minutes()
 
     stories_job = _scheduler.get_job(STORIES_JOB_ID)
     if stories_job is not None:
@@ -51,3 +54,10 @@ def apply_sync_schedules(*, stories_run_immediately: bool = False) -> None:
     reels_job = _scheduler.get_job(REELS_JOB_ID)
     if reels_job is not None:
         _scheduler.reschedule_job(REELS_JOB_ID, trigger=IntervalTrigger(minutes=reels_m))
+
+    calendly_job = _scheduler.get_job(CALENDLY_JOB_ID)
+    if calendly_job is not None:
+        _scheduler.reschedule_job(
+            CALENDLY_JOB_ID,
+            trigger=IntervalTrigger(minutes=calendly_m),
+        )

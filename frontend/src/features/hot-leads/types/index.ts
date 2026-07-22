@@ -1,3 +1,5 @@
+import { AVATAR_COLORS, AVATAR_OPTIONS } from '@/shared/constants/avatar-defaults'
+
 export type HotLead = {
   id: string
   nombre: string
@@ -23,26 +25,7 @@ export type HotLeadColumnDef = {
   colors?: Record<string, string>
 }
 
-export const AVATAR_OPTIONS = [
-  '',
-  'Experto en info',
-  'Dueño de agencia',
-  'Dueño de negocio',
-  'Habilidades de alto valor',
-  'Creador de contenido',
-  'Creador con infoproducto',
-  'Otro',
-]
-
-export const AVATAR_COLORS: Record<string, string> = {
-  'Experto en info': '#3B82F6',
-  'Dueño de agencia': '#A855F7',
-  'Dueño de negocio': '#F59E0B',
-  'Habilidades de alto valor': '#EC4899',
-  'Creador de contenido': '#22C55E',
-  'Creador con infoproducto': '#06B6D4',
-  'Otro': '#6B7280',
-}
+export { AVATAR_COLORS, AVATAR_OPTIONS }
 
 export const SEGUIDORES_OPTIONS = ['', '0-2k', '3-5k', '6-10k', '10-20k', '20-50k', '50-100k', '+100k']
 

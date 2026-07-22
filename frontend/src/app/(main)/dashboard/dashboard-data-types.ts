@@ -31,11 +31,22 @@ export type DashData = {
   cash: number
   prevCash: number
   prevCashAtDay: number
+  /** Total chats por canal (reels + historias + bio + youtube + otros); independiente de SetterReport. */
   chats: number
   prevChats: number
   reelsChats: number
   historiasChats: number
   bioChats: number
+  youtubeChats: number
+  otrosChats: number
+  /** Mes completo vía /reels/metrics y /stories/metrics (misma fuente que embudo Ventas). */
+  reelsChatsMetrics: number
+  storiesChatsMetrics: number
+  prevReelsChatsMetrics: number
+  prevStoriesChatsMetrics: number
+  prevBioChats: number
+  prevYoutubeChats: number
+  prevOtrosChats: number
   igCash: number
   ytCash: number
   refCash: number
@@ -51,6 +62,8 @@ export type DashData = {
   dailyAgendas: number[]
   dailyCierres: number[]
   rawLeads: LeadRow[]
+  /** Leads del mes con y sin agendo (conteo chats YouTube / Otros). */
+  rawAllLeads: LeadRow[]
   rawContent: DashContentRow[]
   rawBio: DashBioRow[]
   calls: DashCall[]
