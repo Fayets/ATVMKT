@@ -10,7 +10,7 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      - ./backend/media:/app/media
+      - /opt/atv-mkt/media/stories:/app/media/stories
 
   frontend:
     build:
