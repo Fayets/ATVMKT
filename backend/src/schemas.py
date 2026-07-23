@@ -864,3 +864,25 @@ class AgentContenidoOut(BaseModel):
     youtube: AgentContenidoYoutubeOut
     bio: AgentContenidoBioOut
     keywords_top: list[AgentContenidoKeywordTopOut] = Field(default_factory=list)
+
+
+class AgentLlamadaHoyItemOut(BaseModel):
+    hora: str
+    lead: str
+    closer: str
+    link_llamada: str
+
+
+class AgentLlamadasHoyOut(BaseModel):
+    fecha: str
+    llamadas: list[AgentLlamadaHoyItemOut] = Field(default_factory=list)
+
+
+class AgentProximaLlamadaItemOut(BaseModel):
+    hora: str
+    lead: str
+    closer: str
+
+
+class AgentProximasLlamadasOut(BaseModel):
+    llamadas: list[AgentProximaLlamadaItemOut] = Field(default_factory=list)

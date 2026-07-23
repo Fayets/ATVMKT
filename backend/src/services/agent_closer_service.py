@@ -1,0 +1,78 @@
+"""Llamadas del closer para el agente externo (bot WhatsApp)."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+from pony.orm import db_session
+
+from src.models import Lead
+
+AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def _naive_now_ar() -> datetime:
+    return datetime.now(AR_TZ).replace(tzinfo=None)
+
+
+def _today_bounds_ar() -> tuple[datetime, datetime, date]:
+    hoy = datetime.now(AR_TZ).date()
+    inicio = datetime.combine(hoy, time.min)
+    fin = datetime.combine(hoy, time.max)
+    return inicio, fin, hoy
+
+
+def _fmt_hora(call: datetime | None) -> str:
+    if call is None:
+        return ""
+    return call.strftime("%H:%M")
+
+
+def _leads_with_call(user_id: int) -> list[Lead]:
+    return [
+        l
+        for l in list(Lead.select())
+        if int(l.user_id) == user_id and l.call is not None
+    ]
+
+
+@db_session
+def list_llamadas_hoy(user_id: int) -> dict:
+    inicio, fin, hoy = _today_bounds_ar()
+    rows = [l for l in _leads_with_call(user_id) if inicio <= l.call <= fin]
+    rows.sort(key=lambda l: l.call or datetime.min)
+    return {
+        "fecha": hoy.isoformat(),
+        "llamadas": [
+            {
+                "hora": _fmt_hora(l.call),
+                "lead": (l.nombre or "").strip(),
+                "closer": (l.closer or "").strip(),
+                "link_llamada": (l.link_llamada or "").strip(),
+            }
+            for l in rows
+        ],
+    }
+
+
+@db_session
+def list_proximas_llamadas(user_id: int, ventana: int) -> dict:
+    ahora = _naive_now_ar()
+    limite = ahora + timedelta(minutes=ventana)
+    rows = [
+        l
+        for l in _leads_with_call(user_id)
+        if ahora <= l.call <= limite and not bool(l.recordatorio_enviado)
+    ]
+    resultado = [
+        {
+            "hora": _fmt_hora(l.call),
+            "lead": (l.nombre or "").strip(),
+            "closer": (l.closer or "").strip(),
+        }
+        for l in rows
+    ]
+    for l in rows:
+        l.recordatorio_enviado = True
+    return {"llamadas": resultado}

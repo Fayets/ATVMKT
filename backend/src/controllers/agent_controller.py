@@ -5,8 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from src.agent_auth import get_agent_auth, get_agent_user_id
-from src.schemas import AgentContenidoOut, AgentResumenOut
+from src.schemas import (
+    AgentContenidoOut,
+    AgentLlamadasHoyOut,
+    AgentProximasLlamadasOut,
+    AgentResumenOut,
+)
 from src.services.agent_analytics_service import build_miembro, build_resumen, current_month_ar
+from src.services.agent_closer_service import list_llamadas_hoy, list_proximas_llamadas
 from src.services.agent_content_service import build_contenido
 
 router = APIRouter(prefix="/api/agent", tags=["agent"], redirect_slashes=False)
@@ -78,3 +84,22 @@ def agent_miembro(
         return JSONResponse(content=result)
 
     return JSONResponse(content=result)
+
+
+@router.get("/closer/llamadas-hoy", response_model=AgentLlamadasHoyOut)
+def agent_closer_llamadas_hoy(
+    _: Annotated[None, Depends(get_agent_auth)],
+) -> AgentLlamadasHoyOut:
+    uid = get_agent_user_id()
+    payload = list_llamadas_hoy(uid)
+    return AgentLlamadasHoyOut(**payload)
+
+
+@router.get("/closer/proximas-llamadas", response_model=AgentProximasLlamadasOut)
+def agent_closer_proximas_llamadas(
+    _: Annotated[None, Depends(get_agent_auth)],
+    ventana: int = Query(default=30, ge=1, le=24 * 60, description="Minutos hacia adelante"),
+) -> AgentProximasLlamadasOut:
+    uid = get_agent_user_id()
+    payload = list_proximas_llamadas(uid, ventana)
+    return AgentProximasLlamadasOut(**payload)

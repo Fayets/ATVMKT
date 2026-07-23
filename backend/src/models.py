@@ -195,6 +195,7 @@ class Lead(db.Entity):
     debe = Optional(float, default=0)
     estado = Optional(str, default="")
     notas = Optional(str, default="")
+    recordatorio_enviado = Optional(bool, default=False)
     created_at = Required(datetime, default=lambda: datetime.utcnow())
 
 
