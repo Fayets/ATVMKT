@@ -25,6 +25,7 @@ const titles: Record<string, string> = {
   '/conexiones': 'Conexiones API',
   '/ajustes/cuenta': 'Mi cuenta',
   '/ajustes/tasa-refresco': 'Tasa de refresco',
+  '/admin/correccion-closer': 'Corrección reportes',
 }
 
 const subtitles: Record<string, string> = {
@@ -41,6 +42,7 @@ const subtitles: Record<string, string> = {
   '/panel-diario': 'Dashboard',
   '/ajustes/cuenta': 'Ajustes',
   '/ajustes/tasa-refresco': 'Ajustes',
+  '/admin/correccion-closer': 'Admin',
 }
 
 type TopbarProps = {
@@ -62,6 +64,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
     '/conexiones',
     '/ajustes/cuenta',
     '/ajustes/tasa-refresco',
+    '/admin/correccion-closer',
     '/team',
     '/team/reportes',
     '/team/historial-reportes',

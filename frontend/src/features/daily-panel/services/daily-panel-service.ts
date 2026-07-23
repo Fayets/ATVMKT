@@ -1,6 +1,6 @@
 import { apiFetch } from '@/lib/api'
 import { DEFAULT_DAILY_CLOSER } from '../constants'
-import type { DailyCall, DailyCallsResponse } from '../types'
+import type { DailyCall, DailyCallsResponse, ManualCallInput } from '../types'
 
 type ApiDailyCallRow = {
   id: number
@@ -14,6 +14,13 @@ type ApiDailyCallRow = {
   owed?: number
   program_offered?: string
   programada_ofrecido_llamada?: string
+  calificacion_llamada?: string
+}
+
+function normalizeCalificacion(raw: string | undefined): DailyCall['calificacion_llamada'] {
+  const val = (raw || '').trim().toLowerCase()
+  if (val === 'calificado' || val === 'descalificado') return val
+  return ''
 }
 
 export async function getTeamClosers(): Promise<string[]> {
@@ -82,6 +89,7 @@ export async function getDailyCalls(
       closer: effective,
       call_link: row.link_llamada || row.call_link || '',
       status: row.status,
+      calificacion_llamada: normalizeCalificacion(row.calificacion_llamada),
       program_offered: (row.program_offered || '').trim(),
       programada_ofrecido_llamada: (row.programada_ofrecido_llamada || '').trim(),
       payment: Number(row.payment) || 0,
@@ -96,6 +104,46 @@ export async function getDailyCalls(
   }
 
   return { fecha: raw.fecha || '', llamadas }
+}
+
+export async function createManualCall(input: ManualCallInput): Promise<void> {
+  const res = await apiFetch('/leads/manual-call', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      client_name: input.client_name.trim(),
+      closer: input.closer.trim(),
+      hora: input.hora.trim(),
+      ig_handle: input.ig_handle?.trim() || null,
+    }),
+  })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo agregar la llamada.'
+    throw new Error(detail)
+  }
+}
+
+export async function patchLeadCalificacion(
+  leadId: number,
+  calificacion: DailyCall['calificacion_llamada'],
+): Promise<void> {
+  const res = await apiFetch(`/leads/${encodeURIComponent(String(leadId))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ calificacion_llamada: calificacion || '' }),
+  })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo guardar la calificación.'
+    throw new Error(detail)
+  }
 }
 
 export async function patchLeadStatus(leadId: number, status: string): Promise<void> {
@@ -234,4 +282,25 @@ export function buildCloserOptions(closerNames: string[]): string[] {
   return [...new Set(closerNames.map((n) => n.trim()).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b, 'es'),
   )
+}
+
+export async function generateCloserReportsForDay(fecha: string): Promise<{
+  generated: number
+  discord_sent: boolean
+}> {
+  const q = new URLSearchParams({ fecha })
+  const res = await apiFetch(`/team/closer-reports/generate-day?${q}`, { method: 'POST' })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo generar el reporte del día.'
+    throw new Error(detail)
+  }
+  const data = raw as { generated?: number; discord_sent?: boolean }
+  return {
+    generated: Number(data.generated) || 0,
+    discord_sent: Boolean(data.discord_sent),
+  }
 }

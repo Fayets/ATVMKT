@@ -271,12 +271,6 @@ function ReportDetail({ r }: { r: ReportRow }) {
         <dt className="font-bold text-[var(--text)]">Ingreso</dt>
         <dd className="font-mono-num text-[var(--text)]">{formatCash(r.ingreso)}</dd>
       </div>
-      {r.notas ? (
-        <div className="sm:col-span-3">
-          <dt className="font-bold text-[var(--text)]">Notas</dt>
-          <dd className="whitespace-pre-wrap text-[var(--text)]">{r.notas}</dd>
-        </div>
-      ) : null}
     </dl>
   )
 }

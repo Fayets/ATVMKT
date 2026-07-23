@@ -100,11 +100,6 @@ class DiscordServices:
                     ),
                     "inline": False,
                 },
-                {
-                    "name": "NOTAS",
-                    "value": body.get("notas") or "—",
-                    "inline": False,
-                },
             ],
         }
 

@@ -1,5 +1,5 @@
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -16,8 +16,9 @@ from src.schemas import (
     LeadsListResponse,
     LeadsMetricsOut,
     LlamadasHoyOut,
+    ManualCallCreateRequest,
 )
-from src.services.agent_closer_service import list_llamadas_hoy
+from src.services.agent_closer_service import AR_TZ, list_llamadas_hoy
 from src.services.programs_services import (
     build_program_norm_price_map,
     program_price_usd_for_prog_raw,
@@ -387,6 +388,61 @@ def create_lead(
         return _to_lead_out(row, norm_prices)
 
 
+def _parse_call_hora_today(hora: str) -> datetime:
+    raw = (hora or "").strip()
+    match = re.fullmatch(r"(\d{1,2}):(\d{2})", raw)
+    if not match:
+        raise HTTPException(status_code=400, detail="Hora inválida (usar HH:MM).")
+    hour = int(match.group(1))
+    minute = int(match.group(2))
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise HTTPException(status_code=400, detail="Hora inválida (usar HH:MM).")
+    hoy = datetime.now(AR_TZ).date()
+    return datetime.combine(hoy, time(hour=hour, minute=minute))
+
+
+def _normalize_calificacion_llamada(raw: str | None) -> str:
+    val = (raw or "").strip().lower()
+    if val in ("calificado", "descalificado"):
+        return val
+    return ""
+
+
+@router.post("/manual-call", response_model=LeadOut)
+def create_manual_call(
+    body: ManualCallCreateRequest,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> LeadOut:
+    """Llamada agregada a mano en el panel diario; el lead queda en la tabla leads."""
+    try:
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="user_id inválido") from e
+
+    call_at = _parse_call_hora_today(body.hora)
+    now_ar = datetime.now(AR_TZ).replace(tzinfo=None)
+    anchor = datetime(now_ar.year, now_ar.month, 15, 15, 0, 0)
+
+    with db_session:
+        row = LeadEntity(
+            user_id=uid,
+            nombre=(body.client_name or "").strip(),
+            ig=(body.ig_handle or "").strip(),
+            origen="Manual",
+            via=_normalize_via_value(uid, "Panel diario"),
+            status="Pendiente",
+            estado="Pendiente",
+            closer=(body.closer or "").strip(),
+            fecha_bot=anchor,
+            agendo=now_ar,
+            agendo_en="Panel diario",
+            call=call_at,
+        )
+        _sync_dias_para_agendar(row)
+        norm_prices = build_program_norm_price_map(uid)
+        return _to_lead_out(row, norm_prices)
+
+
 def _parse_month_query(month: str | None) -> tuple[int, int] | None:
     if not month or not str(month).strip():
         return None
@@ -565,6 +621,8 @@ def patch_lead(
             row.setter = (str(data["setter"]).strip() if data["setter"] is not None else "") or ""
         if "closer" in data:
             row.closer = (str(data["closer"]).strip() if data["closer"] is not None else "") or ""
+        if "calificacion_llamada" in data:
+            row.calificacion_llamada = _normalize_calificacion_llamada(data["calificacion_llamada"])
 
         _sync_dias_para_agendar(row)
 

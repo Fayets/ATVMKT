@@ -19,11 +19,16 @@ type Props = {
   loading: boolean
   onStatusChange: (leadId: number, status: string) => Promise<void>
   onCloserChange: (leadId: number, closer: string) => Promise<void>
+  onCalificacionChange: (
+    leadId: number,
+    calificacion: DailyCall['calificacion_llamada'],
+  ) => Promise<void>
   onFathomLinkChange: (leadId: number, callLink: string | null) => Promise<void>
   onPaymentChange: (leadId: number, payment: number) => Promise<void>
   onOwedChange: (leadId: number, owed: number) => Promise<void>
   onProgramOfferedChange: (leadId: number, program: string) => Promise<void>
   onProgramadaOfrecidoChange: (leadId: number, program: string) => Promise<void>
+  onAddManualCall?: () => void
 }
 
 function programSelectOptions(programOptions: string[], current: string): string[] {
@@ -132,6 +137,51 @@ function CloserSelect({
         </option>
       ))}
     </select>
+  )
+}
+
+function CalificacionToggle({
+  leadId,
+  value,
+  onChange,
+}: {
+  leadId: number
+  value: DailyCall['calificacion_llamada']
+  onChange: (leadId: number, calificacion: DailyCall['calificacion_llamada']) => Promise<void>
+}) {
+  const [saving, setSaving] = useState(false)
+
+  const pick = async (next: DailyCall['calificacion_llamada']) => {
+    if (next === value || saving) return
+    setSaving(true)
+    try {
+      await onChange(leadId, next)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="neo-calls__calif-toggle" aria-label={`Calificación de lead ${leadId}`}>
+      <button
+        type="button"
+        disabled={saving}
+        className={`neo-calls__calif-btn neo-calls__calif-btn--cal${value === 'calificado' ? ' is-on' : ''}`}
+        title="Marcar como calificado"
+        onClick={() => void pick(value === 'calificado' ? '' : 'calificado')}
+      >
+        Cal
+      </button>
+      <button
+        type="button"
+        disabled={saving}
+        className={`neo-calls__calif-btn neo-calls__calif-btn--desc${value === 'descalificado' ? ' is-on' : ''}`}
+        title="Marcar como descalificado"
+        onClick={() => void pick(value === 'descalificado' ? '' : 'descalificado')}
+      >
+        Desc
+      </button>
+    </div>
   )
 }
 
@@ -389,11 +439,13 @@ export function DailyCallsTable({
   loading,
   onStatusChange,
   onCloserChange,
+  onCalificacionChange,
   onFathomLinkChange,
   onPaymentChange,
   onOwedChange,
   onProgramOfferedChange,
   onProgramadaOfrecidoChange,
+  onAddManualCall,
 }: Props) {
   if (loading && items.length === 0) {
     return <div className="neo-panel__loading">Cargando llamadas</div>
@@ -401,18 +453,33 @@ export function DailyCallsTable({
 
   if (items.length === 0) {
     return (
-      <div className="neo-panel__empty">No hay llamadas agendadas para hoy.</div>
+      <div className="neo-panel__empty neo-panel__empty--actions">
+        <p>No hay llamadas agendadas para hoy.</p>
+        {onAddManualCall ? (
+          <button type="button" className="neo-panel__btn" onClick={onAddManualCall}>
+            + Agregar llamada manual
+          </button>
+        ) : null}
+      </div>
     )
   }
 
   return (
     <div className="neo-calls">
+      {onAddManualCall ? (
+        <div className="neo-calls__toolbar">
+          <button type="button" className="neo-panel__btn neo-panel__btn--ghost" onClick={onAddManualCall}>
+            + Agregar llamada manual
+          </button>
+        </div>
+      ) : null}
       <div className="neo-calls__head">
         <div>Hora</div>
         <div>Lead</div>
         <div>Closer</div>
         <div>Link Fathom</div>
         <div>Status</div>
+        <div>Calif. / Desc.</div>
         <div>Prog. comprado</div>
         <div>Prog. ofrecido</div>
         <div>Pago</div>
@@ -433,6 +500,11 @@ export function DailyCallsTable({
           />
           <FathomLinkCell leadId={row.id} value={row.call_link} onSave={onFathomLinkChange} />
           <StatusSelect leadId={row.id} status={row.status} onStatusChange={onStatusChange} />
+          <CalificacionToggle
+            leadId={row.id}
+            value={row.calificacion_llamada}
+            onChange={onCalificacionChange}
+          />
           <ProgramSelect
             leadId={row.id}
             value={row.program_offered}

@@ -144,12 +144,12 @@ export function Sidebar({ className }: SidebarProps) {
           </div>
           <div className="flex shrink-0 items-center gap-1">
             <Link
-              href="/ajustes/cuenta"
+              href="/admin/correccion-closer"
               prefetch={false}
-              aria-label="Mi cuenta"
-              title="Mi cuenta"
+              aria-label="Corrección reportes"
+              title="Corrección reportes (admin)"
               className={`inline-flex h-6 w-6 items-center justify-center rounded bg-transparent transition-all ${
-                pathname === '/ajustes/cuenta'
+                pathname === '/admin/correccion-closer'
                   ? 'bg-[var(--accent-faint)] text-[var(--accent)]'
                   : 'text-[var(--accent)] hover:bg-[var(--accent-faint)]'
               }`}

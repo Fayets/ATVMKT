@@ -194,6 +194,7 @@ class Lead(db.Entity):
     pago = Optional(float, default=0)
     debe = Optional(float, default=0)
     estado = Optional(str, default="")
+    calificacion_llamada = Optional(str, default="")
     notas = Optional(str, default="")
     recordatorio_enviado = Optional(bool, default=False)
     created_at = Required(datetime, default=lambda: datetime.utcnow())

@@ -39,11 +39,18 @@ def _leads_with_call(user_id: int) -> list[Lead]:
 
 @db_session
 def list_llamadas_hoy(user_id: int) -> dict:
-    inicio, fin, hoy = _today_bounds_ar()
+    hoy = datetime.now(AR_TZ).date()
+    return list_llamadas_dia(user_id, hoy)
+
+
+@db_session
+def list_llamadas_dia(user_id: int, fecha: date) -> dict:
+    inicio = datetime.combine(fecha, time.min)
+    fin = datetime.combine(fecha, time.max)
     rows = [l for l in _leads_with_call(user_id) if inicio <= l.call <= fin]
     rows.sort(key=lambda l: l.call or datetime.min)
     return {
-        "fecha": hoy.isoformat(),
+        "fecha": fecha.isoformat(),
         "llamadas": [_llamada_item(l) for l in rows],
     }
 
@@ -61,6 +68,7 @@ def _llamada_item(l: Lead) -> dict:
         "owed": float(l.debe or 0),
         "program_offered": (l.programa_ofrecido or "").strip(),
         "programada_ofrecido_llamada": (l.programada_ofrecido_llamada or "").strip(),
+        "calificacion_llamada": (getattr(l, "calificacion_llamada", None) or "").strip(),
     }
 
 

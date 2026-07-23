@@ -563,6 +563,23 @@ class LeadPatchRequest(BaseModel):
     ingresos_rango: str | None = None
     setter: str | None = None
     closer: str | None = None
+    calificacion_llamada: str | None = Field(
+        default=None,
+        description='"" | "calificado" | "descalificado" — panel diario.',
+    )
+
+
+class ManualCallCreateRequest(BaseModel):
+    """Alta de llamada manual del panel diario (lead visible en tabla leads)."""
+
+    client_name: str = Field(min_length=1, max_length=500)
+    closer: str = Field(min_length=1, max_length=200)
+    hora: str = Field(
+        min_length=4,
+        max_length=5,
+        description="Hora Argentina HH:MM para la llamada de hoy.",
+    )
+    ig_handle: str | None = None
 
 
 class LeadCreateRequest(BaseModel):
@@ -877,6 +894,7 @@ class AgentLlamadaHoyItemOut(BaseModel):
     owed: float = 0
     program_offered: str = ""
     programada_ofrecido_llamada: str = ""
+    calificacion_llamada: str = ""
 
 
 class AgentLlamadasHoyOut(BaseModel):

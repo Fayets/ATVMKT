@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from decouple import config
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pony.orm import db_session
 
+from src.controllers.admin_panel_controller import router as admin_panel_router
 from src.controllers.agent_controller import router as agent_router
 from src.controllers.auth_controller import router as auth_router
 from src.controllers.bio_controller import router as bio_router
@@ -51,8 +53,10 @@ from src.services.sync_settings_service import (
     get_stories_interval_minutes,
 )
 from src.services.stories_service import StoriesService
+from src.services.closer_report_auto_service import generate_daily_reports_all_users
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+CLOSER_DAILY_REPORT_JOB_ID = "auto_closer_daily_reports"
 scheduler = AsyncIOScheduler()
 
 
@@ -127,6 +131,14 @@ async def auto_sync_calendly() -> None:
         print(f"[scheduler] Error general en auto_sync_calendly: {e}")
 
 
+async def auto_generate_closer_daily_reports() -> None:
+    """Reporte de ventas del closer desde panel diario (23:00 Argentina)."""
+    try:
+        generate_daily_reports_all_users(send_discord=True)
+    except Exception as e:
+        print(f"[scheduler] Error en auto_generate_closer_daily_reports: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
@@ -152,6 +164,12 @@ async def lifespan(_: FastAPI):
         id=CALENDLY_JOB_ID,
         replace_existing=True,
     )
+    scheduler.add_job(
+        auto_generate_closer_daily_reports,
+        trigger=CronTrigger(hour=23, minute=0, timezone=AR_TZ),
+        id=CLOSER_DAILY_REPORT_JOB_ID,
+        replace_existing=True,
+    )
     bind_sync_scheduler(scheduler)
     apply_sync_schedules()
     scheduler.start()
@@ -166,6 +184,7 @@ async def lifespan(_: FastAPI):
         f"[scheduler] Auto-sync Calendly cada {get_calendly_interval_minutes()} min "
         f"(check liviano → sync solo si hay novedades)"
     )
+    print("[scheduler] Reporte closer ventas automático diario a las 23:00 (Argentina)")
     yield
     scheduler.shutdown()
 
@@ -188,6 +207,7 @@ app.add_middleware(
 )
 
 # app.include_router(health_router)
+app.include_router(admin_panel_router)
 app.include_router(auth_router)
 app.include_router(agent_router)
 app.include_router(conexiones_router)

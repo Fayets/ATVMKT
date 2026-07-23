@@ -1,7 +1,7 @@
 import calendar
 import re
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -10,6 +10,12 @@ from pydantic import BaseModel, Field
 from starlette.responses import Response
 
 from src.models import CloserReport, SeguimientoReport, SetterReport, TeamMember
+from src.services.closer_report_auto_service import (
+    AR_TZ,
+    generate_closer_report_for_member,
+    generate_daily_reports_for_user,
+    preview_closer_report,
+)
 from src.services.discord_service import DiscordServices
 from src.team_reports_pdf import build_team_reports_pdf, fecha_iso_a_dd_mm_yyyy
 
@@ -57,7 +63,6 @@ def _setter_report_discord_payload(r: SetterReport) -> dict[str, Any]:
 
 
 def _closer_ventas_discord_payload(r: CloserReport) -> dict[str, Any]:
-    notas = _notas_str(r.notas)
     return {
         "fecha": r.fecha.isoformat(),
         "llamadas_agendadas": int(r.llamadas_agendadas),
@@ -66,7 +71,6 @@ def _closer_ventas_discord_payload(r: CloserReport) -> dict[str, Any]:
         "calificados": int(r.calificados),
         "descalificados": int(r.descalificados),
         "ingreso": float(r.ingreso),
-        "notas": notas or None,
     }
 
 
@@ -279,17 +283,9 @@ class CloserReportBody(BaseModel):
     llamadas_agendadas: int = 0
     shows: int = 0
     cierres: int = 0
-    shows_organico: int = 0
-    shows_ads: int = 0
-    cierres_organico: int = 0
-    cierres_ads: int = 0
-    reservas: int = 0
-    seguimiento: int = 0
-    facturacion: float = 0
     calificados: int = 0
     descalificados: int = 0
     ingreso: float = 0
-    notas: str | None = None
 
 
 class SeguimientoReportBody(BaseModel):
@@ -297,6 +293,33 @@ class SeguimientoReportBody(BaseModel):
     fecha: date
     nombre_lead: str = Field(min_length=1, max_length=500)
     monto: float = Field(ge=0)
+
+
+class CloserReportPreviewOut(BaseModel):
+    llamadas_agendadas: int = 0
+    shows: int = 0
+    cierres: int = 0
+    calificados: int = 0
+    descalificados: int = 0
+    ingreso: float = 0
+
+
+class CloserReportGenerateOut(BaseModel):
+    id: int
+    updated: bool
+    llamadas_agendadas: int = 0
+    shows: int = 0
+    cierres: int = 0
+    calificados: int = 0
+    descalificados: int = 0
+    ingreso: float = 0
+    discord_sent: bool = False
+
+
+class CloserReportGenerateDayOut(BaseModel):
+    fecha: str
+    generated: int
+    discord_sent: bool = False
 
 
 class ReportSavedOut(BaseModel):
@@ -616,24 +639,82 @@ def notify_closer_report_discord(
     return DiscordNotifyOut(sent=True, detail="Reporte enviado a Discord.")
 
 
+@router.get("/closer-reports/preview", response_model=CloserReportPreviewOut)
+def closer_report_preview(
+    member_id: int = Query(...),
+    fecha: date = Query(...),
+    user_id: str = Depends(require_user_id),
+) -> CloserReportPreviewOut:
+    uid = _parse_uid(user_id)
+    try:
+        metrics = preview_closer_report(uid, member_id, fecha)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return CloserReportPreviewOut(**metrics)
+
+
+@router.post("/closer-reports/generate", response_model=CloserReportGenerateOut)
+def generate_closer_report(
+    member_id: int = Query(...),
+    fecha: date = Query(...),
+    send_discord: bool = Query(True, description="Enviar a Discord al generar"),
+    user_id: str = Depends(require_user_id),
+) -> CloserReportGenerateOut:
+    uid = _parse_uid(user_id)
+    with db_session:
+        _get_active_member(uid, member_id, "closer")
+    try:
+        report, updated = generate_closer_report_for_member(
+            uid,
+            member_id,
+            fecha,
+            send_discord=send_discord,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    discord_sent = send_discord and discord_service.is_closer_ventas_webhook_configured()
+    return CloserReportGenerateOut(
+        id=report.id,
+        updated=updated,
+        llamadas_agendadas=int(report.llamadas_agendadas),
+        shows=int(report.shows),
+        cierres=int(report.cierres),
+        calificados=int(report.calificados),
+        descalificados=int(report.descalificados),
+        ingreso=float(report.ingreso),
+        discord_sent=discord_sent,
+    )
+
+
+@router.post("/closer-reports/generate-day", response_model=CloserReportGenerateDayOut)
+def generate_closer_reports_day(
+    fecha: date | None = Query(None, description="YYYY-MM-DD; default hoy Argentina"),
+    send_discord: bool = Query(True, description="Enviar a Discord al generar"),
+    user_id: str = Depends(require_user_id),
+) -> CloserReportGenerateDayOut:
+    uid = _parse_uid(user_id)
+    target = fecha or datetime.now(AR_TZ).date()
+    count = generate_daily_reports_for_user(uid, target, send_discord=send_discord)
+    if count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay llamadas en el panel para generar reportes en esta fecha.",
+        )
+    discord_sent = send_discord and discord_service.is_closer_ventas_webhook_configured()
+    return CloserReportGenerateDayOut(
+        fecha=target.isoformat(),
+        generated=count,
+        discord_sent=discord_sent,
+    )
+
+
 @router.post("/closer-reports")
 def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_user_id)) -> ReportSavedOut:
     uid = _parse_uid(user_id)
-    la = body.llamadas_agendadas
-    sh = body.shows_organico + body.shows_ads
-    ci = body.cierres_organico + body.cierres_ads
-    cal = body.calificados
-    desc = body.descalificados
-    ing = body.ingreso
-    shows_org = body.shows_organico
-    shows_ads = body.shows_ads
-    cierres_org = body.cierres_organico
-    cierres_ads = body.cierres_ads
-    reservas = body.reservas
-    seguimiento = body.seguimiento
-    facturacion = body.facturacion
     member_name = ""
     result: ReportSavedOut
+    discord_payload: dict[str, Any] | None = None
     with db_session:
         member = _get_active_member(uid, body.member_id, "closer")
         member_name = member.nombre
@@ -646,48 +727,44 @@ def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_us
         ]
         if existing:
             r = existing[0]
-            r.llamadas_agendadas = la
-            r.shows = sh
-            r.cierres = ci
-            r.shows_organico = shows_org
-            r.shows_ads = shows_ads
-            r.cierres_organico = cierres_org
-            r.cierres_ads = cierres_ads
-            r.reservas = reservas
-            r.seguimiento = seguimiento
-            r.facturacion = facturacion
-            r.calificados = cal
-            r.descalificados = desc
-            r.ingreso = ing
-            r.notas = _notas_str(body.notas)
+            r.llamadas_agendadas = body.llamadas_agendadas
+            r.shows = body.shows
+            r.cierres = body.cierres
+            r.calificados = body.calificados
+            r.descalificados = body.descalificados
+            r.ingreso = body.ingreso
+            r.shows_organico = 0
+            r.shows_ads = 0
+            r.cierres_organico = 0
+            r.cierres_ads = 0
+            r.notas = ""
             result = ReportSavedOut(id=r.id, updated=True)
         else:
             r = CloserReport(
                 user_id=uid,
                 member_id=body.member_id,
                 fecha=body.fecha,
-                llamadas_agendadas=la,
-                shows=sh,
-                cierres=ci,
-                shows_organico=shows_org,
-                shows_ads=shows_ads,
-                cierres_organico=cierres_org,
-                cierres_ads=cierres_ads,
-                reservas=reservas,
-                seguimiento=seguimiento,
-                facturacion=facturacion,
-                calificados=cal,
-                descalificados=desc,
-                ingreso=ing,
-                notas=_notas_str(body.notas),
+                llamadas_agendadas=body.llamadas_agendadas,
+                shows=body.shows,
+                cierres=body.cierres,
+                calificados=body.calificados,
+                descalificados=body.descalificados,
+                ingreso=body.ingreso,
+                shows_organico=0,
+                shows_ads=0,
+                cierres_organico=0,
+                cierres_ads=0,
+                notas="",
             )
             r.flush()
             result = ReportSavedOut(id=r.id, updated=False)
+        discord_payload = _closer_ventas_discord_payload(r)
 
-    try:
-        discord_service.send_closer_ventas_to_discord(member_name, body.model_dump(mode="json"))
-    except Exception:
-        pass
+    if discord_payload is not None:
+        try:
+            discord_service.send_closer_ventas_to_discord(member_name, discord_payload)
+        except Exception:
+            pass
 
     return result
 

@@ -91,7 +91,17 @@ export function DailyReportSection({ role }: Props) {
   const [saving, setSaving] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [setterSavedStamp, setSetterSavedStamp] = useState<string | null>(null)
-  const [closerSavedStamp, setCloserSavedStamp] = useState<string | null>(null)
+  const [closerPreviewLoading, setCloserPreviewLoading] = useState(false)
+  const [closerGenerating, setCloserGenerating] = useState(false)
+  const [closerGeneratedStamp, setCloserGeneratedStamp] = useState<string | null>(null)
+  const [closerPreview, setCloserPreview] = useState({
+    calls_scheduled: 0,
+    shows: 0,
+    cierres: 0,
+    calificados: 0,
+    descalificados: 0,
+    ingreso: 0,
+  })
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -148,14 +158,113 @@ export function DailyReportSection({ role }: Props) {
     void fetchMembers()
   }, [fetchMembers])
 
+  const fetchCloserPreview = useCallback(async () => {
+    if (role !== 'closer' || !userId || form.memberId === '') return
+    setCloserPreviewLoading(true)
+    try {
+      const q = new URLSearchParams({
+        member_id: String(form.memberId),
+        fecha: form.date,
+      })
+      const res = await apiFetch(`/team/closer-reports/preview?${q}`)
+      if (!res.ok) {
+        setCloserPreview({
+          calls_scheduled: 0,
+          shows: 0,
+          cierres: 0,
+          calificados: 0,
+          descalificados: 0,
+          ingreso: 0,
+        })
+        return
+      }
+      const data = (await res.json()) as {
+        llamadas_agendadas?: number
+        shows?: number
+        cierres?: number
+        calificados?: number
+        descalificados?: number
+        ingreso?: number
+      }
+      setCloserPreview({
+        calls_scheduled: Number(data.llamadas_agendadas) || 0,
+        shows: Number(data.shows) || 0,
+        cierres: Number(data.cierres) || 0,
+        calificados: Number(data.calificados) || 0,
+        descalificados: Number(data.descalificados) || 0,
+        ingreso: Number(data.ingreso) || 0,
+      })
+    } catch {
+      /* silencioso */
+    } finally {
+      setCloserPreviewLoading(false)
+    }
+  }, [role, userId, form.memberId, form.date])
+
+  useEffect(() => {
+    if (role === 'closer') void fetchCloserPreview()
+  }, [role, fetchCloserPreview])
+
+  const handleGenerateCloserReport = async () => {
+    if (role !== 'closer' || !userId || form.memberId === '') {
+      toast('Seleccioná un closer')
+      return
+    }
+    if (closerPreview.calls_scheduled === 0) {
+      toast('No hay llamadas en el panel para este closer en esta fecha.')
+      return
+    }
+    setCloserGenerating(true)
+    try {
+      const q = new URLSearchParams({
+        member_id: String(form.memberId),
+        fecha: form.date,
+      })
+      const res = await apiFetch(`/team/closer-reports/generate?${q}`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        toast(errMessage(data))
+        return
+      }
+      const payload = data as {
+        discord_sent?: boolean
+        llamadas_agendadas?: number
+        shows?: number
+        cierres?: number
+        calificados?: number
+        descalificados?: number
+        ingreso?: number
+      }
+      setCloserPreview({
+        calls_scheduled: Number(payload.llamadas_agendadas) || 0,
+        shows: Number(payload.shows) || 0,
+        cierres: Number(payload.cierres) || 0,
+        calificados: Number(payload.calificados) || 0,
+        descalificados: Number(payload.descalificados) || 0,
+        ingreso: Number(payload.ingreso) || 0,
+      })
+      setCloserGeneratedStamp(stamp(form.memberId, form.date))
+      toast(
+        payload.discord_sent
+          ? 'Reporte generado y enviado a Discord'
+          : 'Reporte generado (Discord no configurado o desactivado)',
+      )
+      window.dispatchEvent(new Event('atvmkt-team-reports-changed'))
+    } catch {
+      toast('No se pudo generar el reporte.')
+    } finally {
+      setCloserGenerating(false)
+    }
+  }
+
   const stamp = (mid: number | '', d: string) => `${mid}|${d}`
+
+  const closerGeneratedThisDate =
+    role === 'closer' && closerGeneratedStamp === stamp(form.memberId, form.date) && form.memberId !== ''
 
   const setterSavedThisDate =
     role === 'setter' && setterSavedStamp === stamp(form.memberId, form.date) && form.memberId !== ''
   const setterSavedForDate = setterSavedThisDate && form.date === today
-
-  const closerSavedForSelection =
-    role === 'closer' && form.memberId !== '' && closerSavedStamp === stamp(form.memberId, form.date)
 
   const numField = (
     key: NumKey,
@@ -208,6 +317,7 @@ export function DailyReportSection({ role }: Props) {
   )
 
   const handleSave = async () => {
+    if (role !== 'setter') return
     if (!userId) {
       toast('Iniciá sesión')
       return
@@ -244,29 +354,6 @@ export function DailyReportSection({ role }: Props) {
         toast('Reporte guardado')
         setSetterSavedStamp(stamp(form.memberId, form.date))
         setShowForm(false)
-      } else {
-        const res = await apiFetch('/team/closer-reports', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            member_id: form.memberId,
-            fecha: form.date,
-            llamadas_agendadas: form.calls_scheduled,
-            shows: form.shows,
-            cierres: form.cierres,
-            calificados: form.calificados,
-            descalificados: form.descalificados,
-            ingreso: form.ingreso,
-            notas: form.notes.trim() || null,
-          }),
-        })
-        if (!res.ok) {
-          toast(errMessage(await res.json().catch(() => ({}))))
-          return
-        }
-        toast('Reporte guardado')
-        setCloserSavedStamp(stamp(form.memberId, form.date))
-        setShowForm(false)
       }
       void fetchMembers()
       window.dispatchEvent(new Event('atvmkt-team-reports-changed'))
@@ -297,22 +384,122 @@ export function DailyReportSection({ role }: Props) {
     )
   }
 
-  const openLabel =
-    role === 'setter'
-      ? showForm
-        ? 'Cerrar'
-        : setterSavedThisDate
-          ? setterSavedForDate
-            ? 'Editar reporte de hoy'
-            : 'Editar reporte'
-          : '+ Cargar reporte diario'
-      : showForm
-        ? 'Cerrar'
-        : closerSavedForSelection
-          ? form.date === today
-            ? 'Editar reporte de hoy ventas'
-            : 'Editar reporte ventas'
-          : '+ Cargar reporte diario ventas'
+  if (role === 'closer') {
+    return (
+      <div className="space-y-4">
+        <div className="glass-card glass-card--performant p-5">
+          <div className="mb-2 text-[13px] font-semibold">Reporte diario — Closer (automático)</div>
+          <p className="mb-4 text-[12px] leading-relaxed text-[var(--text3)]">
+            Se genera solo a las <strong className="text-[var(--text2)]">23:00 (Argentina)</strong> desde el panel
+            diario. Podés forzarlo antes con el botón de abajo. Completá status, calificación, pago y closer en cada
+            llamada.
+          </p>
+          <div className="mb-4 grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-[var(--text2)]">Fecha</label>
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-[var(--text2)]">Closer</label>
+              <select
+                value={form.memberId === '' ? '' : String(form.memberId)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setForm((f) => ({ ...f, memberId: v ? parseInt(v, 10) : '' }))
+                }}
+                className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+              >
+                <option value="">Seleccionar…</option>
+                {members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {form.memberId === '' ? (
+            <p className="text-[12px] text-[var(--text3)]">Elegí un closer para ver la vista previa del día.</p>
+          ) : closerPreviewLoading ? (
+            <p className="text-[12px] text-[var(--text3)]">Calculando desde panel diario…</p>
+          ) : (
+            <>
+              <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {[
+                  ['Llamadas agendadas', closerPreview.calls_scheduled],
+                  ['Shows', closerPreview.shows],
+                  ['Cierres', closerPreview.cierres],
+                  ['Calificados', closerPreview.calificados],
+                  ['Descalificados', closerPreview.descalificados],
+                  ['Ingreso', formatCash(closerPreview.ingreso)],
+                ].map(([label, val]) => (
+                  <div key={String(label)} className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text3)]">{label}</div>
+                    <div className="mt-1 text-[15px] font-semibold text-[var(--text)]">{val}</div>
+                  </div>
+                ))}
+              </div>
+              {closerPreview.shows > 0 ? (
+                <div className="mb-4 flex gap-6 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3 text-[11px]">
+                  <div>
+                    <span className="text-[var(--text3)]">Close Rate:</span>{' '}
+                    <span className="font-semibold text-[var(--accent)]">
+                      {((closerPreview.cierres / closerPreview.shows) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[var(--text3)]">Ticket prom:</span>{' '}
+                    <span className="font-semibold text-[var(--green)]">
+                      {closerPreview.cierres > 0
+                        ? formatCash(closerPreview.ingreso / closerPreview.cierres)
+                        : '$0'}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => void handleGenerateCloserReport()}
+                  disabled={
+                    closerGenerating ||
+                    closerPreviewLoading ||
+                    closerPreview.calls_scheduled === 0
+                  }
+                  className="w-full rounded-xl bg-[var(--accent)] px-5 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-white shadow-[0_4px_18px_-6px_rgba(230,57,70,0.55)] transition-all hover:brightness-110 hover:shadow-[0_6px_22px_-6px_rgba(230,57,70,0.45)] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                >
+                  {closerGenerating ? 'Generando…' : 'Generar reporte del día'}
+                </button>
+                {closerGeneratedThisDate && (
+                  <span className="block text-center text-[11px] font-medium text-[var(--green)]">
+                    ✓ Reporte generado para esta fecha
+                  </span>
+                )}
+                {closerPreview.calls_scheduled === 0 && !closerPreviewLoading ? (
+                  <p className="text-center text-[11px] text-[var(--text3)]">
+                    Sin llamadas en el panel — no se puede generar.
+                  </p>
+                ) : null}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  const openLabel = showForm
+    ? 'Cerrar'
+    : setterSavedThisDate
+      ? setterSavedForDate
+        ? 'Editar reporte de hoy'
+        : 'Editar reporte'
+      : '+ Cargar reporte diario'
 
   return (
     <div className="space-y-4">
@@ -324,19 +511,14 @@ export function DailyReportSection({ role }: Props) {
         >
           {openLabel}
         </button>
-        {role === 'setter' && setterSavedForDate && (
+        {setterSavedForDate && (
           <span className="block text-[11px] font-medium text-[var(--green)]">✓ Reporte de hoy cargado</span>
-        )}
-        {role === 'closer' && closerSavedForSelection && form.date === today && form.memberId !== '' && (
-          <span className="block text-[11px] font-medium text-[var(--green)]">✓ Ventas hoy</span>
         )}
       </div>
 
       {showForm && (
         <div className="glass-card glass-card--performant p-5">
-          <div className="mb-4 text-[13px] font-semibold">
-            {role === 'setter' ? 'Reporte Diario — Setter' : 'Reporte Diario — Closer (Ventas)'}
-          </div>
+          <div className="mb-4 text-[13px] font-semibold">Reporte Diario — Setter</div>
 
           <div className="mb-4 grid grid-cols-2 gap-3">
             <div>
@@ -350,7 +532,7 @@ export function DailyReportSection({ role }: Props) {
             </div>
             <div>
               <label className="mb-1.5 block text-[11px] font-medium leading-snug text-[var(--text2)]">
-                {role === 'setter' ? 'Setter (selección)' : 'Closer (selección)'}
+                Setter (selección)
               </label>
               <select
                 value={form.memberId === '' ? '' : String(form.memberId)}
@@ -363,7 +545,7 @@ export function DailyReportSection({ role }: Props) {
                 <option value="">Seleccionar…</option>
                 {members.length === 0 ? (
                   <option value="" disabled>
-                    Sin miembros ({role})
+                    Sin miembros (setter)
                   </option>
                 ) : (
                   members.map((m) => (
@@ -376,109 +558,66 @@ export function DailyReportSection({ role }: Props) {
             </div>
           </div>
 
-          {role === 'setter' ? (
-            <>
-              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {numField('conversaciones', 'Conversaciones', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('agendas', 'Agendas', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('calendly_links', 'Calendlys enviados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-              </div>
-              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {numField('seguimientos', 'Seguimientos', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('outbounds', 'Outbounds', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-              </div>
-              <div className="mb-4">
-                <label className="mb-2 block text-[12px] font-medium leading-snug text-[var(--text)]">
-                  Avatar / Tipo de agendas generadas
-                </label>
-                <div className="space-y-2 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] p-3">
-                  {SETTER_AVATAR_OPTIONS.map((avatar) => (
-                    <div key={avatar} className="flex items-center justify-between gap-3">
-                      <span className="min-w-0 flex-1 text-[12px] leading-snug text-[var(--text2)]">{avatar}</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={(form.avatar_counts[avatar] ?? 0) === 0 ? '' : form.avatar_counts[avatar]}
-                        onChange={(e) => {
-                          const raw = e.target.value
-                          if (raw === '') {
-                            setForm((f) => ({
-                              ...f,
-                              avatar_counts: { ...f.avatar_counts, [avatar]: 0 },
-                            }))
-                            return
-                          }
-                          const n = parseInt(raw, 10) || 0
-                          setForm((f) => ({
-                            ...f,
-                            avatar_counts: { ...f.avatar_counts, [avatar]: n },
-                          }))
-                        }}
-                        placeholder="0"
-                        className="w-20 shrink-0 rounded-lg border border-[var(--border2)] bg-[var(--bg2)] px-2 py-1.5 text-right text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
-                      />
-                    </div>
-                  ))}
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {numField('conversaciones', 'Conversaciones', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+            {numField('agendas', 'Agendas', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+            {numField('calendly_links', 'Calendlys enviados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+          </div>
+          <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {numField('seguimientos', 'Seguimientos', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+            {numField('outbounds', 'Outbounds', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
+          </div>
+          <div className="mb-4">
+            <label className="mb-2 block text-[12px] font-medium leading-snug text-[var(--text)]">
+              Avatar / Tipo de agendas generadas
+            </label>
+            <div className="space-y-2 rounded-lg border border-[var(--border2)] bg-[var(--bg3)] p-3">
+              {SETTER_AVATAR_OPTIONS.map((avatar) => (
+                <div key={avatar} className="flex items-center justify-between gap-3">
+                  <span className="min-w-0 flex-1 text-[12px] leading-snug text-[var(--text2)]">{avatar}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={(form.avatar_counts[avatar] ?? 0) === 0 ? '' : form.avatar_counts[avatar]}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      if (raw === '') {
+                        setForm((f) => ({
+                          ...f,
+                          avatar_counts: { ...f.avatar_counts, [avatar]: 0 },
+                        }))
+                        return
+                      }
+                      const n = parseInt(raw, 10) || 0
+                      setForm((f) => ({
+                        ...f,
+                        avatar_counts: { ...f.avatar_counts, [avatar]: n },
+                      }))
+                    }}
+                    placeholder="0"
+                    className="w-20 shrink-0 rounded-lg border border-[var(--border2)] bg-[var(--bg2)] px-2 py-1.5 text-right text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+                  />
                 </div>
-              </div>
-              <div className="mb-4 space-y-4">
-                {textareaField('sentimiento_trafico', 'Tipo de tráfico', 'Ej.: más lento de lo habitual, picos al mediodía…', 2)}
-                {textareaField('dia_bueno_malo', '¿Fue un día bueno o malo?', 'Ej.: Bueno — buen volumen y calidad de leads…', 2)}
-                {textareaField(
-                  'insights_marketing',
-                  'Feedback a MKT',
-                  'Qué viste en conversaciones que sirva para creativos, copy o segmentación…',
-                  4,
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {numField('calls_scheduled', 'Llamadas agendadas', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('shows', 'Shows (presentadas)', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('cierres', 'Cierres', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('calificados', 'Calificados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('descalificados', 'Descalificados', false, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-                {numField('ingreso', 'Ingreso ($)', true, 'text-[11px] font-medium leading-snug text-[var(--text2)]')}
-              </div>
-              <div className="mb-4">
-                <label className="mb-1.5 block text-[11px] font-medium leading-snug text-[var(--text2)]">
-                  Notas (observaciones del día)
-                </label>
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                  rows={3}
-                  placeholder="Observaciones del día..."
-                  className="w-full resize-y rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
-                />
-              </div>
-            </>
-          )}
+              ))}
+            </div>
+          </div>
+          <div className="mb-4 space-y-4">
+            {textareaField('sentimiento_trafico', 'Tipo de tráfico', 'Ej.: más lento de lo habitual, picos al mediodía…', 2)}
+            {textareaField('dia_bueno_malo', '¿Fue un día bueno o malo?', 'Ej.: Bueno — buen volumen y calidad de leads…', 2)}
+            {textareaField(
+              'insights_marketing',
+              'Feedback a MKT',
+              'Qué viste en conversaciones que sirva para creativos, copy o segmentación…',
+              4,
+            )}
+          </div>
 
-          {role === 'setter' && form.conversaciones > 0 && (
+          {form.conversaciones > 0 && (
             <div className="mb-4 flex gap-6 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3">
               <div className="text-[11px]">
                 <span className="text-[var(--text3)]">Tasa agend.:</span>{' '}
                 <span className="font-semibold text-[var(--accent)]">
                   {form.conversaciones > 0 ? ((form.agendas / form.conversaciones) * 100).toFixed(1) : 0}%
-                </span>
-              </div>
-            </div>
-          )}
-          {role === 'closer' && form.shows > 0 && (
-            <div className="mb-4 flex gap-6 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-3">
-              <div className="text-[11px]">
-                <span className="text-[var(--text3)]">Close Rate:</span>{' '}
-                <span className="font-semibold text-[var(--accent)]">
-                  {form.shows > 0 ? ((form.cierres / form.shows) * 100).toFixed(1) : 0}%
-                </span>
-              </div>
-              <div className="text-[11px]">
-                <span className="text-[var(--text3)]">Ticket prom:</span>{' '}
-                <span className="font-semibold text-[var(--green)]">
-                  {form.cierres > 0 ? formatCash(form.ingreso / form.cierres) : '$0'}
                 </span>
               </div>
             </div>
