@@ -33,6 +33,7 @@ from src.controllers.stories_controller import router as stories_router
 from src.controllers.sync_settings_controller import router as sync_settings_router
 from src.controllers.team_controller import router as team_router
 from src.controllers.youtube_controller import router as youtube_router
+from src.controllers.weekly_reports_controller import router as weekly_reports_router
 from src.controllers.webhook_controller import router as webhook_router
 from src.db import db, init_db
 from src.models import ApiConnection
@@ -224,6 +225,7 @@ app.include_router(bio_router)
 app.include_router(stories_router)
 app.include_router(sync_settings_router)
 app.include_router(team_router)
+app.include_router(weekly_reports_router)
 app.include_router(youtube_router)
 app.include_router(calendly_router)
 app.include_router(webhook_router)

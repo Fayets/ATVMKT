@@ -317,6 +317,25 @@ class CallReport(db.Entity):
     updated_at = Optional(datetime)
 
 
+class WeeklyReport(db.Entity):
+    """Reporte semanal generado por Claude (análisis Fathom + reportes diarios closer)."""
+
+    _table_ = "weekly_report"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    semana_inicio = Required(date)
+    semana_fin = Required(date)
+    contenido = Optional(str, default="")
+    estado = Required(str, default="pendiente")
+    error_msg = Optional(str, default="")
+    llamadas_count = Required(int, default=0)
+    closer_dias_count = Required(int, default=0)
+    feedback_marketing = Optional(str, default="")
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+    updated_at = Optional(datetime)
+
+
 class AppSyncSettings(db.Entity):
     """Config global del servidor: intervalos de sync automático (singleton id=1)."""
 
