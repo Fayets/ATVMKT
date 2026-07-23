@@ -9,7 +9,7 @@ import { apiFetch } from '@/lib/api'
 
 const REPORTES_PAGE_SIZE = 20
 
-type ReporteFiltro = 'todos' | 'setter' | 'closer_marketing' | 'closer_ventas' | 'seguimiento'
+type ReporteFiltro = 'todos' | 'setter' | 'closer_ventas' | 'seguimiento'
 
 type ReportRow =
   | {
@@ -43,7 +43,6 @@ type ReportRow =
       id: number
       fecha: string
       member_nombre: string
-      reporte_tipo: string
       llamadas_agendadas: number
       shows: number
       cierres: number
@@ -51,13 +50,6 @@ type ReportRow =
       descalificados: number
       ingreso: number
       notas: string
-      nombre_lead: string
-      estado_final_llamada: string
-      perfil_lead: string
-      objecion_miedo: string
-      dolores_llamada: string
-      razon_compra_final: string
-      insights_marketing_llamada: string
     }
 
 function errMessage(data: unknown): string {
@@ -230,8 +222,7 @@ function reportListTitle(r: ReportRow): string {
   if (r.kind === 'seguimiento') {
     return `REPORTE SEGUIMIENTO - ${fd} - ${r.member_nombre}`
   }
-  const tipo = r.reporte_tipo === 'marketing' ? 'MARKETING' : 'VENTAS'
-  return `REPORTE CLOSER ${tipo} - ${fd} - ${r.member_nombre}`
+  return `REPORTE CLOSER VENTAS - ${fd} - ${r.member_nombre}`
 }
 
 function ReportDetail({ r }: { r: ReportRow }) {
@@ -253,48 +244,6 @@ function ReportDetail({ r }: { r: ReportRow }) {
           <dt className="font-bold text-[var(--text)]">Quién completó el reporte</dt>
           <dd className="text-[var(--text)]">{r.member_nombre}</dd>
         </div>
-      </dl>
-    )
-  }
-  if (r.kind === 'closer' && r.reporte_tipo === 'marketing') {
-    return (
-      <dl className="grid gap-2 text-[12px] text-[var(--text)] sm:grid-cols-2">
-        <div>
-          <dt className="font-bold text-[var(--text)]">Nombre lead</dt>
-          <dd className="text-[var(--text)]">{r.nombre_lead || '—'}</dd>
-        </div>
-        <div>
-          <dt className="font-bold text-[var(--text)]">Estado final</dt>
-          <dd className="text-[var(--text)]">{r.estado_final_llamada || '—'}</dd>
-        </div>
-        <div className="sm:col-span-2">
-          <dt className="font-bold text-[var(--text)]">Perfil</dt>
-          <dd className="text-[var(--text)]">{r.perfil_lead || '—'}</dd>
-        </div>
-        {r.objecion_miedo ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Objeción / miedo</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.objecion_miedo}</dd>
-          </div>
-        ) : null}
-        {r.dolores_llamada ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Dolores</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.dolores_llamada}</dd>
-          </div>
-        ) : null}
-        {r.razon_compra_final ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Razón de compra</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.razon_compra_final}</dd>
-          </div>
-        ) : null}
-        {r.insights_marketing_llamada ? (
-          <div className="sm:col-span-2">
-            <dt className="font-bold text-[var(--text)]">Insights marketing</dt>
-            <dd className="whitespace-pre-wrap text-[var(--text)]">{r.insights_marketing_llamada}</dd>
-          </div>
-        ) : null}
       </dl>
     )
   }
@@ -390,10 +339,8 @@ export default function TeamHistorialReportesPage() {
   const filteredReports = useMemo(() => {
     let rows = reports
     if (roleFilter === 'setter') rows = rows.filter((x) => x.kind === 'setter')
-    else if (roleFilter === 'closer_marketing') {
-      rows = rows.filter((x) => x.kind === 'closer' && x.reporte_tipo === 'marketing')
-    } else if (roleFilter === 'closer_ventas') {
-      rows = rows.filter((x) => x.kind === 'closer' && x.reporte_tipo !== 'marketing')
+    else if (roleFilter === 'closer_ventas') {
+      rows = rows.filter((x) => x.kind === 'closer')
     } else if (roleFilter === 'seguimiento') {
       rows = rows.filter((x) => x.kind === 'seguimiento')
     }
@@ -558,7 +505,6 @@ export default function TeamHistorialReportesPage() {
             >
               <option value="todos">Todos</option>
               <option value="setter">Setter</option>
-              <option value="closer_marketing">Closer marketing</option>
               <option value="closer_ventas">Closer ventas</option>
               <option value="seguimiento">Seguimiento</option>
             </select>
@@ -676,7 +622,6 @@ export default function TeamHistorialReportesPage() {
           >
             <option value="todos">Todos</option>
             <option value="setter">Setter</option>
-            <option value="closer_marketing">Closer marketing</option>
             <option value="closer_ventas">Closer ventas</option>
             <option value="seguimiento">Seguimiento</option>
           </select>

@@ -1704,6 +1704,25 @@ function LeadsTableCell({
         />
       )
     }
+    if (col.type === 'link') {
+      return (
+        <input
+          autoFocus
+          type="text"
+          defaultValue={String(value ?? '')}
+          placeholder="Pegar link o dejar vacío"
+          onBlur={(e) => {
+            const v = e.target.value
+            onSave(v.trim() === '' ? null : v.trim())
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+            if (e.key === 'Escape') onCancelEdit()
+          }}
+          className="w-full rounded border border-[var(--accent)] bg-[var(--bg3)] px-2 py-1 text-[12px] text-[var(--text)] outline-none"
+        />
+      )
+    }
     return (
       <input
         autoFocus
@@ -1846,14 +1865,41 @@ function LeadsTableCell({
     )
   }
 
-  // Link
+  // Link — ↗ Link abre; doble clic edita; tachito borra
   if (col.type === 'link') {
     if (!value) return <span onClick={onStartEdit} className={`${cellClass} text-[var(--text3)]`}>—</span>
+    const url = String(value)
     return (
-      <a href={String(value)} target="_blank" rel="noopener noreferrer"
-        className="text-[12px] text-[var(--accent)] hover:underline inline-flex items-center gap-1">
-        ↗ Link
-      </a>
+      <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={url}
+          onDoubleClick={(e) => {
+            e.preventDefault()
+            onStartEdit()
+          }}
+          className="text-[12px] text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+        >
+          ↗ Link
+        </a>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onSave(null)
+          }}
+          className="flex-shrink-0 rounded p-0.5 text-[var(--text3)] transition-colors hover:bg-[rgba(248,113,113,0.12)] hover:text-[#F87171]"
+          title="Borrar link"
+          aria-label="Borrar link"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M10 11v6M14 11v6" strokeLinecap="round" />
+          </svg>
+        </button>
+      </span>
     )
   }
 

@@ -19,20 +19,6 @@ discord_service = DiscordServices()
 DEFAULT_COMMISSION_PCT = 5.0
 VALID_ROLES = frozenset({"setter", "closer", "cash"})
 SEGUIMIENTO_MEMBER_ROLES = frozenset({"setter", "closer", "cash"})
-CLOSER_REPORTE_TIPOS = frozenset({"ventas", "marketing"})
-CLOSER_ESTADOS_FINAL = frozenset(
-    {"Re-agendado", "Cerrado", "No cerrado", "Señado", "Descalificado"}
-)
-CLOSER_PERFILES_LEAD = frozenset(
-    {
-        "Experto en infoproductos",
-        "Dueño de agencias",
-        "Setter / closer / editor / etc.",
-        "Infoproductor (persona que ya tiene un producto digital validado)",
-        "Creador de contenido (persona que no tiene un infoproducto y solo crea contenido)",
-        "Otro",
-    }
-)
 
 
 def require_user_id(
@@ -81,19 +67,6 @@ def _closer_ventas_discord_payload(r: CloserReport) -> dict[str, Any]:
         "descalificados": int(r.descalificados),
         "ingreso": float(r.ingreso),
         "notas": notas or None,
-    }
-
-
-def _closer_marketing_discord_payload(r: CloserReport) -> dict[str, Any]:
-    return {
-        "fecha": r.fecha.isoformat(),
-        "nombre_lead": _notas_str(r.nombre_lead) or None,
-        "estado_final_llamada": _notas_str(r.estado_final_llamada) or None,
-        "perfil_lead": _notas_str(r.perfil_lead) or None,
-        "objecion_miedo": _notas_str(r.objecion_miedo) or None,
-        "dolores_llamada": _notas_str(r.dolores_llamada) or None,
-        "razon_compra_final": _notas_str(r.razon_compra_final) or None,
-        "insights_marketing_llamada": _notas_str(r.insights_marketing_llamada) or None,
     }
 
 
@@ -201,7 +174,6 @@ def _collect_team_reports(uid: int, desde: date, hasta: date) -> list[dict[str, 
                     "fecha": r.fecha.isoformat(),
                     "member_id": r.member_id,
                     "member_nombre": _mn(members, r.member_id),
-                    "reporte_tipo": getattr(r, "reporte_tipo", None) or "ventas",
                     "llamadas_agendadas": r.llamadas_agendadas,
                     "shows": r.shows,
                     "cierres": r.cierres,
@@ -216,13 +188,6 @@ def _collect_team_reports(uid: int, desde: date, hasta: date) -> list[dict[str, 
                     "descalificados": r.descalificados,
                     "ingreso": float(r.ingreso),
                     "notas": r.notas or "",
-                    "nombre_lead": getattr(r, "nombre_lead", None) or "",
-                    "estado_final_llamada": getattr(r, "estado_final_llamada", None) or "",
-                    "perfil_lead": getattr(r, "perfil_lead", None) or "",
-                    "objecion_miedo": getattr(r, "objecion_miedo", None) or "",
-                    "dolores_llamada": getattr(r, "dolores_llamada", None) or "",
-                    "razon_compra_final": getattr(r, "razon_compra_final", None) or "",
-                    "insights_marketing_llamada": getattr(r, "insights_marketing_llamada", None) or "",
                 }
             )
         for r in list(SeguimientoReport.select()):
@@ -243,7 +208,7 @@ def _collect_team_reports(uid: int, desde: date, hasta: date) -> list[dict[str, 
     return rows
 
 
-TEAM_REPORT_FILTROS = frozenset({"todos", "setter", "closer_marketing", "closer_ventas", "seguimiento"})
+TEAM_REPORT_FILTROS = frozenset({"todos", "setter", "closer_ventas", "seguimiento"})
 
 
 def _parse_team_report_filtro(raw: str | None) -> str:
@@ -251,7 +216,7 @@ def _parse_team_report_filtro(raw: str | None) -> str:
     if v not in TEAM_REPORT_FILTROS:
         raise HTTPException(
             status_code=400,
-            detail="filtro debe ser todos, setter, closer_marketing, closer_ventas o seguimiento.",
+            detail="filtro debe ser todos, setter, closer_ventas o seguimiento.",
         )
     return v
 
@@ -261,18 +226,8 @@ def _filter_team_reports(rows: list[dict[str, Any]], filtro: str) -> list[dict[s
         return rows
     if filtro == "setter":
         return [r for r in rows if r.get("kind") == "setter"]
-    if filtro == "closer_marketing":
-        return [
-            r
-            for r in rows
-            if r.get("kind") == "closer" and str(r.get("reporte_tipo") or "ventas") == "marketing"
-        ]
     if filtro == "closer_ventas":
-        return [
-            r
-            for r in rows
-            if r.get("kind") == "closer" and str(r.get("reporte_tipo") or "ventas") != "marketing"
-        ]
+        return [r for r in rows if r.get("kind") == "closer"]
     if filtro == "seguimiento":
         return [r for r in rows if r.get("kind") == "seguimiento"]
     return rows
@@ -321,7 +276,6 @@ class SetterReportBody(BaseModel):
 class CloserReportBody(BaseModel):
     member_id: int
     fecha: date
-    reporte_tipo: str = "ventas"
     llamadas_agendadas: int = 0
     shows: int = 0
     cierres: int = 0
@@ -336,13 +290,6 @@ class CloserReportBody(BaseModel):
     descalificados: int = 0
     ingreso: float = 0
     notas: str | None = None
-    nombre_lead: str | None = None
-    estado_final_llamada: str | None = None
-    perfil_lead: str | None = None
-    objecion_miedo: str | None = None
-    dolores_llamada: str | None = None
-    razon_compra_final: str | None = None
-    insights_marketing_llamada: str | None = None
 
 
 class SeguimientoReportBody(BaseModel):
@@ -522,7 +469,7 @@ def team_reports_pdf(
     hasta: date = Query(...),
     filtro: str = Query(
         "todos",
-        description="todos | setter | closer_marketing | closer_ventas | seguimiento",
+        description="todos | setter | closer_ventas | seguimiento",
     ),
     user_id: str = Depends(require_user_id),
 ) -> Response:
@@ -655,27 +602,15 @@ def notify_closer_report_discord(
                 break
         if found is None:
             raise HTTPException(status_code=404, detail="Reporte closer no encontrado.")
-        tipo = (getattr(found, "reporte_tipo", None) or "ventas").strip().lower()
         member_name = _member_name_for_report(uid, found.member_id)
-        if tipo == "marketing":
-            if not discord_service.is_closer_marketing_webhook_configured():
-                raise HTTPException(
-                    status_code=503,
-                    detail="Webhook de Discord no configurado (DISCORD_CLOSER_MARKETING_WEBHOOK_URL).",
-                )
-            payload = _closer_marketing_discord_payload(found)
-        else:
-            if not discord_service.is_closer_ventas_webhook_configured():
-                raise HTTPException(
-                    status_code=503,
-                    detail="Webhook de Discord no configurado (DISCORD_CLOSER_VENTAS_WEBHOOK_URL).",
-                )
-            payload = _closer_ventas_discord_payload(found)
+        if not discord_service.is_closer_ventas_webhook_configured():
+            raise HTTPException(
+                status_code=503,
+                detail="Webhook de Discord no configurado (DISCORD_CLOSER_VENTAS_WEBHOOK_URL).",
+            )
+        payload = _closer_ventas_discord_payload(found)
 
-    if tipo == "marketing":
-        sent = discord_service.send_closer_marketing_to_discord(member_name, payload)
-    else:
-        sent = discord_service.send_closer_ventas_to_discord(member_name, payload)
+    sent = discord_service.send_closer_ventas_to_discord(member_name, payload)
     if not sent:
         raise HTTPException(status_code=502, detail="No se pudo enviar el reporte a Discord.")
     return DiscordNotifyOut(sent=True, detail="Reporte enviado a Discord.")
@@ -684,12 +619,9 @@ def notify_closer_report_discord(
 @router.post("/closer-reports")
 def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_user_id)) -> ReportSavedOut:
     uid = _parse_uid(user_id)
-    tipo = (body.reporte_tipo or "ventas").strip().lower()
-    if tipo not in CLOSER_REPORTE_TIPOS:
-        raise HTTPException(status_code=400, detail="reporte_tipo debe ser 'ventas' o 'marketing'.")
     la = body.llamadas_agendadas
-    sh = body.shows
-    ci = body.cierres
+    sh = body.shows_organico + body.shows_ads
+    ci = body.cierres_organico + body.cierres_ads
     cal = body.calificados
     desc = body.descalificados
     ing = body.ingreso
@@ -697,133 +629,63 @@ def save_closer_report(body: CloserReportBody, user_id: str = Depends(require_us
     shows_ads = body.shows_ads
     cierres_org = body.cierres_organico
     cierres_ads = body.cierres_ads
-    if tipo == "ventas":
-        sh = shows_org + shows_ads
-        ci = cierres_org + cierres_ads
     reservas = body.reservas
     seguimiento = body.seguimiento
     facturacion = body.facturacion
-    nombre_l = _notas_str(body.nombre_lead)
-    estado_f = _notas_str(body.estado_final_llamada)
-    perfil = _notas_str(body.perfil_lead)
-    objecion = _notas_str(body.objecion_miedo)
-    dolores = _notas_str(body.dolores_llamada)
-    razon = _notas_str(body.razon_compra_final)
-    ins_mkt = _notas_str(body.insights_marketing_llamada)
-    if tipo == "marketing":
-        if not nombre_l:
-            raise HTTPException(status_code=400, detail="Indicá el nombre del lead.")
-        if estado_f not in CLOSER_ESTADOS_FINAL:
-            raise HTTPException(
-                status_code=400,
-                detail="Seleccioná el estado final de la llamada.",
-            )
-        if perfil not in CLOSER_PERFILES_LEAD:
-            raise HTTPException(status_code=400, detail="Seleccioná el perfil del lead.")
-        la = sh = ci = cal = desc = 0
-        ing = 0.0
-        shows_org = shows_ads = cierres_org = cierres_ads = reservas = seguimiento = 0
-        facturacion = 0.0
-    else:
-        nombre_l = estado_f = perfil = objecion = dolores = razon = ins_mkt = ""
     member_name = ""
     result: ReportSavedOut
     with db_session:
         member = _get_active_member(uid, body.member_id, "closer")
         member_name = member.nombre
-        if tipo == "marketing":
+        existing = [
+            r
+            for r in list(CloserReport.select())
+            if r.user_id == uid
+            and r.member_id == body.member_id
+            and r.fecha == body.fecha
+        ]
+        if existing:
+            r = existing[0]
+            r.llamadas_agendadas = la
+            r.shows = sh
+            r.cierres = ci
+            r.shows_organico = shows_org
+            r.shows_ads = shows_ads
+            r.cierres_organico = cierres_org
+            r.cierres_ads = cierres_ads
+            r.reservas = reservas
+            r.seguimiento = seguimiento
+            r.facturacion = facturacion
+            r.calificados = cal
+            r.descalificados = desc
+            r.ingreso = ing
+            r.notas = _notas_str(body.notas)
+            result = ReportSavedOut(id=r.id, updated=True)
+        else:
             r = CloserReport(
                 user_id=uid,
                 member_id=body.member_id,
                 fecha=body.fecha,
-                reporte_tipo=tipo,
                 llamadas_agendadas=la,
                 shows=sh,
                 cierres=ci,
+                shows_organico=shows_org,
+                shows_ads=shows_ads,
+                cierres_organico=cierres_org,
+                cierres_ads=cierres_ads,
+                reservas=reservas,
+                seguimiento=seguimiento,
+                facturacion=facturacion,
                 calificados=cal,
                 descalificados=desc,
                 ingreso=ing,
                 notas=_notas_str(body.notas),
-                nombre_lead=nombre_l,
-                estado_final_llamada=estado_f,
-                perfil_lead=perfil,
-                objecion_miedo=objecion,
-                dolores_llamada=dolores,
-                razon_compra_final=razon,
-                insights_marketing_llamada=ins_mkt,
             )
             r.flush()
             result = ReportSavedOut(id=r.id, updated=False)
-        else:
-            existing = [
-                r
-                for r in list(CloserReport.select())
-                if r.user_id == uid
-                and r.member_id == body.member_id
-                and r.fecha == body.fecha
-                and r.reporte_tipo == tipo
-            ]
-            if existing:
-                r = existing[0]
-                r.llamadas_agendadas = la
-                r.shows = sh
-                r.cierres = ci
-                r.shows_organico = shows_org
-                r.shows_ads = shows_ads
-                r.cierres_organico = cierres_org
-                r.cierres_ads = cierres_ads
-                r.reservas = reservas
-                r.seguimiento = seguimiento
-                r.facturacion = facturacion
-                r.calificados = cal
-                r.descalificados = desc
-                r.ingreso = ing
-                r.notas = _notas_str(body.notas)
-                r.nombre_lead = nombre_l
-                r.estado_final_llamada = estado_f
-                r.perfil_lead = perfil
-                r.objecion_miedo = objecion
-                r.dolores_llamada = dolores
-                r.razon_compra_final = razon
-                r.insights_marketing_llamada = ins_mkt
-                result = ReportSavedOut(id=r.id, updated=True)
-            else:
-                r = CloserReport(
-                    user_id=uid,
-                    member_id=body.member_id,
-                    fecha=body.fecha,
-                    reporte_tipo=tipo,
-                    llamadas_agendadas=la,
-                    shows=sh,
-                    cierres=ci,
-                    shows_organico=shows_org,
-                    shows_ads=shows_ads,
-                    cierres_organico=cierres_org,
-                    cierres_ads=cierres_ads,
-                    reservas=reservas,
-                    seguimiento=seguimiento,
-                    facturacion=facturacion,
-                    calificados=cal,
-                    descalificados=desc,
-                    ingreso=ing,
-                    notas=_notas_str(body.notas),
-                    nombre_lead=nombre_l,
-                    estado_final_llamada=estado_f,
-                    perfil_lead=perfil,
-                    objecion_miedo=objecion,
-                    dolores_llamada=dolores,
-                    razon_compra_final=razon,
-                    insights_marketing_llamada=ins_mkt,
-                )
-                r.flush()
-                result = ReportSavedOut(id=r.id, updated=False)
 
     try:
-        payload = body.model_dump(mode="json")
-        if tipo == "ventas":
-            discord_service.send_closer_ventas_to_discord(member_name, payload)
-        else:
-            discord_service.send_closer_marketing_to_discord(member_name, payload)
+        discord_service.send_closer_ventas_to_discord(member_name, body.model_dump(mode="json"))
     except Exception:
         pass
 
@@ -868,31 +730,6 @@ def seguimiento_reports_month(
         ]
     total = sum(e["monto"] for e in entries)
     return {"total": total, "entries": entries}
-
-
-class CloserMarketingCountOut(BaseModel):
-    count: int
-
-
-@router.get("/closer-marketing-report-count")
-def closer_marketing_report_count(
-    fecha: date = Query(..., description="Día del reporte (YYYY-MM-DD)"),
-    member_id: int = Query(..., description="TeamMember closer"),
-    user_id: str = Depends(require_user_id),
-) -> CloserMarketingCountOut:
-    """Cuántos reportes marketing (una fila por llamada) hay para ese closer en esa fecha."""
-    uid = _parse_uid(user_id)
-    with db_session:
-        _get_active_member(uid, member_id, "closer")
-        n = sum(
-            1
-            for r in list(CloserReport.select())
-            if r.user_id == uid
-            and r.member_id == member_id
-            and r.fecha == fecha
-            and r.reporte_tipo == "marketing"
-        )
-    return CloserMarketingCountOut(count=n)
 
 
 @router.get("/dashboard/daily", response_model=list[TeamDashboardDailyRow])
@@ -945,7 +782,7 @@ def team_dashboard(
         closer_rows = [
             r
             for r in list(CloserReport.select())
-            if r.user_id == uid and start <= r.fecha <= end and r.reporte_tipo == "ventas"
+            if r.user_id == uid and start <= r.fecha <= end
         ]
 
         members_by_id = {m.id: m for m in _members_for_user(uid)}

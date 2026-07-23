@@ -810,6 +810,70 @@ def _migrate_postgres_closer_report_marketing_multiple_per_day() -> None:
         conn.close()
 
 
+def _migrate_postgres_remove_closer_marketing() -> None:
+    """Elimina reportes marketing manuales del closer y columnas asociadas (Fathom los reemplaza)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'closer_report'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            try:
+                cur.execute(
+                    f"DELETE FROM {sql_table} WHERE LOWER(COALESCE(reporte_tipo, 'ventas')) = 'marketing'"
+                )
+            except Exception:
+                pass
+            for ddl in (
+                "DROP INDEX IF EXISTS uq_closer_report_user_member_fecha_ventas",
+                "DROP INDEX IF EXISTS uq_closer_report_user_member_fecha_tipo",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS reporte_tipo",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS nombre_lead",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS estado_final_llamada",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS perfil_lead",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS objecion_miedo",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS dolores_llamada",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS razon_compra_final",
+                f"ALTER TABLE {sql_table} DROP COLUMN IF EXISTS insights_marketing_llamada",
+            ):
+                try:
+                    cur.execute(ddl)
+                except Exception:
+                    pass
+            try:
+                cur.execute(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS uq_closer_report_user_member_fecha "
+                    f"ON {sql_table} (user_id, member_id, fecha)"
+                )
+            except Exception:
+                pass
+    finally:
+        conn.close()
+
+
 def _migrate_agendo_en_iso_to_call() -> None:
     """ISO en agendo_en → call (fecha) y agendo_en=Chat (canal)."""
     iso_pat = re.compile(r"^\d{4}-\d{2}-\d{2}")
@@ -1195,6 +1259,7 @@ def init_db() -> None:
     _migrate_postgres_team_report_breakdown()
     _migrate_postgres_closer_report_tipo()
     _migrate_postgres_closer_report_marketing_multiple_per_day()
+    _migrate_postgres_remove_closer_marketing()
     _migrate_postgres_offered_program()
     _migrate_postgres_avatar_type()
     _migrate_postgres_seguimiento_report()

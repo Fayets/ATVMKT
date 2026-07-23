@@ -148,8 +148,6 @@ def _load_team_reports(user_id: int, start: date, end: date) -> tuple[list[_Dail
         for r in list(CloserReport.select()):
             if r.user_id != user_id or not (start <= r.fecha <= end):
                 continue
-            if (getattr(r, "reporte_tipo", None) or "ventas").strip().lower() != "ventas":
-                continue
             closer_rows.append(
                 _DailyReportRow(
                     date=r.fecha.isoformat(),
@@ -314,8 +312,6 @@ def _team_avg_ticket(user_id: int, start: date, end: date) -> float:
         for r in list(CloserReport.select()):
             if r.user_id != user_id or not (start <= r.fecha <= end):
                 continue
-            if (getattr(r, "reporte_tipo", None) or "ventas").strip().lower() != "ventas":
-                continue
             cash_total += float(r.ingreso or 0)
             total_cierres += int(r.cierres or 0)
     return (cash_total / total_cierres) if total_cierres > 0 else 0.0
@@ -397,8 +393,6 @@ def build_miembro(user_id: int, nombre: str, month: str) -> list[dict[str, Any]]
     with db_session:
         for r in list(CloserReport.select()):
             if r.user_id != user_id or r.member_id != mid or not (start <= r.fecha <= end):
-                continue
-            if (getattr(r, "reporte_tipo", None) or "ventas").strip().lower() != "ventas":
                 continue
             totals["llamadas_agendadas"] += int(r.llamadas_agendadas or 0)
             totals["shows"] += int(r.shows or 0)

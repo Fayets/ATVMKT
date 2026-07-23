@@ -10,6 +10,7 @@ import {
 } from '../services/call-reports-service'
 import type { CallReport } from '../types'
 import { CallReportsTable } from './CallReportsTable'
+import { callReportDateKey } from './CallReportDetail'
 
 const POLL_MS = 5000
 
@@ -24,6 +25,8 @@ export function CallReportsPage() {
   const [loading, setLoading] = useState(true)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [busy, setBusy] = useState(false)
+  const [desde, setDesde] = useState('')
+  const [hasta, setHasta] = useState('')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchReports = useCallback(async (silent = false) => {
@@ -74,6 +77,25 @@ export function CallReportsPage() {
     }
   }, [items, ready, userId, fetchReports])
 
+  const dateFilterActive = Boolean(desde || hasta)
+
+  const filteredItems = useMemo(() => {
+    let rows = items
+    if (desde) {
+      rows = rows.filter((r) => {
+        const d = callReportDateKey(r.created_at)
+        return d && d >= desde
+      })
+    }
+    if (hasta) {
+      rows = rows.filter((r) => {
+        const d = callReportDateKey(r.created_at)
+        return d && d <= hasta
+      })
+    }
+    return rows
+  }, [items, desde, hasta])
+
   const selectedList = useMemo(() => Array.from(selectedIds), [selectedIds])
 
   const toggleRow = useCallback((id: string) => {
@@ -87,12 +109,12 @@ export function CallReportsPage() {
 
   const toggleAll = useCallback(() => {
     setSelectedIds((prev) => {
-      if (items.length > 0 && items.every((r) => prev.has(r.id))) {
+      if (filteredItems.length > 0 && filteredItems.every((r) => prev.has(r.id))) {
         return new Set()
       }
-      return new Set(items.map((r) => r.id))
+      return new Set(filteredItems.map((r) => r.id))
     })
-  }, [items])
+  }, [filteredItems])
 
   const runBulkDownload = useCallback(async () => {
     if (selectedList.length === 0) return
@@ -167,13 +189,55 @@ export function CallReportsPage() {
           </div>
         )}
       </div>
+
+      <div className="glass-card mb-4 flex flex-wrap items-end gap-4 p-4 sm:p-5">
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold text-[var(--text)]">Desde</label>
+          <input
+            type="date"
+            value={desde}
+            onChange={(e) => setDesde(e.target.value)}
+            className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+          />
+        </div>
+        <div>
+          <label className="mb-1.5 block text-[11px] font-semibold text-[var(--text)]">Hasta</label>
+          <input
+            type="date"
+            value={hasta}
+            onChange={(e) => setHasta(e.target.value)}
+            className="rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none focus:border-[var(--text3)]"
+          />
+        </div>
+        {dateFilterActive ? (
+          <>
+            <span className="pb-2 text-[12px] text-[var(--text3)]">
+              {filteredItems.length} de {items.length} reportes
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setDesde('')
+                setHasta('')
+              }}
+              className="rounded-lg border border-[var(--border2)] px-3 py-2 text-[11px] font-semibold text-[var(--text2)] hover:border-[var(--text3)]"
+            >
+              Limpiar fechas
+            </button>
+          </>
+        ) : null}
+      </div>
+
       <CallReportsTable
-        items={items}
+        items={filteredItems}
+        totalCount={items.length}
+        dateFilterActive={dateFilterActive}
         loading={loading}
         selectedIds={selectedIds}
         onToggleRow={toggleRow}
         onToggleAll={toggleAll}
         onError={(msg) => toast(msg)}
+        onSuccess={(msg) => toast(msg)}
         onRefresh={() => void fetchReports(true)}
       />
     </div>

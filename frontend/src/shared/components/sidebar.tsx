@@ -20,6 +20,12 @@ type NavGroup = {
 
 const navigation: NavGroup[] = [
   {
+    title: 'Dashboard diario',
+    icon: '◆',
+    href: '/panel-diario',
+    items: [],
+  },
+  {
     title: 'Dashboard ventas',
     icon: '◆',
     href: '/sales-dashboard',

@@ -10,6 +10,7 @@ const titles: Record<string, string> = {
   '/historias': 'Historias',
   '/youtube': 'YouTube',
   '/leads': 'Leads',
+  '/panel-diario': 'Dashboard diario',
   '/reporte-calls': 'Reporte calls',
   '/hot-leads': 'Hot Leads',
   '/sales-dashboard': 'Ventas',
@@ -37,6 +38,7 @@ const subtitles: Record<string, string> = {
   '/programas': 'Configuracion',
   '/avatares': 'Configuracion',
   '/conexiones': 'Configuracion',
+  '/panel-diario': 'Dashboard',
   '/ajustes/cuenta': 'Ajustes',
   '/ajustes/tasa-refresco': 'Ajustes',
 }
@@ -48,6 +50,7 @@ type TopbarProps = {
 export function Topbar({ onMenuClick }: TopbarProps) {
   const pathname = usePathname()
   const hideTitleForPath = [
+    '/panel-diario',
     '/reels',
     '/keywords',
     '/historias',

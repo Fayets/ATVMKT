@@ -867,13 +867,24 @@ class AgentContenidoOut(BaseModel):
 
 
 class AgentLlamadaHoyItemOut(BaseModel):
+    id: int
     hora: str
     lead: str
     closer: str
     link_llamada: str
+    status: str
+    payment: float = 0
+    owed: float = 0
+    program_offered: str = ""
+    programada_ofrecido_llamada: str = ""
 
 
 class AgentLlamadasHoyOut(BaseModel):
+    fecha: str
+    llamadas: list[AgentLlamadaHoyItemOut] = Field(default_factory=list)
+
+
+class LlamadasHoyOut(BaseModel):
     fecha: str
     llamadas: list[AgentLlamadaHoyItemOut] = Field(default_factory=list)
 

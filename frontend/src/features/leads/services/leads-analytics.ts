@@ -332,7 +332,7 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
               cierres: 0,
               ingreso: 0,
             })
-          } else if (r.kind === 'closer' && String(r.reporte_tipo || 'ventas').toLowerCase() === 'ventas') {
+          } else if (r.kind === 'closer') {
             closerReports.push({
               date: fecha,
               conversaciones: 0,

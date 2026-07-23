@@ -22,7 +22,7 @@ export function LoginForm() {
       setError(result.error)
       return
     }
-    router.replace('/sales-dashboard')
+    router.replace('/panel-diario')
   }
 
   return (

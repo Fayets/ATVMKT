@@ -44,15 +44,23 @@ def list_llamadas_hoy(user_id: int) -> dict:
     rows.sort(key=lambda l: l.call or datetime.min)
     return {
         "fecha": hoy.isoformat(),
-        "llamadas": [
-            {
-                "hora": _fmt_hora(l.call),
-                "lead": (l.nombre or "").strip(),
-                "closer": (l.closer or "").strip(),
-                "link_llamada": (l.link_llamada or "").strip(),
-            }
-            for l in rows
-        ],
+        "llamadas": [_llamada_item(l) for l in rows],
+    }
+
+
+def _llamada_item(l: Lead) -> dict:
+    status = (l.status or l.estado or "Pendiente").strip() or "Pendiente"
+    return {
+        "id": int(l.id),
+        "hora": _fmt_hora(l.call),
+        "lead": (l.nombre or "").strip(),
+        "closer": (l.closer or "").strip(),
+        "link_llamada": (l.link_llamada or "").strip(),
+        "status": status,
+        "payment": float(l.pago or 0),
+        "owed": float(l.debe or 0),
+        "program_offered": (l.programa_ofrecido or "").strip(),
+        "programada_ofrecido_llamada": (l.programada_ofrecido_llamada or "").strip(),
     }
 
 

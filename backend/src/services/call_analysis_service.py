@@ -42,8 +42,9 @@ Reglas OBLIGATORIAS:
 - LEGIBILIDAD: cada valor debe ser texto ESTRUCTURADO y fácil de escanear. Usá saltos de línea reales (\\n) y viñetas con "- ".
   Patrón preferido por campo:
   1) primera línea = veredicto corto (ej. "Alto", "Decide solo", "Buen fit")
-  2) luego líneas en blanco + bullets "- ..." con evidencia/citas
-  3) si hay contraste (superficie vs real, promesa vs riesgo), usá sub-rótulos en una línea, ej. "Superficie:" / "Real:" en líneas propias
+  2) luego hasta 4 bullets "- ..." de UNA línea (~120 caracteres máx.), sin citas literales largas
+  3) NO uses líneas "Cita: \\"...\\"" con transcripción verbatim; resumí la evidencia en pocas palabras
+  4) si hay contraste (superficie vs real), usá sub-rótulos en una línea, ej. "Superficie:" / "Real:"
 - No inventes: si no hay evidencia, usá "No se evidencia en la llamada".
 - Si la llamada cerró, en razon_real_no_cerrar: primera línea "Cerró" + bullets con por qué sí.
 - Priorizá señales de los primeros ~10 minutos para capacidad_decision.
@@ -69,7 +70,7 @@ Extra:
 10. patrones_y_mejoras: patrones + puntos de mejora para el closer (listas separadas).
 
 Ejemplo de estilo (un campo):
-"Alto\\n\\n- Cita: \\"...\\"\\n- Dolor profundo: falta de sistema de adquisición\\n- Señal de urgencia: agendó ayer"
+"Alto\\n\\n- Dolor profundo: falta de sistema de adquisición\\n- Urgencia: agendó ayer\\n- Lead reconoce 500 DMs sin responder"
 
 Formato (sin nada alrededor):
 {{"nivel_dolor":"...","capacidad_decision":"...","capacidad_economica":"...","fit_real":"...","objecion_diagnostico":"...","cambio_energia":"...","objecion_no_manejada":"...","razon_real_no_cerrar":"...","compromisos_prometidos":"...","patrones_y_mejoras":"..."}}

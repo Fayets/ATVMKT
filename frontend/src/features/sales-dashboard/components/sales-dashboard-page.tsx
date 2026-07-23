@@ -870,11 +870,7 @@ function FunnelCloserVentasBreakdown({
         }
         const body = (await res.json().catch(() => ({}))) as { reports?: Record<string, unknown>[] }
         const closerRows = (Array.isArray(body.reports) ? body.reports : [])
-          .filter(
-            r =>
-              r.kind === 'closer' &&
-              String(r.reporte_tipo || 'ventas').toLowerCase() === 'ventas',
-          )
+          .filter((r) => r.kind === 'closer')
           .map(r => ({
             id: Number(r.id) || 0,
             fecha: String(r.fecha ?? '').slice(0, 10),

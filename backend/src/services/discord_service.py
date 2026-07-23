@@ -114,46 +114,42 @@ class DiscordServices:
         except Exception:
             return False
 
-    def is_closer_marketing_webhook_configured(self) -> bool:
+    def is_call_analysis_webhook_configured(self) -> bool:
         return bool((config("DISCORD_CLOSER_MARKETING_WEBHOOK_URL", default="") or "").strip())
 
-    def send_closer_marketing_to_discord(self, member_name: str, body: dict[str, Any]) -> bool:
+    @staticmethod
+    def _discord_clip(text: str | None, max_len: int = 1000) -> str:
+        raw = (text or "").strip()
+        if not raw:
+            return "—"
+        if len(raw) <= max_len:
+            return raw
+        return raw[: max_len - 1].rstrip() + "…"
+
+    def send_call_analysis_to_discord(
+        self,
+        _body: dict[str, Any],
+        *,
+        pdf_bytes: bytes | None = None,
+        pdf_filename: str = "reporte.pdf",
+    ) -> tuple[bool, str]:
+        """Envía el PDF del análisis Fathom (DISCORD_CLOSER_MARKETING_WEBHOOK_URL)."""
         webhook_url = (config("DISCORD_CLOSER_MARKETING_WEBHOOK_URL", default="") or "").strip()
         if not webhook_url:
-            return False
-
-        embed = {
-            "title": f"REPORTE CLOSER · MARKETING · {member_name.upper()} · {str(body.get('fecha'))}",
-            "color": 0x5865F2,
-            "fields": [
-                {
-                    "name": "LEAD",
-                    "value": (
-                        f"Nombre: **{body.get('nombre_lead') or '—'}**\n"
-                        f"Estado final: **{body.get('estado_final_llamada') or '—'}**\n"
-                        f"Perfil: **{body.get('perfil_lead') or '—'}**"
-                    ),
-                    "inline": False,
-                },
-                {
-                    "name": "CUALITATIVO",
-                    "value": (
-                        f"Objeción/Miedo: {body.get('objecion_miedo') or '—'}\n"
-                        f"Dolores en llamada: {body.get('dolores_llamada') or '—'}\n"
-                        f"Razón de compra: {body.get('razon_compra_final') or '—'}"
-                    ),
-                    "inline": False,
-                },
-                {
-                    "name": "INSIGHTS MARKETING",
-                    "value": body.get("insights_marketing_llamada") or "—",
-                    "inline": False,
-                },
-            ],
-        }
+            return False, "Webhook no configurado."
+        if not pdf_bytes:
+            return False, "No hay PDF para enviar."
 
         try:
-            resp = httpx.post(webhook_url, json={"embeds": [embed]}, timeout=5.0)
-            return resp.is_success
-        except Exception:
-            return False
+            files = {
+                "files[0]": (pdf_filename, pdf_bytes, "application/pdf"),
+            }
+            resp = httpx.post(webhook_url, files=files, timeout=30.0)
+            if resp.is_success:
+                return True, ""
+            detail = resp.text.strip()
+            if len(detail) > 200:
+                detail = detail[:199] + "…"
+            return False, detail or f"Discord respondió {resp.status_code}."
+        except Exception as exc:
+            return False, str(exc)

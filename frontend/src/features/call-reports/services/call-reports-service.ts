@@ -53,6 +53,16 @@ export async function reanalyzeCallReport(id: string): Promise<void> {
   }
 }
 
+export async function sendCallReportToDiscord(id: string): Promise<void> {
+  const res = await apiFetch(`/call-reports/${encodeURIComponent(id)}/discord`, {
+    method: 'POST',
+  })
+  const raw = (await res.json().catch(() => ({}))) as { detail?: string; sent?: boolean }
+  if (!res.ok) {
+    throw new Error(typeof raw.detail === 'string' ? raw.detail : 'No se pudo enviar a Discord.')
+  }
+}
+
 export async function getCallReport(id: string): Promise<CallReport> {
   const res = await apiFetch(`/call-reports/${encodeURIComponent(id)}`)
   const raw = (await res.json().catch(() => ({}))) as CallReport & { detail?: string }

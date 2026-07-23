@@ -5,6 +5,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import Response
 from pony.orm import ObjectNotFound, db_session
+from pydantic import BaseModel
 
 from src.call_reports_export import (
     build_call_reports_pdf,
@@ -31,6 +32,7 @@ from src.services.call_report_service import (
     get_or_create_report,
     is_fathom_link,
     normalize_fathom_url,
+    notify_call_report_discord,
 )
 
 router = APIRouter(prefix="/api/call-reports", tags=["call-reports"], redirect_slashes=False)
@@ -364,6 +366,35 @@ def reanalyze_call_report(
 
     background.add_task(analyze_call_report, rid)
     return CallReportAnalyzeResponse(report_id=rid, estado="pendiente")
+
+
+class DiscordNotifyOut(BaseModel):
+    sent: bool
+    detail: str
+
+
+@router.post("/{report_id}/discord", response_model=DiscordNotifyOut)
+def notify_call_report_discord_endpoint(
+    report_id: str,
+    user_id: Annotated[str, Depends(require_user_id)],
+) -> DiscordNotifyOut:
+    try:
+        rid = int(report_id)
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="report_id o user_id inválido") from e
+    try:
+        notify_call_report_discord(rid, uid)
+    except RuntimeError as e:
+        msg = str(e)
+        if "no configurado" in msg.lower():
+            raise HTTPException(status_code=503, detail=msg) from e
+        if "no encontrado" in msg.lower():
+            raise HTTPException(status_code=404, detail=msg) from e
+        if "no se pudo enviar" in msg.lower():
+            raise HTTPException(status_code=502, detail=msg) from e
+        raise HTTPException(status_code=400, detail=msg) from e
+    return DiscordNotifyOut(sent=True, detail="Análisis enviado a Discord.")
 
 
 @router.delete("/{report_id}")
