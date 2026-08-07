@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import calendar
 import re
-import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
@@ -13,7 +12,11 @@ from zoneinfo import ZoneInfo
 from pony.orm import db_session
 
 from src.models import CloserReport, Lead, OfferedProgram, SeguimientoReport, SetterReport, TeamMember
-from src.services.programs_services import build_program_norm_price_map, program_price_usd_for_prog_raw
+from src.services.programs_services import (
+    build_program_norm_price_map,
+    normalize_program_lookup_key,
+    program_price_usd_for_prog_raw,
+)
 from src.services.reels_services import ReelsServices
 from src.services.stories_service import StoriesService
 
@@ -56,7 +59,8 @@ def month_range(month: str) -> tuple[date, date]:
 
 
 def _lead_effective_dt(row: Lead) -> datetime | None:
-    return row.fecha_bot or row.created_at
+    """Mes operativo alineado con GET /api/leads?month= (dashboard ventas)."""
+    return row.call or row.agendo or row.fecha_bot or row.created_at
 
 
 def _lead_month_ar(row: Lead) -> tuple[int, int] | None:
@@ -72,12 +76,6 @@ def _lead_month_ar(row: Lead) -> tuple[int, int] | None:
 
 def _week_index(day_of_month: int) -> int:
     return min(3, (day_of_month - 1) // 7)
-
-
-def _program_prices_display(user_id: int) -> dict[str, float]:
-    t = unicodedata.normalize("NFD", (name or "").strip())
-    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
-    return " ".join(t.casefold().split())
 
 
 def _program_prices_display(user_id: int) -> dict[str, float]:
@@ -121,9 +119,9 @@ def _lead_facturacion_usd(
     if api_price is not None:
         return float(api_price)
 
-    nk = _norm_program_key(prog)
+    nk = normalize_program_lookup_key(prog)
     for k, v in program_prices.items():
-        if _norm_program_key(k) == nk:
+        if normalize_program_lookup_key(k) == nk:
             return float(v)
     return float(row.ingresos_lead or 0)
 
@@ -226,6 +224,10 @@ def build_resumen(user_id: int, month: str) -> dict[str, Any]:
 
     cash_from_leads = sum(float(r.pago or 0) for r in leads)
     ingresos = cash_from_leads + seguimiento_total
+    cash_desglose = {
+        "pago": round(cash_from_leads, 2),
+        "seguimiento": round(seguimiento_total, 2),
+    }
 
     catalog_defined = len(program_prices) > 0
     leads_with_program = sum(1 for r in leads if (r.programa_ofrecido or "").strip())
@@ -294,6 +296,7 @@ def build_resumen(user_id: int, month: str) -> dict[str, Any]:
         "shows": shows,
         "cierres": cierres,
         "ingresos": round(ingresos, 2),
+        "cash_desglose": cash_desglose,
         "facturacion": round(facturacion, 2),
         "close_rate": round(close_rate, 2),
         "show_rate": round(show_rate, 2),

@@ -810,6 +810,11 @@ class AgentResumenPorSemanaOut(BaseModel):
     cierres: list[int] = Field(default_factory=lambda: [0, 0, 0, 0])
 
 
+class AgentResumenCashDesgloseOut(BaseModel):
+    pago: float = 0
+    seguimiento: float = 0
+
+
 class AgentResumenOut(BaseModel):
     month: str
     conversaciones: int
@@ -818,6 +823,7 @@ class AgentResumenOut(BaseModel):
     shows: int
     cierres: int
     ingresos: float
+    cash_desglose: AgentResumenCashDesgloseOut
     facturacion: float
     close_rate: float
     show_rate: float
