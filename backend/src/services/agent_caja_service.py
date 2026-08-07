@@ -243,36 +243,33 @@ def _build_auditoria_closer(user_id: int, fecha: date, llamadas_rows: list[Lead]
             name = (lead.nombre or "").strip() or f"Lead #{lead.id}"
             pagos_sin_cambio.append(name)
 
-    estado = "ok"
-    detalle = "Sin llamadas agendadas para este día."
+    closer_label = member.nombre if member else CLOSER_AUDIT_NAME
 
-    if llamadas_rows:
-        if pagos_sin_cambio:
-            estado = "datos_incoherentes"
+    if pagos_sin_cambio:
+        estado = "datos_incoherentes"
+        detalle = (
+            f"{len(pagos_sin_cambio)} llamada(s) con pago cargado pero estado pendiente: "
+            f"{', '.join(pagos_sin_cambio[:3])}"
+            + ("…" if len(pagos_sin_cambio) > 3 else "")
+        )
+    elif not reporte_cargado:
+        estado = "sin_reporte"
+        if llamadas_rows:
             detalle = (
-                f"{len(pagos_sin_cambio)} llamada(s) con pago cargado pero estado pendiente: "
-                f"{', '.join(pagos_sin_cambio[:3])}"
-                + ("…" if len(pagos_sin_cambio) > 3 else "")
+                f"Reporte del closer ({closer_label}) no cargado para {fecha.isoformat()}. "
+                f"{len(llamadas_rows)} llamada(s) agendadas."
             )
-        elif llamadas_con_status > 0 and not reporte_cargado:
-            estado = "sospecha_no_carga"
-            closer_label = member.nombre if member else CLOSER_AUDIT_NAME
-            detalle = (
-                f"{llamadas_con_status} llamada(s) con status actualizado pero "
-                f"sin reporte closer de {closer_label} en closer_report ({fecha.isoformat()})."
-            )
-        elif reporte_cargado and llamadas_con_status > 0:
+        else:
+            detalle = f"Reporte del closer ({closer_label}) no cargado para {fecha.isoformat()}."
+    else:
+        estado = "ok"
+        if llamadas_rows:
             detalle = (
                 f"Reporte closer cargado; {llamadas_con_status} llamada(s) con status actualizado "
                 f"y {llamadas_pendientes} pendiente(s)."
             )
-        elif reporte_cargado:
-            detalle = "Reporte closer cargado; todas las llamadas siguen en pendiente."
         else:
-            detalle = (
-                f"{len(llamadas_rows)} llamada(s) agendadas; reporte closer aún no cargado "
-                f"(normal si el día no cerró)."
-            )
+            detalle = f"Reporte closer cargado; sin llamadas agendadas para {fecha.isoformat()}."
 
     return {
         "estado": estado,
@@ -302,25 +299,25 @@ def _build_auditoria_setter(user_id: int, fecha: date) -> dict[str, Any]:
         reporte_cargado = _setter_report_exists(user_id, mid, fecha)
 
     delta_conversaciones = conversaciones_hoy - conversaciones_ayer
+    setter_label = member.nombre if member else SETTER_AUDIT_NAME
 
-    estado = "ok"
-    if delta_chats > 0 and delta_conversaciones <= 0:
+    if not reporte_cargado:
+        estado = "sin_reporte"
+        detalle = (
+            f"Reporte del setter ({setter_label}) no cargado para {fecha.isoformat()}. "
+            f"Chats auto: {chats_hoy} (Δ {delta_chats:+d} vs ayer)."
+        )
+    elif delta_chats > 0 and delta_conversaciones <= 0:
         estado = "sospecha_no_carga"
-        setter_label = member.nombre if member else SETTER_AUDIT_NAME
         detalle = (
             f"Chats subieron +{delta_chats} ({chats_ayer}→{chats_hoy}) pero conversaciones "
-            f"no acompañaron ({conversaciones_ayer}→{conversaciones_hoy}). "
-            f"Revisar reporte setter de {setter_label}."
+            f"no acompañaron ({conversaciones_ayer}→{conversaciones_hoy})."
         )
-    elif reporte_cargado:
+    else:
+        estado = "ok"
         detalle = (
             f"Reporte setter cargado: {conversaciones_hoy} conversaciones "
             f"(Δ {delta_conversaciones:+d} vs ayer). Chats auto: {chats_hoy} (Δ {delta_chats:+d})."
-        )
-    else:
-        detalle = (
-            f"Sin reporte setter para {fecha.isoformat()}. "
-            f"Chats auto: {chats_hoy} (Δ {delta_chats:+d} vs ayer)."
         )
 
     return {
