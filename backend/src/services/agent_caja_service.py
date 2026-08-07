@@ -9,14 +9,15 @@ from zoneinfo import ZoneInfo
 from pony.orm import db_session
 
 from src.models import CallReport, CloserReport, Lead, SetterReport, StorySequence, TeamMember
-from src.services.agent_analytics_service import _match_members
 from src.services.call_report_service import is_fathom_link
+from src.services.closer_report_auto_service import (
+    closer_names_with_calls_on_date,
+    find_closer_member,
+    leads_for_closer_on_date,
+)
 from src.services.programs_services import build_program_norm_price_map, program_price_usd_for_prog_raw
 
 AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
-
-CLOSER_AUDIT_NAME = "Nick"
-SETTER_AUDIT_NAME = "Andrés"
 
 _PENDIENTE_KEYS = frozenset({"", "pendiente", "pending", "agendado"})
 _NO_SHOW_KEYS = frozenset({"no show", "noshow", "no asistio", "no asistió", "no-asistio"})
@@ -65,14 +66,38 @@ def _is_pendiente(raw: str) -> bool:
     return _status_bucket(raw) == "pendiente"
 
 
-def _resolve_member(user_id: int, nombre_fragment: str, rol: str) -> TeamMember | None:
-    matches = [m for m in _match_members(user_id, nombre_fragment) if m.rol == rol and m.activo]
-    if not matches:
-        matches = [m for m in _match_members(user_id, nombre_fragment) if m.rol == rol]
-    if not matches:
-        return None
-    matches.sort(key=lambda m: int(m.id))
-    return matches[0]
+def _members_by_id(user_id: int, rol: str) -> dict[int, TeamMember]:
+    return {
+        int(m.id): m
+        for m in list(TeamMember.select())
+        if int(m.user_id) == user_id and m.rol == rol
+    }
+
+
+def _closer_report_member_ids(user_id: int, fecha: date) -> set[int]:
+    return {
+        int(r.member_id)
+        for r in list(CloserReport.select())
+        if int(r.user_id) == user_id and r.fecha == fecha
+    }
+
+
+def _setter_report_rows(user_id: int, fecha: date) -> list[SetterReport]:
+    return [
+        r
+        for r in list(SetterReport.select())
+        if int(r.user_id) == user_id and r.fecha == fecha
+    ]
+
+
+def _setter_conversaciones(user_id: int, member_id: int, fecha: date) -> int:
+    total = 0
+    for report in list(SetterReport.select()):
+        if int(report.user_id) != user_id or int(report.member_id) != member_id:
+            continue
+        if report.fecha == fecha:
+            total += int(report.conversaciones or 0)
+    return total
 
 
 def _leads_with_call_on_date(user_id: int, fecha: date) -> list[Lead]:
@@ -101,35 +126,60 @@ def _fathom_lead_ids(user_id: int, lead_ids: list[int]) -> set[int]:
 
 
 def _closer_report_exists(user_id: int, member_id: int, fecha: date) -> bool:
-    for report in list(CloserReport.select()):
-        if (
-            int(report.user_id) == user_id
-            and int(report.member_id) == member_id
-            and report.fecha == fecha
-        ):
-            return True
-    return False
+    return member_id in _closer_report_member_ids(user_id, fecha)
 
 
-def _setter_conversaciones(user_id: int, member_id: int, fecha: date) -> int:
-    total = 0
-    for report in list(SetterReport.select()):
-        if int(report.user_id) != user_id or int(report.member_id) != member_id:
+def _closers_sin_reporte(user_id: int, fecha: date) -> list[str]:
+    """Closers con llamadas ese día que no tienen fila en closer_report."""
+    faltantes: list[str] = []
+    for closer_name in sorted(closer_names_with_calls_on_date(user_id, fecha)):
+        member = find_closer_member(user_id, closer_name)
+        if member is None:
+            faltantes.append(closer_name)
             continue
-        if report.fecha == fecha:
-            total += int(report.conversaciones or 0)
-    return total
+        if not _closer_report_exists(user_id, int(member.id), fecha):
+            faltantes.append(member.nombre)
+    return faltantes
 
 
-def _setter_report_exists(user_id: int, member_id: int, fecha: date) -> bool:
-    for report in list(SetterReport.select()):
-        if (
-            int(report.user_id) == user_id
-            and int(report.member_id) == member_id
-            and report.fecha == fecha
-        ):
-            return True
-    return False
+def _build_reportes_closer(user_id: int, fecha: date) -> dict[str, Any]:
+    members = _members_by_id(user_id, "closer")
+    reported_ids = _closer_report_member_ids(user_id, fecha)
+    cargados: list[dict[str, Any]] = []
+    for member_id in sorted(reported_ids):
+        member = members.get(member_id)
+        nombre = member.nombre if member else f"(member #{member_id})"
+        leads = leads_for_closer_on_date(user_id, fecha, nombre) if member else []
+        actualizadas = sum(
+            1 for lead in leads if not _is_pendiente(_lead_status_raw(lead))
+        )
+        cargados.append(
+            {
+                "nombre": nombre,
+                "llamadas": len(leads),
+                "actualizadas": actualizadas,
+            }
+        )
+    cargados.sort(key=lambda x: str(x["nombre"]).casefold())
+    return {"cargados": cargados, "cantidad": len(cargados)}
+
+
+def _build_reportes_setter(user_id: int, fecha: date) -> dict[str, Any]:
+    members = _members_by_id(user_id, "setter")
+    chats_hoy = _count_chats_dia(user_id, fecha)
+    cargados: list[dict[str, Any]] = []
+    for report in sorted(_setter_report_rows(user_id, fecha), key=lambda r: int(r.member_id)):
+        member = members.get(int(report.member_id))
+        nombre = member.nombre if member else f"(member #{report.member_id})"
+        cargados.append(
+            {
+                "nombre": nombre,
+                "conversaciones": int(report.conversaciones or 0),
+                "chats": chats_hoy,
+            }
+        )
+    cargados.sort(key=lambda x: str(x["nombre"]).casefold())
+    return {"cargados": cargados, "cantidad": len(cargados)}
 
 
 def _count_chats_dia(user_id: int, fecha: date) -> int:
@@ -221,12 +271,12 @@ def _build_llamadas_block(user_id: int, fecha: date, rows: list[Lead] | None = N
     }
 
 
-def _build_auditoria_closer(user_id: int, fecha: date, llamadas_rows: list[Lead]) -> dict[str, Any]:
-    member = _resolve_member(user_id, CLOSER_AUDIT_NAME, "closer")
-    reporte_cargado = False
-    if member is not None:
-        reporte_cargado = _closer_report_exists(user_id, int(member.id), fecha)
-
+def _build_auditoria_closer(
+    user_id: int,
+    fecha: date,
+    llamadas_rows: list[Lead],
+    reportes_closer: dict[str, Any],
+) -> dict[str, Any]:
     llamadas_con_status = 0
     llamadas_pendientes = 0
     pagos_sin_cambio: list[str] = []
@@ -243,7 +293,8 @@ def _build_auditoria_closer(user_id: int, fecha: date, llamadas_rows: list[Lead]
             name = (lead.nombre or "").strip() or f"Lead #{lead.id}"
             pagos_sin_cambio.append(name)
 
-    closer_label = member.nombre if member else CLOSER_AUDIT_NAME
+    closers_sin_reporte = _closers_sin_reporte(user_id, fecha)
+    reporte_cargado = int(reportes_closer.get("cantidad") or 0) > 0
 
     if pagos_sin_cambio:
         estado = "datos_incoherentes"
@@ -252,24 +303,29 @@ def _build_auditoria_closer(user_id: int, fecha: date, llamadas_rows: list[Lead]
             f"{', '.join(pagos_sin_cambio[:3])}"
             + ("…" if len(pagos_sin_cambio) > 3 else "")
         )
-    elif not reporte_cargado:
+    elif closers_sin_reporte:
         estado = "sin_reporte"
-        if llamadas_rows:
-            detalle = (
-                f"Reporte del closer ({closer_label}) no cargado para {fecha.isoformat()}. "
-                f"{len(llamadas_rows)} llamada(s) agendadas."
-            )
-        else:
-            detalle = f"Reporte del closer ({closer_label}) no cargado para {fecha.isoformat()}."
-    else:
+        nombres = ", ".join(closers_sin_reporte[:5]) + ("…" if len(closers_sin_reporte) > 5 else "")
+        detalle = (
+            f"Sin reporte closer para {fecha.isoformat()} de: {nombres}."
+            if nombres
+            else f"Ningún closer cargó reporte para {fecha.isoformat()}."
+        )
+    elif reporte_cargado:
         estado = "ok"
+        nombres_ok = ", ".join(
+            str(item.get("nombre") or "") for item in reportes_closer.get("cargados") or []
+        )
         if llamadas_rows:
             detalle = (
-                f"Reporte closer cargado; {llamadas_con_status} llamada(s) con status actualizado "
-                f"y {llamadas_pendientes} pendiente(s)."
+                f"Reportes closer cargados ({nombres_ok}); {llamadas_con_status} llamada(s) "
+                f"con status actualizado y {llamadas_pendientes} pendiente(s)."
             )
         else:
-            detalle = f"Reporte closer cargado; sin llamadas agendadas para {fecha.isoformat()}."
+            detalle = f"Reportes closer cargados ({nombres_ok}); sin llamadas agendadas."
+    else:
+        estado = "sin_reporte"
+        detalle = f"Ningún closer cargó reporte para {fecha.isoformat()}."
 
     return {
         "estado": estado,
@@ -281,42 +337,57 @@ def _build_auditoria_closer(user_id: int, fecha: date, llamadas_rows: list[Lead]
     }
 
 
-def _build_auditoria_setter(user_id: int, fecha: date) -> dict[str, Any]:
+def _build_auditoria_setter(
+    user_id: int,
+    fecha: date,
+    reportes_setter: dict[str, Any],
+) -> dict[str, Any]:
     ayer = fecha.fromordinal(fecha.toordinal() - 1)
-    member = _resolve_member(user_id, SETTER_AUDIT_NAME, "setter")
-
     chats_hoy = _count_chats_dia(user_id, fecha)
     chats_ayer = _count_chats_dia(user_id, ayer)
     delta_chats = chats_hoy - chats_ayer
 
+    members = _members_by_id(user_id, "setter")
+    member_id_by_name = {m.nombre.casefold(): int(m.id) for m in members.values()}
+
     conversaciones_hoy = 0
     conversaciones_ayer = 0
-    reporte_cargado = False
-    if member is not None:
-        mid = int(member.id)
-        conversaciones_hoy = _setter_conversaciones(user_id, mid, fecha)
-        conversaciones_ayer = _setter_conversaciones(user_id, mid, ayer)
-        reporte_cargado = _setter_report_exists(user_id, mid, fecha)
+    sospechosos: list[str] = []
+    for item in reportes_setter.get("cargados") or []:
+        nombre = str(item.get("nombre") or "")
+        conv_hoy = int(item.get("conversaciones") or 0)
+        conversaciones_hoy += conv_hoy
+        member_id = member_id_by_name.get(nombre.casefold())
+        conv_ayer = (
+            _setter_conversaciones(user_id, member_id, ayer) if member_id is not None else 0
+        )
+        conversaciones_ayer += conv_ayer
+        if delta_chats > 0 and (conv_hoy - conv_ayer) <= 0:
+            sospechosos.append(nombre)
 
     delta_conversaciones = conversaciones_hoy - conversaciones_ayer
-    setter_label = member.nombre if member else SETTER_AUDIT_NAME
+    reporte_cargado = int(reportes_setter.get("cantidad") or 0) > 0
 
     if not reporte_cargado:
         estado = "sin_reporte"
         detalle = (
-            f"Reporte del setter ({setter_label}) no cargado para {fecha.isoformat()}. "
+            f"Ningún setter cargó reporte para {fecha.isoformat()}. "
             f"Chats auto: {chats_hoy} (Δ {delta_chats:+d} vs ayer)."
         )
-    elif delta_chats > 0 and delta_conversaciones <= 0:
+    elif sospechosos:
         estado = "sospecha_no_carga"
+        nombres = ", ".join(sospechosos[:5]) + ("…" if len(sospechosos) > 5 else "")
         detalle = (
             f"Chats subieron +{delta_chats} ({chats_ayer}→{chats_hoy}) pero conversaciones "
-            f"no acompañaron ({conversaciones_ayer}→{conversaciones_hoy})."
+            f"no acompañaron para: {nombres}."
         )
     else:
         estado = "ok"
+        nombres_ok = ", ".join(
+            str(item.get("nombre") or "") for item in reportes_setter.get("cargados") or []
+        )
         detalle = (
-            f"Reporte setter cargado: {conversaciones_hoy} conversaciones "
+            f"Reportes setter cargados ({nombres_ok}): {conversaciones_hoy} conversaciones "
             f"(Δ {delta_conversaciones:+d} vs ayer). Chats auto: {chats_hoy} (Δ {delta_chats:+d})."
         )
 
@@ -337,9 +408,15 @@ def _build_auditoria_setter(user_id: int, fecha: date) -> dict[str, Any]:
 def build_caja_dia(user_id: int, fecha: date | None = None) -> dict[str, Any]:
     target = _parse_fecha(fecha)
     llamadas_rows = _leads_with_call_on_date(user_id, target)
+    reportes_closer = _build_reportes_closer(user_id, target)
+    reportes_setter = _build_reportes_setter(user_id, target)
     return {
         "fecha": target.isoformat(),
         "llamadas": _build_llamadas_block(user_id, target, llamadas_rows),
-        "auditoria_closer": _build_auditoria_closer(user_id, target, llamadas_rows),
-        "auditoria_setter": _build_auditoria_setter(user_id, target),
+        "reportes_closer": reportes_closer,
+        "reportes_setter": reportes_setter,
+        "auditoria_closer": _build_auditoria_closer(
+            user_id, target, llamadas_rows, reportes_closer
+        ),
+        "auditoria_setter": _build_auditoria_setter(user_id, target, reportes_setter),
     }

@@ -942,6 +942,28 @@ class AgentCajaLlamadasOut(BaseModel):
     facturacion_del_dia_usd: float = 0
 
 
+class AgentCajaReporteCloserItemOut(BaseModel):
+    nombre: str
+    llamadas: int = 0
+    actualizadas: int = 0
+
+
+class AgentCajaReportesCloserOut(BaseModel):
+    cargados: list[AgentCajaReporteCloserItemOut] = Field(default_factory=list)
+    cantidad: int = 0
+
+
+class AgentCajaReporteSetterItemOut(BaseModel):
+    nombre: str
+    conversaciones: int = 0
+    chats: int = 0
+
+
+class AgentCajaReportesSetterOut(BaseModel):
+    cargados: list[AgentCajaReporteSetterItemOut] = Field(default_factory=list)
+    cantidad: int = 0
+
+
 class AgentCajaAuditoriaCloserOut(BaseModel):
     estado: str = "ok"
     reporte_cargado: bool = False
@@ -966,5 +988,7 @@ class AgentCajaAuditoriaSetterOut(BaseModel):
 class AgentCajaDiaOut(BaseModel):
     fecha: str
     llamadas: AgentCajaLlamadasOut
+    reportes_closer: AgentCajaReportesCloserOut
+    reportes_setter: AgentCajaReportesSetterOut
     auditoria_closer: AgentCajaAuditoriaCloserOut
     auditoria_setter: AgentCajaAuditoriaSetterOut
