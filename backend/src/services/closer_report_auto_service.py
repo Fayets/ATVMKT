@@ -1,4 +1,4 @@
-"""Generación automática del reporte diario de ventas del closer desde leads del panel."""
+"""Generación del reporte diario de ventas del closer desde leads del panel."""
 
 from __future__ import annotations
 
@@ -246,17 +246,3 @@ def generate_daily_reports_for_user(
         )
         generated += 1
     return generated
-
-
-def generate_daily_reports_all_users(*, send_discord: bool = True) -> None:
-    user_ids: set[int] = set()
-    with db_session:
-        for lead in list(Lead.select()):
-            if lead.call is not None:
-                user_ids.add(int(lead.user_id))
-    for uid in sorted(user_ids):
-        try:
-            count = generate_daily_reports_for_user(uid, send_discord=send_discord)
-            print(f"[closer-auto] user={uid} reportes={count}")
-        except Exception as exc:
-            print(f"[closer-auto] user={uid} error: {exc}")

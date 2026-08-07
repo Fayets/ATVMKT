@@ -384,7 +384,7 @@ export function DailyPanelPage({
             title={
               isAdmin
                 ? 'Actualiza el reporte closer de la fecha seleccionada'
-                : 'Genera el reporte closer desde los datos del panel (como a las 23:00)'
+                : 'Genera el reporte closer desde los datos del panel'
             }
           >
             {generatingReport ? 'Generando…' : 'Generar reporte'}

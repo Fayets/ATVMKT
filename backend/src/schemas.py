@@ -915,3 +915,50 @@ class AgentProximaLlamadaItemOut(BaseModel):
 
 class AgentProximasLlamadasOut(BaseModel):
     llamadas: list[AgentProximaLlamadaItemOut] = Field(default_factory=list)
+
+
+class AgentCajaLlamadaDetalleOut(BaseModel):
+    hora: str = ""
+    lead: str = ""
+    closer: str = ""
+    status: str = "pendiente"
+    programa_comprado: str | None = None
+    pago_usd: float = 0
+    tiene_fathom: bool = False
+
+
+class AgentCajaLlamadasOut(BaseModel):
+    total: int = 0
+    detalle: list[AgentCajaLlamadaDetalleOut] = Field(default_factory=list)
+    por_status: dict[str, int] = Field(default_factory=lambda: {"pendiente": 0, "asistio": 0, "no_show": 0})
+    con_venta: int = 0
+    cash_del_dia_usd: float = 0
+    facturacion_del_dia_usd: float = 0
+
+
+class AgentCajaAuditoriaCloserOut(BaseModel):
+    estado: str = "ok"
+    reporte_cargado: bool = False
+    llamadas_con_status_actualizado: int = 0
+    llamadas_pendientes: int = 0
+    pagos_sin_cambio_estado: list[str] = Field(default_factory=list)
+    detalle: str = ""
+
+
+class AgentCajaAuditoriaSetterOut(BaseModel):
+    estado: str = "ok"
+    chats_hoy: int = 0
+    chats_ayer: int = 0
+    delta_chats: int = 0
+    conversaciones_hoy: int = 0
+    conversaciones_ayer: int = 0
+    delta_conversaciones: int = 0
+    reporte_cargado: bool = False
+    detalle: str = ""
+
+
+class AgentCajaDiaOut(BaseModel):
+    fecha: str
+    llamadas: AgentCajaLlamadasOut
+    auditoria_closer: AgentCajaAuditoriaCloserOut
+    auditoria_setter: AgentCajaAuditoriaSetterOut

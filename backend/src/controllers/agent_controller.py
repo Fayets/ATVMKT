@@ -1,4 +1,5 @@
 import re
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -6,12 +7,14 @@ from fastapi.responses import JSONResponse
 
 from src.agent_auth import get_agent_auth, get_agent_user_id
 from src.schemas import (
+    AgentCajaDiaOut,
     AgentContenidoOut,
     AgentLlamadasHoyOut,
     AgentProximasLlamadasOut,
     AgentResumenOut,
 )
 from src.services.agent_analytics_service import build_miembro, build_resumen, current_month_ar
+from src.services.agent_caja_service import build_caja_dia, today_ar
 from src.services.agent_closer_service import list_llamadas_hoy, list_proximas_llamadas
 from src.services.agent_content_service import build_contenido
 
@@ -103,3 +106,17 @@ def agent_closer_proximas_llamadas(
     uid = get_agent_user_id()
     payload = list_proximas_llamadas(uid, ventana)
     return AgentProximasLlamadasOut(**payload)
+
+
+@router.get("/caja-dia", response_model=AgentCajaDiaOut)
+def agent_caja_dia(
+    _: Annotated[None, Depends(get_agent_auth)],
+    fecha: date | None = Query(
+        default=None,
+        description="YYYY-MM-DD; default hoy (America/Argentina/Buenos_Aires)",
+    ),
+) -> AgentCajaDiaOut:
+    uid = get_agent_user_id()
+    target = fecha or today_ar()
+    payload = build_caja_dia(uid, target)
+    return AgentCajaDiaOut(**payload)
