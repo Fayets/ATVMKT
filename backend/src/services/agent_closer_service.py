@@ -69,6 +69,7 @@ def _llamada_item(l: Lead) -> dict:
         "program_offered": (l.programa_ofrecido or "").strip(),
         "programada_ofrecido_llamada": (l.programada_ofrecido_llamada or "").strip(),
         "calificacion_llamada": (getattr(l, "calificacion_llamada", None) or "").strip(),
+        "vino_de_ads": bool(getattr(l, "vino_de_ads", False)),
     }
 
 

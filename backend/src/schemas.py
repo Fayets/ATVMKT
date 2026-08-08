@@ -502,6 +502,7 @@ class LeadOut(BaseModel):
     content_url: str | None = None
     manychat_contact_id: str | None = None
     respondio_auto: bool | None = None
+    vino_de_ads: bool = False
 
 
 class LeadsListResponse(BaseModel):
@@ -567,6 +568,7 @@ class LeadPatchRequest(BaseModel):
         default=None,
         description='"" | "calificado" | "descalificado" — panel diario.',
     )
+    vino_de_ads: bool | None = None
 
 
 class ManualCallCreateRequest(BaseModel):
@@ -580,6 +582,10 @@ class ManualCallCreateRequest(BaseModel):
         description="Hora Argentina HH:MM para la llamada de hoy.",
     )
     ig_handle: str | None = None
+    fecha: str | None = Field(
+        default=None,
+        description="YYYY-MM-DD; si se omite, hoy en Argentina.",
+    )
 
 
 class LeadCreateRequest(BaseModel):
@@ -901,6 +907,7 @@ class AgentLlamadaHoyItemOut(BaseModel):
     program_offered: str = ""
     programada_ofrecido_llamada: str = ""
     calificacion_llamada: str = ""
+    vino_de_ads: bool = False
 
 
 class AgentLlamadasHoyOut(BaseModel):

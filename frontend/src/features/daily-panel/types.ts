@@ -6,6 +6,7 @@ export type DailyCall = {
   call_link: string
   status: string
   calificacion_llamada: '' | 'calificado' | 'descalificado'
+  vino_de_ads: boolean
   program_offered: string
   programada_ofrecido_llamada: string
   payment: number
@@ -17,6 +18,7 @@ export type ManualCallInput = {
   closer: string
   hora: string
   ig_handle?: string
+  fecha?: string
 }
 
 export type DailyCallsResponse = {

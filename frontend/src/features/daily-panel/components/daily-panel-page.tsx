@@ -18,6 +18,7 @@ import {
   patchLeadProgramOffered,
   patchLeadProgramadaOfrecido,
   patchLeadStatus,
+  patchLeadVinoDeAds,
   resolveDefaultCloser,
   buildCloserOptions,
 } from '../services/daily-panel-service'
@@ -32,6 +33,15 @@ import '../daily-panel.css'
 import '../daily-panel-manual-call.css'
 
 const AR_TZ = 'America/Argentina/Buenos_Aires'
+
+function todayIsoArgentina(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: AR_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
 
 function useArgentinaClock(active: boolean): string {
   const [clock, setClock] = useState('')
@@ -79,8 +89,7 @@ export function DailyPanelPage({
   const isAdmin = mode === 'admin' && Boolean(adminToken)
   const { ready, userId } = useAuthUser()
   const { toast } = useToast()
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0])
-  const [fecha, setFecha] = useState('')
+  const [selectedDate, setSelectedDate] = useState(todayIsoArgentina)
   const [calls, setCalls] = useState<DailyCall[]>([])
   const [closerOptions, setCloserOptions] = useState<string[]>([])
   const [programOptions, setProgramOptions] = useState<string[]>([''])
@@ -98,7 +107,6 @@ export function DailyPanelPage({
     async (silent = false) => {
       if (!ready || !userId) {
         setCalls([])
-        setFecha('')
         setLoading(false)
         return
       }
@@ -123,8 +131,7 @@ export function DailyPanelPage({
           .catch(() => setProgramOptions(['']))
         const data = isAdmin
           ? await getAdminDailyCalls(selectedDate, adminToken!, closers, resolvedDefault)
-          : await getDailyCalls(closers, resolvedDefault)
-        setFecha(data.fecha)
+          : await getDailyCalls(selectedDate, closers, resolvedDefault)
         setCalls(data.llamadas)
       } catch (e) {
         if (!silent) {
@@ -266,6 +273,21 @@ export function DailyPanelPage({
     [toast],
   )
 
+  const handleVinoDeAdsChange = useCallback(
+    async (leadId: number, vinoDeAds: boolean) => {
+      try {
+        await patchLeadVinoDeAds(leadId, vinoDeAds)
+        setCalls((prev) =>
+          prev.map((c) => (c.id === leadId ? { ...c, vino_de_ads: vinoDeAds } : c)),
+        )
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'No se pudo guardar.')
+        throw e
+      }
+    },
+    [toast],
+  )
+
   const handleAddManualCall = useCallback(async () => {
     const name = manualName.trim()
     const hora = manualHora.trim()
@@ -291,7 +313,12 @@ export function DailyPanelPage({
           hora,
         })
       } else {
-        await createManualCall({ client_name: name, closer, hora })
+        await createManualCall({
+          client_name: name,
+          closer,
+          hora,
+          fecha: selectedDate,
+        })
       }
       toast('Llamada agregada.')
       setManualOpen(false)
@@ -306,7 +333,7 @@ export function DailyPanelPage({
   }, [manualName, manualHora, manualCloser, defaultCloser, toast, fetchCalls, isAdmin, adminToken, selectedDate])
 
   const handleGenerateReport = useCallback(async () => {
-    const reportDate = isAdmin ? selectedDate : fecha
+    const reportDate = selectedDate
     if (!reportDate) {
       toast('Esperá a que cargue el panel.')
       return
@@ -329,7 +356,7 @@ export function DailyPanelPage({
     } finally {
       setGeneratingReport(false)
     }
-  }, [isAdmin, selectedDate, fecha, calls.length, toast])
+  }, [selectedDate, calls.length, toast])
 
   if (!ready) {
     return (
@@ -347,7 +374,8 @@ export function DailyPanelPage({
     )
   }
 
-  const fechaLabel = fecha ? formatIsoDateDdMmYyyy(fecha) : isAdmin ? formatIsoDateDdMmYyyy(selectedDate) : 'HOY'
+  const isToday = selectedDate === todayIsoArgentina()
+  const fechaLabel = isToday ? 'HOY' : formatIsoDateDdMmYyyy(selectedDate)
   const countLabel =
     calls.length === 1 ? '1 llamada' : `${calls.length} llamadas`
 
@@ -364,17 +392,15 @@ export function DailyPanelPage({
           </p>
         </div>
         <div className="neo-panel__header-meta">
-          {isAdmin ? (
-            <label className="neo-panel__date-field">
-              <span className="sr-only">Fecha</span>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="neo-panel__date-input"
-              />
-            </label>
-          ) : null}
+          <label className="neo-panel__date-field">
+            <span className="sr-only">Fecha</span>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="neo-panel__date-input"
+            />
+          </label>
           {clock ? <span className="neo-panel__clock">{clock}</span> : null}
           <button
             type="button"
@@ -403,7 +429,7 @@ export function DailyPanelPage({
       <section className="neo-panel__module">
         <div className="neo-panel__module-head">
           <h2 className="neo-panel__module-title">
-            {isAdmin ? 'Llamadas del día' : 'Llamadas de hoy'}
+            {isToday ? 'Llamadas de hoy' : 'Llamadas del día'}
           </h2>
           <p className="neo-panel__module-hint">{countLabel}</p>
         </div>
@@ -416,6 +442,7 @@ export function DailyPanelPage({
           onStatusChange={handleStatusChange}
           onCloserChange={handleCloserChange}
           onCalificacionChange={handleCalificacionChange}
+          onVinoDeAdsChange={handleVinoDeAdsChange}
           onFathomLinkChange={handleFathomLinkChange}
           onPaymentChange={handlePaymentChange}
           onOwedChange={handleOwedChange}

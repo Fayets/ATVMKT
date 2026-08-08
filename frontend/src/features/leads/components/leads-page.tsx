@@ -594,7 +594,7 @@ export function LeadsPage() {
   )
 
   const handleInlineUpdate = useCallback(
-    async (id: string, field: string, value: string | number | null) => {
+    async (id: string, field: string, value: string | number | boolean | null) => {
       if (!ready || !userId) return
       const payload: Record<string, unknown> =
         field === 'origin'
@@ -1496,7 +1496,7 @@ function LeadsTableCell({
   editing: boolean
   onStartEdit: () => void
   onCancelEdit: () => void
-  onSave: (value: string | number | null) => void
+  onSave: (value: string | number | boolean | null) => void
   onPreviewText: (title: string, text: string) => void
   readOnly?: boolean
   resolveAgendaBadgeLabel: (raw: string | null | undefined) => string
@@ -1744,6 +1744,31 @@ function LeadsTableCell({
 
   // ── Display mode ──
   const cellClass = "text-[12px] cursor-pointer hover:opacity-80 truncate block max-w-full"
+
+  if (col.type === 'checkbox') {
+    const checked = Boolean(lead.vino_de_ads)
+    if (readOnly || !col.editable) {
+      return (
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled
+          readOnly
+          aria-label={col.label}
+          className="h-3.5 w-3.5 accent-[var(--accent)]"
+        />
+      )
+    }
+    return (
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onSave(e.target.checked)}
+        aria-label={col.label}
+        className="h-3.5 w-3.5 cursor-pointer accent-[var(--accent)]"
+      />
+    )
+  }
 
   if (col.key === 'agenda_point' && !readOnly) {
     const rawAp = String(lead.agenda_point || '').trim()

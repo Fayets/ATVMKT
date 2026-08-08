@@ -23,6 +23,7 @@ type Props = {
     leadId: number,
     calificacion: DailyCall['calificacion_llamada'],
   ) => Promise<void>
+  onVinoDeAdsChange: (leadId: number, vinoDeAds: boolean) => Promise<void>
   onFathomLinkChange: (leadId: number, callLink: string | null) => Promise<void>
   onPaymentChange: (leadId: number, payment: number) => Promise<void>
   onOwedChange: (leadId: number, owed: number) => Promise<void>
@@ -431,6 +432,40 @@ function FathomLinkCell({
   )
 }
 
+function VinoDeAdsCheckbox({
+  leadId,
+  checked,
+  onChange,
+}: {
+  leadId: number
+  checked: boolean
+  onChange: (leadId: number, vinoDeAds: boolean) => Promise<void>
+}) {
+  const [saving, setSaving] = useState(false)
+
+  const handleChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.checked
+    setSaving(true)
+    try {
+      await onChange(leadId, next)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <label className="neo-calls__ads-check" title="¿Vino de ads?">
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={saving}
+        onChange={(e) => void handleChange(e)}
+        aria-label="¿Vino de ads?"
+      />
+    </label>
+  )
+}
+
 export function DailyCallsTable({
   items,
   closerOptions,
@@ -440,6 +475,7 @@ export function DailyCallsTable({
   onStatusChange,
   onCloserChange,
   onCalificacionChange,
+  onVinoDeAdsChange,
   onFathomLinkChange,
   onPaymentChange,
   onOwedChange,
@@ -454,7 +490,7 @@ export function DailyCallsTable({
   if (items.length === 0) {
     return (
       <div className="neo-panel__empty neo-panel__empty--actions">
-        <p>No hay llamadas agendadas para hoy.</p>
+        <p>No hay llamadas agendadas para este día.</p>
         {onAddManualCall ? (
           <button type="button" className="neo-panel__btn" onClick={onAddManualCall}>
             + Agregar llamada manual
@@ -479,6 +515,7 @@ export function DailyCallsTable({
         <div>Closer</div>
         <div>Link Fathom</div>
         <div>Status</div>
+        <div>¿Vino de ads?</div>
         <div>Calif. / Desc.</div>
         <div>Prog. comprado</div>
         <div>Prog. ofrecido</div>
@@ -500,6 +537,11 @@ export function DailyCallsTable({
           />
           <FathomLinkCell leadId={row.id} value={row.call_link} onSave={onFathomLinkChange} />
           <StatusSelect leadId={row.id} status={row.status} onStatusChange={onStatusChange} />
+          <VinoDeAdsCheckbox
+            leadId={row.id}
+            checked={row.vino_de_ads}
+            onChange={onVinoDeAdsChange}
+          />
           <CalificacionToggle
             leadId={row.id}
             value={row.calificacion_llamada}

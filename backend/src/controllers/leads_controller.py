@@ -18,7 +18,8 @@ from src.schemas import (
     LlamadasHoyOut,
     ManualCallCreateRequest,
 )
-from src.services.agent_closer_service import AR_TZ, list_llamadas_hoy
+from src.services.agent_closer_service import AR_TZ, list_llamadas_dia, list_llamadas_hoy
+from src.services.admin_panel_service import parse_call_hora_for_date
 from src.services.programs_services import (
     build_program_norm_price_map,
     program_price_usd_for_prog_raw,
@@ -287,6 +288,7 @@ def _to_lead_out(row: LeadEntity, norm_prices: dict[str, float] | None = None) -
         content_url=row.content_url,
         manychat_contact_id=row.manychat_contact_id,
         respondio_auto=row.respondio_auto,
+        vino_de_ads=bool(getattr(row, "vino_de_ads", False)),
     )
 
 
@@ -419,9 +421,21 @@ def create_manual_call(
     except ValueError as e:
         raise HTTPException(status_code=400, detail="user_id inválido") from e
 
-    call_at = _parse_call_hora_today(body.hora)
+    if body.fecha and str(body.fecha).strip():
+        try:
+            call_date = date.fromisoformat(str(body.fecha).strip())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="Fecha inválida (usar YYYY-MM-DD).") from e
+    else:
+        call_date = datetime.now(AR_TZ).date()
+
+    try:
+        call_at = parse_call_hora_for_date(body.hora, call_date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
     now_ar = datetime.now(AR_TZ).replace(tzinfo=None)
-    anchor = datetime(now_ar.year, now_ar.month, 15, 15, 0, 0)
+    anchor = datetime(call_date.year, call_date.month, 15, 15, 0, 0)
 
     with db_session:
         row = LeadEntity(
@@ -461,13 +475,24 @@ def _parse_month_query(month: str | None) -> tuple[int, int] | None:
 @router.get("/llamadas-hoy", response_model=LlamadasHoyOut)
 def leads_llamadas_hoy(
     user_id: Annotated[str, Depends(require_user_id)],
+    fecha: str | None = Query(
+        default=None,
+        description="YYYY-MM-DD; si se omite, hoy en Argentina.",
+    ),
 ) -> LlamadasHoyOut:
     try:
         uid = int(user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="user_id inválido") from e
 
-    payload = list_llamadas_hoy(uid)
+    if fecha and str(fecha).strip():
+        try:
+            day = date.fromisoformat(str(fecha).strip())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="Parámetro fecha inválido (usar YYYY-MM-DD).") from e
+        payload = list_llamadas_dia(uid, day)
+    else:
+        payload = list_llamadas_hoy(uid)
     return LlamadasHoyOut(**payload)
 
 
@@ -623,6 +648,8 @@ def patch_lead(
             row.closer = (str(data["closer"]).strip() if data["closer"] is not None else "") or ""
         if "calificacion_llamada" in data:
             row.calificacion_llamada = _normalize_calificacion_llamada(data["calificacion_llamada"])
+        if "vino_de_ads" in data:
+            row.vino_de_ads = bool(data["vino_de_ads"])
 
         _sync_dias_para_agendar(row)
 

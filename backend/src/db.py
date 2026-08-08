@@ -1320,6 +1320,45 @@ def _migrate_postgres_weekly_report_feedback_marketing() -> None:
         conn.close()
 
 
+def _migrate_postgres_lead_vino_de_ads() -> None:
+    """Columna vino_de_ads en lead (panel diario / tabla leads)."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public' AND lower(table_name) = 'lead'
+                """
+            )
+            tr = cur.fetchone()
+            if not tr:
+                return
+            physical = tr[0]
+            sql_table = f'"{physical}"' if physical != physical.lower() else physical
+            cur.execute(
+                f"ALTER TABLE {sql_table} ADD COLUMN IF NOT EXISTS "
+                f"vino_de_ads boolean NOT NULL DEFAULT false"
+            )
+    finally:
+        conn.close()
+
+
 def init_db() -> None:
     import src.models  # noqa: F401 — registrar entidades Pony antes del mapping
 
@@ -1345,6 +1384,7 @@ def init_db() -> None:
     _migrate_postgres_lead_calendly_fields()
     _migrate_postgres_call_report_fields()
     _migrate_postgres_lead_calificacion_llamada()
+    _migrate_postgres_lead_vino_de_ads()
     _migrate_postgres_weekly_report_feedback_marketing()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()

@@ -15,6 +15,7 @@ type ApiDailyCallRow = {
   program_offered?: string
   programada_ofrecido_llamada?: string
   calificacion_llamada?: string
+  vino_de_ads?: boolean
 }
 
 function normalizeCalificacion(raw: string | undefined): DailyCall['calificacion_llamada'] {
@@ -60,10 +61,12 @@ function normalizeTeamCloser(closer: string, teamClosers: string[]): string | nu
 }
 
 export async function getDailyCalls(
+  fecha: string,
   teamClosers: string[],
   defaultCloser: string,
 ): Promise<DailyCallsResponse> {
-  const res = await apiFetch('/leads/llamadas-hoy')
+  const q = new URLSearchParams({ fecha })
+  const res = await apiFetch(`/leads/llamadas-hoy?${q}`)
   const raw = (await res.json().catch(() => ({}))) as DailyCallsResponse & {
     detail?: string
     llamadas?: ApiDailyCallRow[]
@@ -90,6 +93,7 @@ export async function getDailyCalls(
       call_link: row.link_llamada || row.call_link || '',
       status: row.status,
       calificacion_llamada: normalizeCalificacion(row.calificacion_llamada),
+      vino_de_ads: Boolean(row.vino_de_ads),
       program_offered: (row.program_offered || '').trim(),
       programada_ofrecido_llamada: (row.programada_ofrecido_llamada || '').trim(),
       payment: Number(row.payment) || 0,
@@ -115,6 +119,7 @@ export async function createManualCall(input: ManualCallInput): Promise<void> {
       closer: input.closer.trim(),
       hora: input.hora.trim(),
       ig_handle: input.ig_handle?.trim() || null,
+      ...(input.fecha ? { fecha: input.fecha } : {}),
     }),
   })
   const raw = await res.json().catch(() => ({}))
@@ -142,6 +147,22 @@ export async function patchLeadCalificacion(
       typeof raw === 'object' && raw && 'detail' in raw
         ? String((raw as { detail: unknown }).detail)
         : 'No se pudo guardar la calificación.'
+    throw new Error(detail)
+  }
+}
+
+export async function patchLeadVinoDeAds(leadId: number, vinoDeAds: boolean): Promise<void> {
+  const res = await apiFetch(`/leads/${encodeURIComponent(String(leadId))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ vino_de_ads: vinoDeAds }),
+  })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo guardar.'
     throw new Error(detail)
   }
 }

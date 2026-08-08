@@ -64,6 +64,7 @@ export type Lead = {
   content_url?: string | null
   manychat_contact_id?: string | null
   respondio_auto?: boolean | null
+  vino_de_ads?: boolean
 }
 
 export type ColumnDef = {
@@ -71,7 +72,7 @@ export type ColumnDef = {
   label: string
   title?: string
   width: number
-  type: 'text' | 'number' | 'date' | 'select' | 'badge' | 'link' | 'currency'
+  type: 'text' | 'number' | 'date' | 'select' | 'badge' | 'link' | 'currency' | 'checkbox'
   editable?: boolean
   options?: string[]
   colors?: Record<string, string>
@@ -205,6 +206,14 @@ export function buildColumns(
     // Estado y equipo
     { key: 'status', label: 'Status', width: 130, type: 'select', editable: true, options: STATUS_OPTIONS, colors: STATUS_COLORS, defaultVisible: true },
     { key: 'origin', label: 'Origen', width: 200, type: 'select', editable: true, options: [...ORIGIN_OPTIONS], colors: ORIGIN_COLORS, defaultVisible: true },
+    {
+      key: 'vino_de_ads',
+      label: '¿Vino de ads?',
+      width: 110,
+      type: 'checkbox',
+      editable: true,
+      defaultVisible: true,
+    },
     // entry_funnel (keyword) no se muestra en esta vista
     { key: 'agenda_point', label: 'Pto agenda', width: 160, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
     { key: 'entry_channel', label: '1er ingreso embudo', width: 180, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },

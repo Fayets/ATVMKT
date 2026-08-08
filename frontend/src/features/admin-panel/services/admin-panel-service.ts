@@ -16,6 +16,7 @@ type ApiDailyCallRow = {
   program_offered?: string
   programada_ofrecido_llamada?: string
   calificacion_llamada?: string
+  vino_de_ads?: boolean
 }
 
 function adminHeaders(token: string): HeadersInit {
@@ -95,6 +96,7 @@ export async function getAdminDailyCalls(
       call_link: row.link_llamada || row.call_link || '',
       status: row.status,
       calificacion_llamada: normalizeCalificacion(row.calificacion_llamada),
+      vino_de_ads: Boolean(row.vino_de_ads),
       program_offered: (row.program_offered || '').trim(),
       programada_ofrecido_llamada: (row.programada_ofrecido_llamada || '').trim(),
       payment: Number(row.payment) || 0,
