@@ -920,6 +920,23 @@ class LlamadasHoyOut(BaseModel):
     llamadas: list[AgentLlamadaHoyItemOut] = Field(default_factory=list)
 
 
+class LeadSinPuntoAgendaItemOut(BaseModel):
+    id: int
+    client_name: str = ""
+    ig_handle: str | None = None
+    scheduled_at: str | None = Field(
+        default=None,
+        description="Fecha/hora de la llamada (columna call).",
+    )
+    agendo: str | None = None
+    setter: str | None = None
+
+
+class LeadsSinPuntoAgendaOut(BaseModel):
+    month: str
+    leads: list[LeadSinPuntoAgendaItemOut] = Field(default_factory=list)
+
+
 class AgentProximaLlamadaItemOut(BaseModel):
     hora: str
     lead: str

@@ -15,6 +15,8 @@ from src.schemas import (
     LeadPatchRequest,
     LeadsListResponse,
     LeadsMetricsOut,
+    LeadsSinPuntoAgendaOut,
+    LeadSinPuntoAgendaItemOut,
     LlamadasHoyOut,
     ManualCallCreateRequest,
 )
@@ -470,6 +472,63 @@ def _parse_month_query(month: str | None) -> tuple[int, int] | None:
     if not (1 <= m <= 12):
         return None
     return y, m
+
+
+def _sin_punto_agenda_item(row: LeadEntity) -> LeadSinPuntoAgendaItemOut:
+    return LeadSinPuntoAgendaItemOut(
+        id=int(row.id),
+        client_name=lead_display_nombre(row.nombre, row.ig),
+        ig_handle=(row.ig or "").strip() or None,
+        scheduled_at=_scheduled_at_from_row(row),
+        agendo=_dt_iso(row.agendo),
+        setter=(row.setter or "").strip() or None,
+    )
+
+
+@router.get("/sin-punto-agenda", response_model=LeadsSinPuntoAgendaOut)
+def leads_sin_punto_agenda(
+    user_id: Annotated[str, Depends(require_user_id)],
+    month: str | None = Query(
+        default=None,
+        description="YYYY-MM; default mes actual en Argentina.",
+    ),
+) -> LeadsSinPuntoAgendaOut:
+    """Agendas del mes (con agendo) que aún no tienen punto de agenda asignado."""
+    try:
+        uid = int(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="user_id inválido") from e
+
+    if month and str(month).strip():
+        month_key = _parse_month_query(month)
+        if month_key is None:
+            raise HTTPException(status_code=400, detail="Parámetro month inválido (usar YYYY-MM).")
+    else:
+        now_ar = datetime.now(_AR)
+        month_key = (now_ar.year, now_ar.month)
+
+    y, mn = month_key
+    month_s = f"{y}-{mn:02d}"
+
+    with db_session:
+        rows = [
+            r
+            for r in list(LeadEntity.select())
+            if int(r.user_id) == uid
+            and r.agendo is not None
+            and not (r.punto_agenda or "").strip()
+        ]
+        rows = [
+            r
+            for r in rows
+            if (mb := _lead_month_ar(r)) is not None and mb == (y, mn)
+        ]
+        rows.sort(key=_lead_sort_ts)
+
+    return LeadsSinPuntoAgendaOut(
+        month=month_s,
+        leads=[_sin_punto_agenda_item(r) for r in rows],
+    )
 
 
 @router.get("/llamadas-hoy", response_model=LlamadasHoyOut)

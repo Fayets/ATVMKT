@@ -341,6 +341,108 @@
   color: var(--neo-text3);
 }
 
+.neo-panel__module--spaced {
+  margin-top: 1.25rem;
+}
+
+.neo-panel__module-desc {
+  margin: 0 0 1rem;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--neo-text2);
+}
+
+.neo-agenda {
+  --neo-agenda-cols:
+    2.5rem minmax(6rem, 1.2fr) minmax(5rem, 0.85fr) minmax(7rem, 0.95fr) minmax(6.5rem, 0.9fr)
+    minmax(5.5rem, 0.65fr);
+  min-width: min(100%, 760px);
+}
+
+.neo-agenda__head,
+.neo-agenda__row {
+  display: grid;
+  grid-template-columns: var(--neo-agenda-cols);
+  column-gap: var(--neo-col-gap);
+  align-items: center;
+}
+
+.neo-agenda__head {
+  padding: 0 0 0.65rem;
+  border-bottom: 1px solid var(--neo-border-dim);
+  font-family: var(--neo-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--neo-text3);
+}
+
+.neo-agenda__row {
+  padding: 0.65rem 0;
+  border-bottom: 1px solid rgba(230, 57, 70, 0.06);
+  font-size: 12px;
+}
+
+.neo-agenda__row:last-child {
+  border-bottom: none;
+}
+
+.neo-agenda__lead,
+.neo-agenda__ig,
+.neo-agenda__call {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.neo-agenda__num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  font-family: var(--neo-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--neo-text3);
+  text-align: center;
+}
+
+.neo-agenda__head .neo-agenda__num {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.neo-agenda__setter-select {
+  width: 100%;
+  min-width: 0;
+}
+
+.neo-agenda__lead {
+  font-weight: 500;
+  color: var(--neo-text);
+}
+
+.neo-agenda__ig {
+  color: var(--neo-text2);
+  font-family: var(--neo-mono);
+  font-size: 11px;
+}
+
+.neo-agenda__call {
+  font-family: var(--neo-mono);
+  font-size: 11px;
+  color: var(--neo-violet);
+}
+
+.neo-agenda__assign-btn {
+  padding: 0.35rem 0.65rem;
+  font-size: 10px;
+}
+
 .neo-panel__empty,
 .neo-panel__loading {
   padding: 2.5rem 1rem;

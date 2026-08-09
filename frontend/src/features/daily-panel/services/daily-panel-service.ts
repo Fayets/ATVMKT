@@ -1,6 +1,6 @@
 import { apiFetch } from '@/lib/api'
 import { DEFAULT_DAILY_CLOSER } from '../constants'
-import type { DailyCall, DailyCallsResponse, ManualCallInput } from '../types'
+import type { DailyCall, DailyCallsResponse, ManualCallInput, PendingAgendaResponse } from '../types'
 
 type ApiDailyCallRow = {
   id: number
@@ -24,20 +24,35 @@ function normalizeCalificacion(raw: string | undefined): DailyCall['calificacion
   return ''
 }
 
-export async function getTeamClosers(): Promise<string[]> {
+export async function getTeamMemberNames(): Promise<{ closers: string[]; setters: string[] }> {
   const res = await apiFetch('/team/members')
   const data = (await res.json().catch(() => ({}))) as {
     closers?: { nombre: string; activo?: boolean }[]
+    setters?: { nombre: string; activo?: boolean }[]
     detail?: string
   }
   if (!res.ok) {
-    throw new Error(typeof data.detail === 'string' ? data.detail : 'No se pudieron cargar los closers.')
+    throw new Error(typeof data.detail === 'string' ? data.detail : 'No se pudo cargar el equipo.')
   }
   const active = (m: { nombre: string; activo?: boolean }) =>
     m.activo !== false && String(m.nombre || '').trim()
-  return [...new Set((data.closers ?? []).filter(active).map((m) => m.nombre.trim()))].sort((a, b) =>
-    a.localeCompare(b, 'es'),
+  const closers = [...new Set((data.closers ?? []).filter(active).map((m) => m.nombre.trim()))].sort(
+    (a, b) => a.localeCompare(b, 'es'),
   )
+  const setters = [...new Set((data.setters ?? []).filter(active).map((m) => m.nombre.trim()))].sort(
+    (a, b) => a.localeCompare(b, 'es'),
+  )
+  return { closers, setters }
+}
+
+export async function getTeamClosers(): Promise<string[]> {
+  const { closers } = await getTeamMemberNames()
+  return closers
+}
+
+export async function getTeamSetters(): Promise<string[]> {
+  const { setters } = await getTeamMemberNames()
+  return setters
 }
 
 /** Usa solo un nombre que exista en el catálogo de Equipo. */
@@ -108,6 +123,35 @@ export async function getDailyCalls(
   }
 
   return { fecha: raw.fecha || '', llamadas }
+}
+
+export async function getPendingAgendaLeads(month: string): Promise<PendingAgendaResponse> {
+  const q = new URLSearchParams({ month })
+  const res = await apiFetch(`/leads/sin-punto-agenda?${q}`)
+  const raw = (await res.json().catch(() => ({}))) as PendingAgendaResponse & { detail?: string }
+  if (!res.ok) {
+    throw new Error(typeof raw.detail === 'string' ? raw.detail : 'No se pudieron cargar las agendas pendientes.')
+  }
+  return {
+    month: raw.month || month,
+    leads: Array.isArray(raw.leads) ? raw.leads : [],
+  }
+}
+
+export async function patchLeadAgendaPoint(leadId: number, agendaPoint: string): Promise<void> {
+  const res = await apiFetch(`/leads/${encodeURIComponent(String(leadId))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ punto_agenda: agendaPoint }),
+  })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo guardar el punto de agenda.'
+    throw new Error(detail)
+  }
 }
 
 export async function createManualCall(input: ManualCallInput): Promise<void> {
@@ -195,6 +239,22 @@ export async function patchLeadCloser(leadId: number, closer: string): Promise<v
       typeof raw === 'object' && raw && 'detail' in raw
         ? String((raw as { detail: unknown }).detail)
         : 'No se pudo actualizar el closer.'
+    throw new Error(detail)
+  }
+}
+
+export async function patchLeadSetter(leadId: number, setter: string): Promise<void> {
+  const res = await apiFetch(`/leads/${encodeURIComponent(String(leadId))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setter: setter.trim() }),
+  })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo actualizar el setter.'
     throw new Error(detail)
   }
 }

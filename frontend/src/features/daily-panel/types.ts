@@ -25,3 +25,17 @@ export type DailyCallsResponse = {
   fecha: string
   llamadas: DailyCall[]
 }
+
+export type PendingAgendaLead = {
+  id: number
+  client_name: string
+  ig_handle: string | null
+  scheduled_at: string | null
+  agendo: string | null
+  setter: string | null
+}
+
+export type PendingAgendaResponse = {
+  month: string
+  leads: PendingAgendaLead[]
+}
