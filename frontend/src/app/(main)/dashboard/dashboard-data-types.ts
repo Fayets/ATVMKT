@@ -71,7 +71,6 @@ export type DashData = {
   ventas: {
     cierres: number
     cashCollected: number
-    ticketPromedio: number
     closeRate: number
     agendas: number
     leads: number

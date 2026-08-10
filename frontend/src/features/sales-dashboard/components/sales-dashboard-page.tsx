@@ -233,15 +233,15 @@ function getMetricExplanation(id: MonthlyMetricId, d: VDData): MetricExplanation
         result: formatCash(d.aov),
         formula:
           d.cierres > 0
-            ? 'Facturación del mes ÷ Cierres del mes.'
-            : 'Sin cierres en el mes: AOV = 0.',
+            ? 'Cash collected del mes ÷ Cantidad de ventas.'
+            : 'Sin ventas en el mes: AOV = 0.',
         data: [
-          { label: 'Facturación', value: formatCash(d.facturacion) },
-          { label: 'Cierres', value: fN(d.cierres) },
+          { label: 'Cash collected', value: formatCash(d.ingresos) },
+          { label: 'Ventas (cierres)', value: fN(d.cierres) },
           { label: 'AOV', value: formatCash(d.aov) },
         ],
         source:
-          'Fuente: facturación desde leads (Prog. comprado) o ingreso en reportes closer; cierres en reportes closer ventas.',
+          'Fuente: cash (Pagó + seguimiento) ÷ ventas (leads con Prog. comprado, o cierres si no hay).',
       }
     case 'cashPorAgenda':
       return {
@@ -1306,7 +1306,7 @@ function SemanalView({ curr }: { curr: VDData }) {
   })
   const tasaAgend = curr.conversacionesByWeek.map((c, i) => c > 0 ? (curr.agendasByWeek[i] / c) * 100 : 0)
   const aovW = curr.cierresByWeek.map((c, i) =>
-    c > 0 ? (curr.byWeek.facturacion[i] ?? 0) / c : 0,
+    c > 0 ? (curr.ingresosByWeek[i] ?? 0) / c : 0,
   )
 
   const rows = [
@@ -1379,7 +1379,6 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
   const noShowsD = wd.noShows[w]
   const cierres = wd.cierres[w]
   const ingresos = wd.ingresos[w]
-  const facturacionD = wd.facturacion[w]
   const showUpD = agendas.map((a, i) => {
     const s = shows[i] ?? 0
     if (a > 0) return (s / a) * 100
@@ -1391,13 +1390,12 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
     return c > 0 ? Number.NaN : 0
   })
   const tasaAgD = conv.map((c, i) => c > 0 ? (agendas[i] / c) * 100 : 0)
-  const aovD = cierres.map((c, i) => (c > 0 ? facturacionD[i] / c : 0))
+  const aovD = cierres.map((c, i) => (c > 0 ? ingresos[i] / c : 0))
 
   const sum = (arr: number[]) => arr.reduce((s, v) => s + v, 0)
   const sumAg = sum(agendas)
   const sumSh = sum(shows)
   const sumCi = sum(cierres)
-  const sumFact = sum(facturacionD)
   const sumIng = sum(ingresos)
   const sumConv = sum(conv)
 
@@ -1421,7 +1419,7 @@ function DiarioView({ curr, semana, setSemana }: { curr: VDData; semana: number;
       total: sumSh > 0 ? (sumCi / sumSh) * 100 : sumCi > 0 ? Number.NaN : 0,
       fmt: fPOrDash,
     },
-    { label: 'AOV', data: aovD, total: sumCi > 0 ? sumFact / sumCi : 0, fmt: formatCash },
+    { label: 'AOV', data: aovD, total: sumCi > 0 ? sumIng / sumCi : 0, fmt: formatCash },
   ]
 
   return (

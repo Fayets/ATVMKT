@@ -243,21 +243,10 @@ def build_resumen(user_id: int, month: str) -> dict[str, Any]:
     )
     facturacion = revenue_leads if revenue_leads > 0 else ingresos_reports
 
-    billing_uses_programs = catalog_defined or any(
-        (r.programa_ofrecido or "").strip()
-        and program_price_usd_for_prog_raw(norm_prices, r.programa_ofrecido) is not None
-        for r in leads
-    )
-    avg_ticket_from_billing: float | None = None
-    if (catalog_defined or billing_uses_programs) and leads_with_program > 0:
-        avg_ticket_from_billing = facturacion / leads_with_program
-
-    if avg_ticket_from_billing is not None:
-        ticket_promedio = avg_ticket_from_billing
-    elif cierres > 0:
-        ticket_promedio = ingresos / cierres
-    else:
-        ticket_promedio = 0.0
+    # Ventas = leads con Prog. comprado; si no hay, cierres del closer.
+    ventas = leads_with_program if leads_with_program > 0 else cierres
+    # AOV = cash collected ÷ cantidad de ventas
+    aov = (ingresos / ventas) if ventas > 0 else 0.0
 
     close_rate = (cierres / shows * 100.0) if shows > 0 else 0.0
     show_rate = (shows / agendas * 100.0) if agendas > 0 else 0.0
@@ -305,7 +294,7 @@ def build_resumen(user_id: int, month: str) -> dict[str, Any]:
         "close_rate": round(close_rate, 2),
         "show_rate": round(show_rate, 2),
         "tasa_agendamiento": round(tasa_agendamiento, 2),
-        "ticket_promedio": round(ticket_promedio, 2),
+        "aov": round(aov, 2),
         "cash_por_chat": round(cash_por_chat, 2),
         "programas": programas,
         "por_semana": por_semana,

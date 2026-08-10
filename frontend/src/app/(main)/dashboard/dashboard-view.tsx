@@ -549,7 +549,6 @@ function emptyDashForMonth(month: string): DashData {
     ventas: {
       cierres: 0,
       cashCollected: 0,
-      ticketPromedio: 0,
       closeRate: 0,
       agendas: 0,
       leads: 0,
@@ -761,7 +760,6 @@ export default function DashboardPage() {
       ventas: {
         cierres: currFunnel.cierres,
         cashCollected: cash,
-        ticketPromedio: currFunnel.ticketPromedio,
         closeRate: currFunnel.closeRate,
         agendas: currFunnel.agendas,
         leads: currLeads.length,

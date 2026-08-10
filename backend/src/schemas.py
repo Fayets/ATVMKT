@@ -836,7 +836,7 @@ class AgentResumenOut(BaseModel):
     close_rate: float
     show_rate: float
     tasa_agendamiento: float
-    ticket_promedio: float
+    aov: float
     cash_por_chat: float
     programas: list[AgentResumenProgramaOut] = Field(default_factory=list)
     por_semana: AgentResumenPorSemanaOut

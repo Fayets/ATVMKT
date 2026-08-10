@@ -18,13 +18,12 @@ export type LeadsFunnel = {
   cierres: number
   ingresos: number       // cash collected (payment)
   facturacion: number    // total revenue billed
-  ticketPromedio: number
   closeRate: number
   showUpRate: number
   tasaAgendamiento: number
   cashPorAgenda: number
   cashPorShow: number
-  aov: number            // average order value (facturacion / cierres)
+  aov: number            // cash collected ÷ cantidad de ventas
 }
 
 export type WeekMetrics = {
@@ -175,13 +174,13 @@ export function calcFunnel(leads: LeadRow[], conversaciones?: number): LeadsFunn
     chats: 0,
     conversaciones: conv,
     agendas, shows, noShows, cierres, ingresos, facturacion,
-    ticketPromedio: cierres > 0 ? ingresos / cierres : 0,
+    // AOV = cash collected ÷ cantidad de ventas
     closeRate: shows > 0 ? (cierres / shows) * 100 : 0,
     showUpRate: agendas > 0 ? ((agendas - noShows) / agendas) * 100 : 0,
     tasaAgendamiento: conv > 0 ? (agendas / conv) * 100 : 0,
     cashPorAgenda: agendas > 0 ? ingresos / agendas : 0,
     cashPorShow: shows > 0 ? ingresos / shows : 0,
-    aov: cierres > 0 ? facturacion / cierres : 0,
+    aov: cierres > 0 ? ingresos / cierres : 0,
   }
 }
 
@@ -423,19 +422,9 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
   const revenueLeads = leads.reduce((s, l) => s + leadFacturacionUsd(l), 0)
   const facturacion = revenueLeads > 0 ? revenueLeads : ingresosReports
 
-  const billingUsesPrograms =
-    catalogDefined ||
-    leads.some(
-      (x) =>
-        String(x.program_offered ?? '').trim() !== '' &&
-        x.program_price_usd != null &&
-        Number.isFinite(Number(x.program_price_usd)),
-    )
-
-  const avgTicketFromBilling =
-    (catalogDefined || billingUsesPrograms) && leadsWithProgramOfferedCount > 0
-      ? facturacion / leadsWithProgramOfferedCount
-      : null
+  /** Cantidad de ventas: leads con Prog. comprado; si no hay, cierres del reporte closer. */
+  const ventas =
+    leadsWithProgramOfferedCount > 0 ? leadsWithProgramOfferedCount : cierres
 
   const funnel: LeadsFunnel = {
     chats,
@@ -446,23 +435,13 @@ export async function getLeadsAnalytics(month: string): Promise<{ leads: LeadRow
     cierres,
     ingresos: cashCollected,
     facturacion,
-    ticketPromedio:
-      avgTicketFromBilling != null
-        ? avgTicketFromBilling
-        : cierres > 0
-          ? cashCollected / cierres
-          : 0,
     closeRate: shows > 0 ? (cierres / shows) * 100 : 0,
     showUpRate: agendas > 0 ? (shows / agendas) * 100 : 0,
     tasaAgendamiento: conversaciones > 0 ? (agendas / conversaciones) * 100 : 0,
     cashPorAgenda: agendas > 0 ? cashCollected / agendas : 0,
     cashPorShow: shows > 0 ? cashCollected / shows : 0,
-    aov:
-      avgTicketFromBilling != null
-        ? avgTicketFromBilling
-        : cierres > 0
-          ? facturacion / cierres
-          : 0,
+    // AOV = cash collected ÷ cantidad de ventas
+    aov: ventas > 0 ? cashCollected / ventas : 0,
   }
 
   // Programs breakdown (solo programa comprado / facturación; no `programada_ofrecido_llamada`)
