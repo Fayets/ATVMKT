@@ -823,10 +823,12 @@ class AgentResumenCashDesgloseOut(BaseModel):
 
 class AgentResumenOut(BaseModel):
     month: str
+    chats: int = 0
     conversaciones: int
     leads_nuevos: int
     agendas: int
     shows: int
+    no_shows: int = 0
     cierres: int
     ingresos: float
     cash_desglose: AgentResumenCashDesgloseOut

@@ -264,6 +264,8 @@ def build_resumen(user_id: int, month: str) -> dict[str, Any]:
     tasa_agendamiento = (agendas / conversaciones * 100.0) if conversaciones > 0 else 0.0
     cash_por_chat = (ingresos / chats) if chats > 0 else 0.0
 
+    no_shows = max(0, agendas - shows)
+
     prog_map: dict[str, dict[str, float | int]] = {}
     for row in leads:
         p = (row.programa_ofrecido or "").strip()
@@ -290,10 +292,12 @@ def build_resumen(user_id: int, month: str) -> dict[str, Any]:
 
     return {
         "month": month.strip(),
+        "chats": chats,
         "conversaciones": conversaciones,
         "leads_nuevos": leads_nuevos,
         "agendas": agendas,
         "shows": shows,
+        "no_shows": no_shows,
         "cierres": cierres,
         "ingresos": round(ingresos, 2),
         "cash_desglose": cash_desglose,
