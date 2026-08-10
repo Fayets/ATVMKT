@@ -1018,3 +1018,29 @@ class AgentCajaDiaOut(BaseModel):
     reportes_setter: AgentCajaReportesSetterOut
     auditoria_closer: AgentCajaAuditoriaCloserOut
     auditoria_setter: AgentCajaAuditoriaSetterOut
+
+
+class AgentCuotaIdRequest(BaseModel):
+    cuota_id: int = Field(gt=0)
+
+
+class AgentCuotaOut(BaseModel):
+    cuota_id: int
+    cliente_nombre: str
+    monto_usd: float
+    estado: str
+    fecha_pago: str | None = None
+    mensaje: str | None = None
+
+
+class AgentCuotaBuscarItemOut(BaseModel):
+    cuota_id: int
+    cliente_nombre: str
+    monto_usd: float
+    fecha_vence: str | None = None
+    estado: str
+    tipo: str = ""
+
+
+class AgentCuotasBuscarOut(BaseModel):
+    cuotas: list[AgentCuotaBuscarItemOut] = Field(default_factory=list)

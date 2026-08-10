@@ -9,6 +9,9 @@ from src.agent_auth import get_agent_auth, get_agent_user_id
 from src.schemas import (
     AgentCajaDiaOut,
     AgentContenidoOut,
+    AgentCuotaIdRequest,
+    AgentCuotaOut,
+    AgentCuotasBuscarOut,
     AgentLlamadasHoyOut,
     AgentProximasLlamadasOut,
     AgentResumenOut,
@@ -17,6 +20,7 @@ from src.services.agent_analytics_service import build_miembro, build_resumen, c
 from src.services.agent_caja_service import build_caja_dia, today_ar
 from src.services.agent_closer_service import list_llamadas_hoy, list_proximas_llamadas
 from src.services.agent_content_service import build_contenido
+from src.services.agent_cuota_service import buscar_cuotas, marcar_cuota_pagada, revertir_cuota_pago
 
 router = APIRouter(prefix="/api/agent", tags=["agent"], redirect_slashes=False)
 
@@ -120,3 +124,40 @@ def agent_caja_dia(
     target = fecha or today_ar()
     payload = build_caja_dia(uid, target)
     return AgentCajaDiaOut(**payload)
+
+
+@router.get("/cuotas/buscar", response_model=AgentCuotasBuscarOut)
+def agent_cuotas_buscar(
+    _: Annotated[None, Depends(get_agent_auth)],
+    cliente: str = Query(..., min_length=1, description="Nombre o fragmento (case-insensitive)"),
+) -> AgentCuotasBuscarOut:
+    uid = get_agent_user_id()
+    q = (cliente or "").strip()
+    if not q:
+        raise HTTPException(status_code=400, detail="El parámetro cliente es obligatorio.")
+    payload = buscar_cuotas(uid, q)
+    return AgentCuotasBuscarOut(**payload)
+
+
+@router.post("/cuota/marcar-pagada", response_model=AgentCuotaOut)
+def agent_cuota_marcar_pagada(
+    body: AgentCuotaIdRequest,
+    _: Annotated[None, Depends(get_agent_auth)],
+) -> AgentCuotaOut:
+    uid = get_agent_user_id()
+    payload = marcar_cuota_pagada(uid, body.cuota_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Cuota {body.cuota_id} no encontrada.")
+    return AgentCuotaOut(**payload)
+
+
+@router.post("/cuota/revertir-pago", response_model=AgentCuotaOut)
+def agent_cuota_revertir_pago(
+    body: AgentCuotaIdRequest,
+    _: Annotated[None, Depends(get_agent_auth)],
+) -> AgentCuotaOut:
+    uid = get_agent_user_id()
+    payload = revertir_cuota_pago(uid, body.cuota_id)
+    if payload is None:
+        raise HTTPException(status_code=404, detail=f"Cuota {body.cuota_id} no encontrada.")
+    return AgentCuotaOut(**payload)

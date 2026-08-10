@@ -361,3 +361,20 @@ class SeguimientoReport(db.Entity):
     nombre_lead = Required(str)
     monto = Required(float, default=0)
     created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+
+class Cuota(db.Entity):
+    """Cuota de pago de un cliente (estado pendiente/pagado)."""
+
+    _table_ = "cuota"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    cliente_nombre = Required(str)
+    monto_usd = Required(float, default=0)
+    estado = Optional(str, default="pendiente")
+    fecha_pago = Optional(date)
+    fecha_vence = Optional(date)
+    tipo = Optional(str, default="")
+    notas = Optional(str, default="")
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
