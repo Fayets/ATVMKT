@@ -3,15 +3,17 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from pony.orm import db_session
 
+from src.env_public import public_site_url
 from src.models import ApiConnection
 from src.schemas import ApiConnectionResponse, ApiConnectionUpsertRequest
 from src.services.anthropic_service import invalidate_claude_status_cache
+from src.services.calendly_webhook_service import ensure_calendly_webhook_subscription
 
-_CALENDLY_CREDENTIAL_KEYS = frozenset({"api_key", "signing_key"})
+_CALENDLY_CREDENTIAL_KEYS = frozenset({"api_key", "signing_key", "webhook_subscription_uri"})
 
 
 def _sanitize_calendly_credentials(creds: dict) -> dict:
-    """Solo persiste PAT y signing key; ignora q_* legacy."""
+    """Solo persiste PAT, signing key y URI de suscripción; ignora q_* legacy."""
     return {k: str(v) if v is not None else "" for k, v in creds.items() if k in _CALENDLY_CREDENTIAL_KEYS}
 
 
@@ -96,6 +98,14 @@ class ConexionesServices:
                         for key in ("token_saved_at", "token_expires_at"):
                             if key not in incoming_credentials and key in previous_credentials:
                                 incoming_credentials[key] = previous_credentials[key]
+
+            if platform.lower() == "calendly":
+                new_key = str(incoming_credentials.get("api_key") or "").strip()
+                if new_key:
+                    webhook_data = ensure_calendly_webhook_subscription(new_key, public_site_url())
+                    incoming_credentials = {**incoming_credentials, **webhook_data}
+
+            if existing:
                 existing.credentials = incoming_credentials
                 existing.updated_at = now
                 if platform.lower() == "claude":
