@@ -34,7 +34,7 @@ from src.controllers.team_controller import router as team_router
 from src.controllers.youtube_controller import router as youtube_router
 from src.controllers.weekly_reports_controller import router as weekly_reports_router
 from src.controllers.webhook_controller import router as webhook_router
-from src.db import db, init_db
+from src.db import backup_critical_tables, db, init_db
 from src.models import ApiConnection
 from src.services.reels_services import ReelsServices
 from src.services.sync_scheduler_service import (
@@ -131,6 +131,7 @@ async def auto_sync_calendly() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    backup_critical_tables()
     init_db()
     archivos = glob.glob(os.path.join(media_dir, "**/*.jpg"), recursive=True)
     print(f"[media] Archivos encontrados: {len(archivos)}")

@@ -1,8 +1,20 @@
+import json
+import logging
+import os
 import re
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from decouple import config
 from pony.orm import *
+
+logger = logging.getLogger(__name__)
+
+_AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+_BACKUP_DIR = "/app/backups"
+_BACKUP_KEEP = 7
+_BACKUP_TABLES = ("setter_report", "closer_report", "teammember")
 
 db = Database()
 
@@ -1357,6 +1369,94 @@ def _migrate_postgres_lead_vino_de_ads() -> None:
             )
     finally:
         conn.close()
+
+
+def _json_backup_value(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
+def backup_critical_tables() -> None:
+    """Dump JSON de tablas críticas antes de migraciones. Nunca bloquea el arranque."""
+    try:
+        os.makedirs(_BACKUP_DIR, exist_ok=True)
+        if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+            print("[backup] Skip: DB_PROVIDER no es postgres")
+            return
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+        except ImportError:
+            print("[backup] Skip: psycopg2 no disponible")
+            return
+
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+        try:
+            payload: dict = {
+                "created_at": datetime.now(_AR_TZ).isoformat(),
+                "tables": {},
+            }
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for table in _BACKUP_TABLES:
+                    cur.execute(
+                        """
+                        SELECT table_name FROM information_schema.tables
+                        WHERE table_schema = 'public' AND lower(table_name) = %s
+                        """,
+                        (table,),
+                    )
+                    tr = cur.fetchone()
+                    if not tr:
+                        payload["tables"][table] = []
+                        continue
+                    physical = tr["table_name"]
+                    sql_table = f'"{physical}"' if physical != physical.lower() else physical
+                    cur.execute(f"SELECT * FROM {sql_table}")
+                    rows = cur.fetchall()
+                    payload["tables"][table] = [
+                        {k: _json_backup_value(v) for k, v in dict(row).items()}
+                        for row in rows
+                    ]
+        finally:
+            conn.close()
+
+        stamp = datetime.now(_AR_TZ).strftime("%Y-%m-%d_%H-%M")
+        path = os.path.join(_BACKUP_DIR, f"backup_{stamp}.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+
+        counts = {t: len(payload["tables"].get(t) or []) for t in _BACKUP_TABLES}
+        print(f"[backup] OK {path} {counts}")
+
+        existing = sorted(
+            f
+            for f in os.listdir(_BACKUP_DIR)
+            if f.startswith("backup_") and f.endswith(".json")
+        )
+        for old_name in existing[:-_BACKUP_KEEP]:
+            old_path = os.path.join(_BACKUP_DIR, old_name)
+            try:
+                os.remove(old_path)
+                print(f"[backup] Eliminado backup viejo {old_path}")
+            except OSError:
+                logger.warning("No se pudo borrar backup viejo %s", old_path, exc_info=True)
+    except Exception:
+        logger.warning("No se pudo crear backup de tablas críticas", exc_info=True)
+        print("[backup] FAILED — el arranque continúa")
 
 
 def init_db() -> None:

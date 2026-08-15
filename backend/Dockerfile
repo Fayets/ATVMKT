@@ -8,7 +8,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 COPY . .
 
-RUN mkdir -p /app/media/stories
+RUN mkdir -p /app/media/stories /app/backups
 
 EXPOSE 8000
 
