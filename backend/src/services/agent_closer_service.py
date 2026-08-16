@@ -26,7 +26,9 @@ def _today_bounds_ar() -> tuple[datetime, datetime, date]:
 def _fmt_hora(call: datetime | None) -> str:
     if call is None:
         return ""
-    return call.strftime("%H:%M")
+    if call.tzinfo is None:
+        call = call.replace(tzinfo=ZoneInfo("UTC"))
+    return call.astimezone(AR_TZ).strftime("%H:%M")
 
 
 def _leads_with_call(user_id: int) -> list[Lead]:
@@ -45,10 +47,19 @@ def list_llamadas_hoy(user_id: int) -> dict:
 
 @db_session
 def list_llamadas_dia(user_id: int, fecha: date) -> dict:
-    inicio = datetime.combine(fecha, time.min)
-    fin = datetime.combine(fecha, time.max)
-    rows = [l for l in _leads_with_call(user_id) if inicio <= l.call <= fin]
-    rows.sort(key=lambda l: l.call or datetime.min)
+    inicio = datetime.combine(fecha, time.min).replace(tzinfo=AR_TZ)
+    fin = datetime.combine(fecha, time.max).replace(tzinfo=AR_TZ)
+
+    def call_ar(l: Lead) -> datetime | None:
+        if l.call is None:
+            return None
+        c = l.call
+        if c.tzinfo is None:
+            c = c.replace(tzinfo=ZoneInfo("UTC"))
+        return c.astimezone(AR_TZ)
+
+    rows = [l for l in _leads_with_call(user_id) if call_ar(l) is not None and inicio <= call_ar(l) <= fin]
+    rows.sort(key=lambda l: call_ar(l) or datetime.min.replace(tzinfo=AR_TZ))
     return {
         "fecha": fecha.isoformat(),
         "llamadas": [_llamada_item(l) for l in rows],
