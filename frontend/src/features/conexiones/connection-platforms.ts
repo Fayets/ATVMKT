@@ -4,6 +4,7 @@ export type ConnectionField = {
   placeholder?: string
   type?: string
   span?: 2
+  multiline?: boolean
 }
 
 export type ConnectionPlatform = {
@@ -33,6 +34,32 @@ const PLATFORMS: ConnectionPlatform[] = [
         'Generá un Personal Access Token y pegalo acá',
         'Creá un webhook en Calendly con la URL de abajo y el evento invitee.created',
         'Copiá el Signing Key del webhook y pegalo en el campo correspondiente',
+      ],
+    },
+  },
+  {
+    key: 'google_calendar',
+    label: 'Google Calendar',
+    icon: '📆',
+    subtitle: 'Trae eventos y reagendas directamente desde Google Calendar',
+    fields: [
+      { key: 'calendar_id', label: 'Calendar ID', placeholder: 'ejemplo@gmail.com o ID del calendario' },
+      {
+        key: 'service_account_json',
+        label: 'Service Account JSON',
+        placeholder: 'Pegá el JSON de la cuenta de servicio',
+        multiline: true,
+        span: 2,
+      },
+    ],
+    guide: {
+      title: 'Cómo configurar Google Calendar',
+      steps: [
+        'Crear un proyecto en Google Cloud Console',
+        'Habilitar la API de Google Calendar',
+        'Crear una cuenta de servicio y descargar el JSON',
+        'Compartir el calendario con el email de la cuenta de servicio',
+        'Pegar el Calendar ID y el JSON acá',
       ],
     },
   },
@@ -152,7 +179,7 @@ const PLATFORMS: ConnectionPlatform[] = [
 ]
 
 const SETUP_ORDER = ['instagram', 'manychat', 'calendly', 'youtube'] as const
-const APP_ORDER = ['calendly', 'ghl', 'manychat', 'instagram', 'youtube', 'claude'] as const
+const APP_ORDER = ['calendly', 'google_calendar', 'ghl', 'manychat', 'instagram', 'youtube', 'claude'] as const
 const LEGACY_EXTRA_ORDER = ['youtube_analytics'] as const
 
 function pick(order: readonly string[]): ConnectionPlatform[] {

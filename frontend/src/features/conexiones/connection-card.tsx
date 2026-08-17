@@ -16,10 +16,19 @@ export type ConnectionRow = {
 
 const WEBHOOK_PLATFORMS = ['manychat', 'calendly'] as const
 const CALENDLY_CREDENTIAL_KEYS = ['api_key', 'signing_key'] as const
+const GOOGLE_CALENDAR_CREDENTIAL_KEYS = ['calendar_id', 'service_account_json'] as const
 
 function calendlyCredentialsOnly(creds: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {}
   for (const key of CALENDLY_CREDENTIAL_KEYS) {
+    out[key] = creds[key] ?? ''
+  }
+  return out
+}
+
+function googleCalendarCredentialsOnly(creds: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const key of GOOGLE_CALENDAR_CREDENTIAL_KEYS) {
     out[key] = creds[key] ?? ''
   }
   return out
@@ -86,6 +95,12 @@ function ConnectionCardInner({
     next_run_at: string | null
     enabled: boolean
   } | null>(null)
+  const [gcalSyncInfo, setGcalSyncInfo] = useState<{
+    interval_minutes: number
+    last_sync_at: string | null
+    next_run_at: string | null
+    enabled: boolean
+  } | null>(null)
   const {
     month: calendlySyncMonth,
     setMonth: setCalendlySyncMonth,
@@ -104,7 +119,13 @@ function ConnectionCardInner({
 
   useEffect(() => {
     if (!connection?.credentials) return
-    setForm(platform.key === 'calendly' ? calendlyCredentialsOnly(connection.credentials) : connection.credentials)
+    setForm(
+      platform.key === 'calendly'
+        ? calendlyCredentialsOnly(connection.credentials)
+        : platform.key === 'google_calendar'
+          ? googleCalendarCredentialsOnly(connection.credentials)
+          : connection.credentials,
+    )
   }, [connection, platform.key])
 
   useEffect(() => {
@@ -156,7 +177,11 @@ function ConnectionCardInner({
       setStatus('loading')
       setErrorMsg('')
       let payload =
-        platform.key === 'calendly' ? calendlyCredentialsOnly(creds) : { ...creds }
+        platform.key === 'calendly'
+          ? calendlyCredentialsOnly(creds)
+          : platform.key === 'google_calendar'
+            ? googleCalendarCredentialsOnly(creds)
+            : { ...creds }
       if (platform.key === 'instagram' && connection?.credentials) {
         const prev = connection.credentials
         if (!String(payload.access_token || '').trim() && prev.access_token?.trim()) {
@@ -267,6 +292,83 @@ function ConnectionCardInner({
     onSyncComplete,
     platform.key,
     refreshCalendlyAutoStatus,
+  ])
+
+  const refreshGcalSyncStatus = useCallback(async () => {
+    if (platform.key !== 'google_calendar') return
+    try {
+      const res = await fetch(`${resolveBackendBase(apiBase)}/gcal/sync-status`, {
+        headers: backendAuthHeaders(),
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as {
+        interval_minutes?: number
+        last_sync_at?: string | null
+        next_run_at?: string | null
+        enabled?: boolean
+      }
+      setGcalSyncInfo({
+        interval_minutes: data.interval_minutes ?? 60,
+        last_sync_at: data.last_sync_at ?? null,
+        next_run_at: data.next_run_at ?? null,
+        enabled: Boolean(data.enabled),
+      })
+    } catch {
+      /* sin sesión o backend caído */
+    }
+  }, [apiBase, platform.key])
+
+  useEffect(() => {
+    if (platform.key !== 'google_calendar' || !isConnected) return
+    void refreshGcalSyncStatus()
+  }, [platform.key, isConnected, refreshGcalSyncStatus, connection?.last_sync_at])
+
+  const syncGcal = useCallback(async () => {
+    if (platform.key !== 'google_calendar') return
+    const calendarId = (form.calendar_id || connection?.credentials?.calendar_id || '').trim()
+    const saJson = (form.service_account_json || connection?.credentials?.service_account_json || '').trim()
+    if (!calendarId || !saJson) {
+      setSyncStatus('Guardá el Calendar ID y el JSON de la cuenta de servicio antes de sincronizar.')
+      return
+    }
+    setSyncing(true)
+    setSyncStatus('Sincronizando…')
+    try {
+      const res = await fetch(`${resolveBackendBase(apiBase)}/gcal/sync`, {
+        method: 'POST',
+        headers: backendAuthHeaders({ 'Content-Type': 'application/json' }),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: string | { msg?: string }[]
+        error?: string
+        synced?: number
+        created?: number
+        updated?: number
+      }
+      if (!res.ok) {
+        const d = data.error ?? data.detail
+        const msg =
+          typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : 'Error al sincronizar'
+        setSyncStatus(`Error: ${msg}`)
+        return
+      }
+      setSyncStatus(`${data.created ?? 0} leads creados, ${data.updated ?? 0} actualizados.`)
+      await refreshGcalSyncStatus()
+      await onSyncComplete?.()
+    } catch (e) {
+      setSyncStatus(e instanceof Error ? e.message : 'Error al sincronizar')
+    } finally {
+      setSyncing(false)
+    }
+  }, [
+    apiBase,
+    connection?.credentials?.calendar_id,
+    connection?.credentials?.service_account_json,
+    form.calendar_id,
+    form.service_account_json,
+    onSyncComplete,
+    platform.key,
+    refreshGcalSyncStatus,
   ])
 
   const syncGhl = useCallback(async () => {
@@ -443,6 +545,45 @@ function ConnectionCardInner({
       </div>
     ) : null
 
+  const gcalSyncBlock =
+    platform.key === 'google_calendar' ? (
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-4">
+        <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+          Sincronizar leads
+        </div>
+        <p className="mb-3 text-[12px] leading-snug text-[var(--text2)]">
+          Auto cada {gcalSyncInfo?.interval_minutes ?? 60} min: el servidor trae eventos de hoy y
+          los próximos 7 días. El botón{' '}
+          <span className="font-semibold text-[var(--text)]">Sincronizar</span> descarga ahora.
+        </p>
+        {gcalSyncInfo ? (
+          <ul className="mb-3 space-y-1 text-[11px] text-[var(--text3)]">
+            <li>
+              Última sync:{' '}
+              {gcalSyncInfo.last_sync_at
+                ? new Date(gcalSyncInfo.last_sync_at).toLocaleString('es-AR')
+                : 'nunca'}
+            </li>
+            <li>
+              Próximo auto-sync:{' '}
+              {gcalSyncInfo.next_run_at
+                ? new Date(gcalSyncInfo.next_run_at).toLocaleString('es-AR')
+                : 'al reiniciar el backend'}
+            </li>
+          </ul>
+        ) : null}
+        <button
+          type="button"
+          disabled={syncing}
+          onClick={() => void syncGcal()}
+          className="rounded-lg border border-[var(--border2)] bg-[var(--bg4)] px-5 py-2 text-[11px] font-semibold uppercase text-[var(--text)] disabled:opacity-50"
+        >
+          {syncing ? 'Sincronizando…' : 'Sincronizar'}
+        </button>
+        {syncStatus ? <p className="mt-3 text-[12px] text-[var(--text2)]">{syncStatus}</p> : null}
+      </div>
+    ) : null
+
   const ghlSyncBlock =
     platform.key === 'ghl' ? (
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-4">
@@ -498,13 +639,23 @@ function ConnectionCardInner({
           <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
             {f.label}
           </label>
-          <input
-            type={f.type || 'text'}
-            value={form[f.key] || ''}
-            onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
-            placeholder={f.placeholder}
-            className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none placeholder:text-[var(--text3)] focus:border-[var(--text3)]"
-          />
+          {f.multiline ? (
+            <textarea
+              value={form[f.key] || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+              placeholder={f.placeholder}
+              rows={8}
+              className="w-full resize-y rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 font-mono text-[12px] text-[var(--text)] outline-none placeholder:text-[var(--text3)] focus:border-[var(--text3)]"
+            />
+          ) : (
+            <input
+              type={f.type || 'text'}
+              value={form[f.key] || ''}
+              onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+              placeholder={f.placeholder}
+              className="w-full rounded-lg border border-[var(--border2)] bg-[var(--bg3)] px-3 py-2 text-[13px] text-[var(--text)] outline-none placeholder:text-[var(--text3)] focus:border-[var(--text3)]"
+            />
+          )}
           {!isSetup && platform.key === 'instagram' && f.key === 'access_token' && (
             <Link
               href="/configuracion/instagram-token-guide"
@@ -599,6 +750,7 @@ function ConnectionCardInner({
             {status === 'success' && <p className="text-sm text-[var(--green)]">Guardado.</p>}
             {status === 'error' && <p className="text-sm text-[var(--text2)]">{errorMsg}</p>}
             {calendlySyncBlock}
+            {gcalSyncBlock}
             {ghlSyncBlock}
             {instagramTestBlock}
             {webhookBlock}
@@ -671,6 +823,7 @@ function ConnectionCardInner({
             </div>
           )}
           {calendlySyncBlock}
+          {gcalSyncBlock}
           {ghlSyncBlock}
           {instagramTestBlock}
           {webhookBlock}

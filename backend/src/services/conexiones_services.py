@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
@@ -8,11 +9,24 @@ from src.schemas import ApiConnectionResponse, ApiConnectionUpsertRequest
 from src.services.anthropic_service import invalidate_claude_status_cache
 
 _CALENDLY_CREDENTIAL_KEYS = frozenset({"api_key", "signing_key"})
+_GOOGLE_CALENDAR_CREDENTIAL_KEYS = frozenset({"service_account_json", "calendar_id"})
 
 
 def _sanitize_calendly_credentials(creds: dict) -> dict:
     """Solo persiste PAT y signing key; ignora q_* legacy."""
     return {k: str(v) if v is not None else "" for k, v in creds.items() if k in _CALENDLY_CREDENTIAL_KEYS}
+
+
+def _sanitize_google_calendar_credentials(creds: dict) -> dict:
+    """Solo persiste Calendar ID y JSON de cuenta de servicio."""
+    out: dict[str, str] = {}
+    for key in _GOOGLE_CALENDAR_CREDENTIAL_KEYS:
+        raw = creds.get(key)
+        if key == "service_account_json" and isinstance(raw, dict):
+            out[key] = json.dumps(raw)
+        else:
+            out[key] = str(raw).strip() if raw is not None else ""
+    return out
 
 
 class ConexionesServices:
@@ -54,6 +68,10 @@ class ConexionesServices:
             for key in _CALENDLY_CREDENTIAL_KEYS:
                 if not str(merged.get(key) or "").strip() and str(previous.get(key) or "").strip():
                     merged[key] = previous[key]
+        elif pl == "google_calendar":
+            for key in _GOOGLE_CALENDAR_CREDENTIAL_KEYS:
+                if not str(merged.get(key) or "").strip() and str(previous.get(key) or "").strip():
+                    merged[key] = previous[key]
         elif pl == "manychat":
             for key in ("api_key", "webhook_token", "bio_keyword"):
                 if not str(merged.get(key) or "").strip() and str(previous.get(key) or "").strip():
@@ -81,6 +99,8 @@ class ConexionesServices:
             incoming_credentials = dict(body.credentials or {})
             if platform.lower() == "calendly":
                 incoming_credentials = _sanitize_calendly_credentials(incoming_credentials)
+            elif platform.lower() == "google_calendar":
+                incoming_credentials = _sanitize_google_calendar_credentials(incoming_credentials)
             if existing:
                 previous_credentials = existing.credentials if isinstance(existing.credentials, dict) else {}
                 incoming_credentials = self._merge_previous_credentials(

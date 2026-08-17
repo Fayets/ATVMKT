@@ -19,6 +19,11 @@ from src.controllers.bio_controller import router as bio_router
 from src.controllers.call_reports_controller import router as call_reports_router
 from src.controllers.calendly_controller import router as calendly_router
 from src.controllers.conexiones_controller import router as conexiones_router
+from src.controllers.google_calendar_controller import (
+    GCAL_AUTO_INTERVAL_MINUTES,
+    GCAL_JOB_ID,
+    router as gcal_router,
+)
 from src.controllers.ghl_controller import router as ghl_router
 # from src.controllers.health_controller import router as health_router
 from src.controllers.master_lists_controller import router as master_lists_router
@@ -129,6 +134,38 @@ async def auto_sync_calendly() -> None:
         print(f"[scheduler] Error general en auto_sync_calendly: {e}")
 
 
+async def auto_sync_gcal() -> None:
+    """Auto-sync Google Calendar (hoy + 7 días) para usuarios con credenciales."""
+    from src.controllers.google_calendar_controller import (
+        list_gcal_user_ids_with_creds,
+        run_gcal_auto_sync_for_user,
+    )
+
+    try:
+        user_ids = list_gcal_user_ids_with_creds()
+        print(
+            f"[scheduler] Google Calendar auto-sync (cada {GCAL_AUTO_INTERVAL_MINUTES} min) "
+            f"para {len(user_ids)} usuario(s)"
+        )
+        for user_id in user_ids:
+            try:
+                result = run_gcal_auto_sync_for_user(int(user_id))
+                if result.get("skipped"):
+                    print(
+                        f"[scheduler] Google Calendar skip user={user_id} reason={result.get('reason')}"
+                    )
+                else:
+                    sync = result.get("sync") or {}
+                    print(
+                        f"[scheduler] Google Calendar sync OK user={user_id} "
+                        f"created={sync.get('created')} updated={sync.get('updated')}"
+                    )
+            except Exception as e:
+                print(f"[scheduler] Google Calendar FAILED user={user_id}: {e}")
+    except Exception as e:
+        print(f"[scheduler] Error general en auto_sync_gcal: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     backup_critical_tables()
@@ -155,6 +192,12 @@ async def lifespan(_: FastAPI):
         id=CALENDLY_JOB_ID,
         replace_existing=True,
     )
+    scheduler.add_job(
+        auto_sync_gcal,
+        trigger=IntervalTrigger(minutes=GCAL_AUTO_INTERVAL_MINUTES),
+        id=GCAL_JOB_ID,
+        replace_existing=True,
+    )
     bind_sync_scheduler(scheduler)
     apply_sync_schedules()
     scheduler.start()
@@ -168,6 +211,10 @@ async def lifespan(_: FastAPI):
     print(
         f"[scheduler] Auto-sync Calendly cada {get_calendly_interval_minutes()} min "
         f"(check liviano → sync solo si hay novedades)"
+    )
+    print(
+        f"[scheduler] Auto-sync Google Calendar cada {GCAL_AUTO_INTERVAL_MINUTES} min "
+        f"(hoy + 7 días)"
     )
     yield
     scheduler.shutdown()
@@ -211,4 +258,5 @@ app.include_router(team_router)
 app.include_router(weekly_reports_router)
 app.include_router(youtube_router)
 app.include_router(calendly_router)
+app.include_router(gcal_router)
 app.include_router(webhook_router)
