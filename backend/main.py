@@ -19,6 +19,7 @@ from src.controllers.bio_controller import router as bio_router
 from src.controllers.call_reports_controller import router as call_reports_router
 from src.controllers.calendly_controller import router as calendly_router
 from src.controllers.conexiones_controller import router as conexiones_router
+from src.controllers.export_controller import router as export_router
 from src.controllers.google_calendar_controller import (
     GCAL_AUTO_INTERVAL_MINUTES,
     GCAL_JOB_ID,
@@ -242,6 +243,7 @@ app.include_router(admin_panel_router)
 app.include_router(auth_router)
 app.include_router(agent_router)
 app.include_router(conexiones_router)
+app.include_router(export_router)
 app.include_router(ghl_router)
 app.include_router(master_lists_router)
 app.include_router(programs_router)

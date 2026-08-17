@@ -20,6 +20,13 @@ GCAL_AUTO_INTERVAL_MINUTES = 60
 _GCAL_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
 _SKIP_EVENT_STATUSES = frozenset({"cancelled"})
 _SKIP_ATTENDEE_STATUSES = frozenset({"declined"})
+GCAL_SYNC_KEYWORDS = [
+    "aumenta tu valor",
+    "atv advantage",
+    "atv auditoria",
+    "atv mentoria",
+    "atv boost",
+]
 
 
 def require_user_id(
@@ -325,6 +332,10 @@ def _run_gcal_sync(uid: int) -> dict[str, Any]:
             skipped += 1
             continue
         agendo_at = _parse_gcal_created(str(event.get("created") or "") or None)
+        summary = str(event.get("summary") or "").strip().casefold()
+        if not any(kw in summary for kw in GCAL_SYNC_KEYWORDS):
+            skipped += 1
+            continue
         people = _event_people(event, skip_emails)
         if not people:
             skipped += 1

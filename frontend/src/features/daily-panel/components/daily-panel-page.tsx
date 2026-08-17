@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { apiFetch, backendAuthHeaders, formatApiDetail } from '@/lib/api'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { useToast } from '@/shared/components/toast'
 import { formatIsoDateDdMmYyyy } from '@/shared/lib/format-utils'
@@ -122,6 +123,7 @@ export function DailyPanelPage({
   const [manualCloser, setManualCloser] = useState('')
   const [manualSaving, setManualSaving] = useState(false)
   const [generatingReport, setGeneratingReport] = useState(false)
+  const [downloadingBackup, setDownloadingBackup] = useState(false)
   const clock = useArgentinaClock(ready && Boolean(userId))
   const operativeMonth = monthKeyFromIsoDate(selectedDate)
 
@@ -431,6 +433,35 @@ export function DailyPanelPage({
     }
   }, [selectedDate, calls.length, toast])
 
+  const downloadFullBackup = useCallback(async () => {
+    setDownloadingBackup(true)
+    try {
+      const res = await apiFetch('/export/full', { headers: backendAuthHeaders() })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { detail?: unknown }
+        toast(`No se pudo descargar el backup: ${formatApiDetail(data.detail, res.statusText)}`)
+        return
+      }
+      const blob = await res.blob()
+      const cd = res.headers.get('Content-Disposition') || ''
+      const match = /filename=\"?([^\";]+)\"?/i.exec(cd)
+      const filename = match?.[1] || `atv-backup-${new Date().toISOString().slice(0, 10)}.json`
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      toast('Backup descargado')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Error al descargar el backup')
+    } finally {
+      setDownloadingBackup(false)
+    }
+  }, [toast])
+
   if (!ready) {
     return (
       <PanelShell>
@@ -547,6 +578,25 @@ export function DailyPanelPage({
           onSetterChange={handleSetterChange}
         />
       </section>
+
+      {isAdmin ? (
+        <section className="neo-panel__module neo-panel__module--spaced">
+          <div className="neo-panel__module-head">
+            <h2 className="neo-panel__module-title">Backup de datos</h2>
+          </div>
+          <p className="neo-panel__module-desc">
+            Descargá un JSON con leads, reportes, equipo, historias, reels y listas maestras de tu cuenta.
+          </p>
+          <button
+            type="button"
+            disabled={downloadingBackup}
+            onClick={() => void downloadFullBackup()}
+            className="neo-panel__btn"
+          >
+            {downloadingBackup ? 'Descargando…' : 'Descargar backup completo'}
+          </button>
+        </section>
+      ) : null}
 
       <AgendaPointPickerModal
         open={Boolean(agendaModalLead)}
