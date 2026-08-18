@@ -98,6 +98,7 @@ export const STATUS_COLORS: Record<string, string> = {
   'No show': '#F87171',
   'Re-agenda': '#FB923C',
   Descalificado: '#A855F7',
+  Cancelada: '#EF4444',
   Pendiente: '#94A3B8',
 }
 
@@ -109,7 +110,16 @@ export const PROGRAM_COLORS: Record<string, string> = {
   Mentoria: '#22C55E',
 }
 
-export const STATUS_OPTIONS = ['Pendiente', 'Seguimiento', 'Seña', 'Cerrado', 'No show', 'Re-agenda', 'Descalificado']
+export const STATUS_OPTIONS = [
+  'Pendiente',
+  'Seguimiento',
+  'Seña',
+  'Cerrado',
+  'No show',
+  'Re-agenda',
+  'Descalificado',
+  'Cancelada',
+]
 export const PROGRAM_OPTIONS = ['', 'Boost', 'Advantage', 'Mentoria']
 export const ORIGIN_OPTIONS = ['Referido', 'Setter', 'Youtube', 'Lead viejo (seguimiento)'] as const
 
@@ -170,6 +180,10 @@ export function canonicalLeadStatus(raw: string | null | undefined): string {
     reagenda: 'Re-agenda',
     seña: 'Seña',
     sena: 'Seña',
+    cancelada: 'Cancelada',
+    cancelado: 'Cancelada',
+    cancelled: 'Cancelada',
+    canceled: 'Cancelada',
   }
   if (synonyms[n]) return synonyms[n]
   const fromOptions = STATUS_OPTIONS.find((o) => normStatusKey(o) === n)

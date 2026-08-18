@@ -101,13 +101,13 @@ def _setter_conversaciones(user_id: int, member_id: int, fecha: date) -> int:
 
 
 def _leads_with_call_on_date(user_id: int, fecha: date) -> list[Lead]:
-    inicio, fin = _day_bounds(fecha)
-    rows = [
-        l
-        for l in list(Lead.select())
-        if int(l.user_id) == user_id and l.call is not None and inicio <= l.call <= fin
-    ]
-    rows.sort(key=lambda l: l.call or datetime.min)
+    rows = []
+    for l in list(Lead.select()):
+        if int(l.user_id) != user_id or l.call is None:
+            continue
+        call_ar = l.call.replace(tzinfo=ZoneInfo("UTC")).astimezone(AR_TZ)
+        if call_ar.date() == fecha:
+            rows.append(l)
     return rows
 
 
@@ -248,7 +248,10 @@ def _build_llamadas_block(user_id: int, fecha: date, rows: list[Lead] | None = N
         link = (lead.link_llamada or "").strip()
         tiene_fathom = is_fathom_link(link) or int(lead.id) in fathom_ids
 
-        hora = lead.call.strftime("%H:%M") if lead.call else ""
+        if lead.call:
+            hora = lead.call.replace(tzinfo=ZoneInfo("UTC")).astimezone(AR_TZ).strftime("%H:%M")
+        else:
+            hora = ""
         detalle.append(
             {
                 "hora": hora,
