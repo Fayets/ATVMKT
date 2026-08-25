@@ -37,6 +37,12 @@ const navigation: NavGroup[] = [
     href: '/dashboard',
     items: [],
   },
+  {
+    title: 'Dashboard ads',
+    icon: '◆',
+    href: '/ads',
+    items: [],
+  },
 ]
 
 const dataGroups: NavGroup[] = [

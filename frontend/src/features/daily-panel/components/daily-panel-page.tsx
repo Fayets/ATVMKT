@@ -14,6 +14,7 @@ import {
   getTeamMemberNames,
   patchLeadSetter,
   patchLeadAgendaPoint,
+  patchLeadEntryChannel,
   patchLeadCalificacion,
   patchLeadCallLink,
   patchLeadCloser,
@@ -112,6 +113,7 @@ export function DailyPanelPage({
   const [pendingAgendaMonth, setPendingAgendaMonth] = useState('')
   const [pendingLoading, setPendingLoading] = useState(true)
   const [agendaModalLead, setAgendaModalLead] = useState<PendingAgendaLead | null>(null)
+  const [baseModalLead, setBaseModalLead] = useState<PendingAgendaLead | null>(null)
   const [closerOptions, setCloserOptions] = useState<string[]>([])
   const [setterOptions, setSetterOptions] = useState<string[]>([])
   const [programOptions, setProgramOptions] = useState<string[]>([''])
@@ -328,6 +330,23 @@ export function DailyPanelPage({
         )
       } catch (e) {
         toast(e instanceof Error ? e.message : 'No se pudo guardar.')
+        throw e
+      }
+    },
+    [toast],
+  )
+
+  const handleAssignEntryChannel = useCallback(
+    async (leadId: number, value: string) => {
+      try {
+        await patchLeadEntryChannel(leadId, value)
+        // la fila se queda: sigue pendiente de su punto de agenda, que es lo que lista esta tabla
+        setPendingAgenda((prev) =>
+          prev.map((l) => (l.id === leadId ? { ...l, entry_channel: value } : l)),
+        )
+        toast('Punto de agenda base guardado.')
+      } catch (e) {
+        toast(e instanceof Error ? e.message : 'No se pudo guardar el punto de agenda base.')
         throw e
       }
     },
@@ -575,6 +594,7 @@ export function DailyPanelPage({
           setterOptions={setterOptions}
           loading={pendingLoading}
           onAssign={(lead) => setAgendaModalLead(lead)}
+          onAssignBase={(lead) => setBaseModalLead(lead)}
           onSetterChange={handleSetterChange}
         />
       </section>
@@ -607,6 +627,21 @@ export function DailyPanelPage({
           if (!agendaModalLead) return
           await handleAssignAgendaPoint(agendaModalLead.id, value)
           setAgendaModalLead(null)
+        }}
+        onCacheReel={() => undefined}
+        onCacheSequence={() => undefined}
+        onCacheYoutube={() => undefined}
+      />
+
+      <AgendaPointPickerModal
+        open={Boolean(baseModalLead)}
+        modalTitle="Punto de agenda base"
+        onClose={() => setBaseModalLead(null)}
+        hasAssignedPuntoAgenda={Boolean(baseModalLead?.entry_channel?.trim())}
+        onSavePuntoAgenda={async (value) => {
+          if (!baseModalLead) return
+          await handleAssignEntryChannel(baseModalLead.id, value)
+          setBaseModalLead(null)
         }}
         onCacheReel={() => undefined}
         onCacheSequence={() => undefined}

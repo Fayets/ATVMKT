@@ -932,6 +932,10 @@ class LeadSinPuntoAgendaItemOut(BaseModel):
     )
     agendo: str | None = None
     setter: str | None = None
+    entry_channel: str | None = Field(
+        default=None,
+        description="Punto de agenda base (columna via): la pieza que trajo al lead.",
+    )
 
 
 class LeadsSinPuntoAgendaOut(BaseModel):

@@ -123,6 +123,26 @@ const PLATFORMS: ConnectionPlatform[] = [
     },
   },
   {
+    key: 'meta_ads',
+    label: 'Meta Ads',
+    icon: '📊',
+    subtitle: 'Trackea el rendimiento de tus campañas publicitarias de Meta',
+    fields: [
+      { key: 'ad_account_id', label: 'Ad Account ID', placeholder: 'act_XXXXXXXXXX' },
+      { key: 'access_token', label: 'Access Token', placeholder: 'Token de acceso de Meta Ads', type: 'password' },
+    ],
+    guide: {
+      title: 'Cómo configurar Meta Ads',
+      steps: [
+        'Entrá a Meta for Developers y creá (o usá) una app con Marketing API',
+        'Generá un Access Token con permisos ads_read (y ads_management si hace falta)',
+        'Copiá el Ad Account ID desde Ads Manager (formato act_XXXXXXXXXX)',
+        'Pegá ambos campos acá y guardá la conexión',
+        'En Meta Ads usá «Sincronizar» para traer campañas del mes',
+      ],
+    },
+  },
+  {
     key: 'youtube',
     label: 'YouTube',
     icon: '▶️',
@@ -179,7 +199,7 @@ const PLATFORMS: ConnectionPlatform[] = [
 ]
 
 const SETUP_ORDER = ['instagram', 'manychat', 'calendly', 'youtube'] as const
-const APP_ORDER = ['calendly', 'google_calendar', 'ghl', 'manychat', 'instagram', 'youtube', 'claude'] as const
+const APP_ORDER = ['calendly', 'google_calendar', 'ghl', 'manychat', 'instagram', 'meta_ads', 'youtube', 'claude'] as const
 const LEGACY_EXTRA_ORDER = ['youtube_analytics'] as const
 
 function pick(order: readonly string[]): ConnectionPlatform[] {

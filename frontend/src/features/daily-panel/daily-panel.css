@@ -355,8 +355,8 @@
 .neo-agenda {
   --neo-agenda-cols:
     2.5rem minmax(6rem, 1.2fr) minmax(5rem, 0.85fr) minmax(7rem, 0.95fr) minmax(6.5rem, 0.9fr)
-    minmax(5.5rem, 0.65fr);
-  min-width: min(100%, 760px);
+    minmax(5.5rem, 0.65fr) minmax(5.5rem, 0.65fr);
+  min-width: min(100%, 860px);
 }
 
 .neo-agenda__head,

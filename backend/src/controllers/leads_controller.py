@@ -482,6 +482,7 @@ def _sin_punto_agenda_item(row: LeadEntity) -> LeadSinPuntoAgendaItemOut:
         scheduled_at=_scheduled_at_from_row(row),
         agendo=_dt_iso(row.agendo),
         setter=(row.setter or "").strip() or None,
+        entry_channel=(row.via or "").strip() or None,
     )
 
 

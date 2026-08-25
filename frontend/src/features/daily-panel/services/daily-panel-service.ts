@@ -154,6 +154,22 @@ export async function patchLeadAgendaPoint(leadId: number, agendaPoint: string):
   }
 }
 
+export async function patchLeadEntryChannel(leadId: number, entryChannel: string): Promise<void> {
+  const res = await apiFetch(`/leads/${encodeURIComponent(String(leadId))}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entry_channel: entryChannel }),
+  })
+  const raw = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const detail =
+      typeof raw === 'object' && raw && 'detail' in raw
+        ? String((raw as { detail: unknown }).detail)
+        : 'No se pudo guardar el punto de agenda base.'
+    throw new Error(detail)
+  }
+}
+
 export async function createManualCall(input: ManualCallInput): Promise<void> {
   const res = await apiFetch('/leads/manual-call', {
     method: 'POST',

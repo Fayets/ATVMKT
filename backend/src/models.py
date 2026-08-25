@@ -349,6 +349,30 @@ class AppSyncSettings(db.Entity):
     updated_at = Optional(datetime)
 
 
+class AdsCampaign(db.Entity):
+    """Métricas de campañas Meta Ads por usuario y mes de insights."""
+
+    _table_ = "ads_campaign"
+
+    id = PrimaryKey(int, auto=True)
+    user_id = Required(int, index=True)
+    campaign_id = Required(str)
+    nombre = Optional(str, default="")
+    estado = Optional(str, default="")
+    spend = Required(float, default=0)
+    impressions = Required(int, default=0)
+    clicks = Required(int, default=0)
+    conversions = Required(int, default=0)
+    cost_per_conversion = Required(float, default=0)
+    reach = Required(int, default=0)
+    period_start = Required(date)
+    period_end = Optional(date)
+    fecha_sync = Required(datetime, default=lambda: datetime.utcnow())
+    created_at = Required(datetime, default=lambda: datetime.utcnow())
+
+    composite_key(user_id, campaign_id, period_start)
+
+
 class SeguimientoReport(db.Entity):
     """Cobranzas / seguimiento declaradas por setter, closer o cash; suman a cash collected del mes."""
 

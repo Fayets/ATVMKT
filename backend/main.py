@@ -25,6 +25,11 @@ from src.controllers.google_calendar_controller import (
     GCAL_JOB_ID,
     router as gcal_router,
 )
+from src.controllers.meta_ads_controller import (
+    META_ADS_AUTO_INTERVAL_MINUTES,
+    META_ADS_JOB_ID,
+    router as meta_ads_router,
+)
 from src.controllers.ghl_controller import router as ghl_router
 # from src.controllers.health_controller import router as health_router
 from src.controllers.master_lists_controller import router as master_lists_router
@@ -34,6 +39,7 @@ from src.controllers.keywords_controller import router as keywords_router
 from src.controllers.leads_controller import router as leads_router
 from src.controllers.hot_leads_controller import router as hot_leads_router
 from src.controllers.reels_controller import router as reels_router
+from src.controllers.reportes_controller import router as reportes_router
 from src.controllers.stories_controller import router as stories_router
 from src.controllers.sync_settings_controller import router as sync_settings_router
 from src.controllers.team_controller import router as team_router
@@ -167,6 +173,39 @@ async def auto_sync_gcal() -> None:
         print(f"[scheduler] Error general en auto_sync_gcal: {e}")
 
 
+async def auto_sync_meta_ads() -> None:
+    """Auto-sync Meta Ads (mes calendario AR) para usuarios con credenciales."""
+    from src.controllers.meta_ads_controller import (
+        list_meta_ads_user_ids_with_creds,
+        run_meta_ads_auto_sync_for_user,
+    )
+
+    try:
+        user_ids = list_meta_ads_user_ids_with_creds()
+        print(
+            f"[scheduler] Meta Ads auto-sync (cada {META_ADS_AUTO_INTERVAL_MINUTES} min) "
+            f"para {len(user_ids)} usuario(s)"
+        )
+        for user_id in user_ids:
+            try:
+                result = run_meta_ads_auto_sync_for_user(int(user_id))
+                if result.get("skipped"):
+                    print(
+                        f"[scheduler] Meta Ads skip user={user_id} reason={result.get('reason')}"
+                    )
+                else:
+                    sync = result.get("sync") or {}
+                    print(
+                        f"[scheduler] Meta Ads sync OK user={user_id} "
+                        f"created={sync.get('created')} updated={sync.get('updated')} "
+                        f"campaigns={sync.get('campaigns')}"
+                    )
+            except Exception as e:
+                print(f"[scheduler] Meta Ads FAILED user={user_id}: {e}")
+    except Exception as e:
+        print(f"[scheduler] Error general en auto_sync_meta_ads: {e}")
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     backup_critical_tables()
@@ -199,6 +238,12 @@ async def lifespan(_: FastAPI):
         id=GCAL_JOB_ID,
         replace_existing=True,
     )
+    scheduler.add_job(
+        auto_sync_meta_ads,
+        trigger=IntervalTrigger(minutes=META_ADS_AUTO_INTERVAL_MINUTES),
+        id=META_ADS_JOB_ID,
+        replace_existing=True,
+    )
     bind_sync_scheduler(scheduler)
     apply_sync_schedules()
     scheduler.start()
@@ -216,6 +261,10 @@ async def lifespan(_: FastAPI):
     print(
         f"[scheduler] Auto-sync Google Calendar cada {GCAL_AUTO_INTERVAL_MINUTES} min "
         f"(hoy + 7 días)"
+    )
+    print(
+        f"[scheduler] Auto-sync Meta Ads cada {META_ADS_AUTO_INTERVAL_MINUTES} min "
+        f"(mes calendario AR)"
     )
     yield
     scheduler.shutdown()
@@ -257,8 +306,10 @@ app.include_router(bio_router)
 app.include_router(stories_router)
 app.include_router(sync_settings_router)
 app.include_router(team_router)
+app.include_router(reportes_router)
 app.include_router(weekly_reports_router)
 app.include_router(youtube_router)
 app.include_router(calendly_router)
 app.include_router(gcal_router)
+app.include_router(meta_ads_router)
 app.include_router(webhook_router)

@@ -33,6 +33,8 @@ export type PendingAgendaLead = {
   scheduled_at: string | null
   agendo: string | null
   setter: string | null
+  /** Punto de agenda base (columna `via`): la pieza que trajo al lead. */
+  entry_channel: string | null
 }
 
 export type PendingAgendaResponse = {

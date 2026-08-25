@@ -12,9 +12,20 @@ from pony.orm import *
 logger = logging.getLogger(__name__)
 
 _AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
-_BACKUP_DIR = "/app/backups"
 _BACKUP_KEEP = 7
 _BACKUP_TABLES = ("setter_report", "closer_report", "teammember")
+
+
+def _resolve_backup_dir() -> str:
+    """En Docker usa /app/backups; en local, backend/backups (escribible)."""
+    env = (os.environ.get("BACKUP_DIR") or config("BACKUP_DIR", default="") or "").strip()
+    if env:
+        return env
+    docker_root = "/app"
+    if os.path.isdir(docker_root) and os.access(docker_root, os.W_OK):
+        return os.path.join(docker_root, "backups")
+    backend_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(backend_root, "backups")
 
 db = Database()
 
@@ -1371,6 +1382,57 @@ def _migrate_postgres_lead_vino_de_ads() -> None:
         conn.close()
 
 
+def _migrate_postgres_ads_campaign() -> None:
+    """Tabla ads_campaign: métricas de campañas Meta Ads por mes."""
+    if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
+        return
+    try:
+        import psycopg2
+    except ImportError:
+        return
+    try:
+        conn = psycopg2.connect(
+            user=config("DB_USER"),
+            password=config("DB_PASS"),
+            host=config("DB_HOST"),
+            dbname=config("DB_NAME"),
+        )
+    except Exception:
+        return
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ads_campaign (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    campaign_id TEXT NOT NULL,
+                    nombre TEXT NOT NULL DEFAULT '',
+                    estado TEXT NOT NULL DEFAULT '',
+                    spend FLOAT NOT NULL DEFAULT 0,
+                    impressions INTEGER NOT NULL DEFAULT 0,
+                    clicks INTEGER NOT NULL DEFAULT 0,
+                    conversions INTEGER NOT NULL DEFAULT 0,
+                    cost_per_conversion FLOAT NOT NULL DEFAULT 0,
+                    reach INTEGER NOT NULL DEFAULT 0,
+                    period_start DATE,
+                    period_end DATE,
+                    fecha_sync TIMESTAMP NOT NULL DEFAULT NOW(),
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_ads_campaign
+                ON ads_campaign(user_id, campaign_id, period_start)
+                """
+            )
+    finally:
+        conn.close()
+
+
 def _json_backup_value(value):
     if value is None:
         return None
@@ -1387,8 +1449,13 @@ def _json_backup_value(value):
 
 def backup_critical_tables() -> None:
     """Dump JSON de tablas críticas antes de migraciones. Nunca bloquea el arranque."""
+    backup_dir = _resolve_backup_dir()
     try:
-        os.makedirs(_BACKUP_DIR, exist_ok=True)
+        try:
+            os.makedirs(backup_dir, exist_ok=True)
+        except OSError as exc:
+            print(f"[backup] Skip: no se pudo crear {backup_dir} ({exc})")
+            return
         if (config("DB_PROVIDER", default="") or "").strip().lower() != "postgres":
             print("[backup] Skip: DB_PROVIDER no es postgres")
             return
@@ -1435,7 +1502,7 @@ def backup_critical_tables() -> None:
             conn.close()
 
         stamp = datetime.now(_AR_TZ).strftime("%Y-%m-%d_%H-%M")
-        path = os.path.join(_BACKUP_DIR, f"backup_{stamp}.json")
+        path = os.path.join(backup_dir, f"backup_{stamp}.json")
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
 
@@ -1444,11 +1511,11 @@ def backup_critical_tables() -> None:
 
         existing = sorted(
             f
-            for f in os.listdir(_BACKUP_DIR)
+            for f in os.listdir(backup_dir)
             if f.startswith("backup_") and f.endswith(".json")
         )
         for old_name in existing[:-_BACKUP_KEEP]:
-            old_path = os.path.join(_BACKUP_DIR, old_name)
+            old_path = os.path.join(backup_dir, old_name)
             try:
                 os.remove(old_path)
                 print(f"[backup] Eliminado backup viejo {old_path}")
@@ -1486,6 +1553,7 @@ def init_db() -> None:
     _migrate_postgres_lead_calificacion_llamada()
     _migrate_postgres_lead_vino_de_ads()
     _migrate_postgres_weekly_report_feedback_marketing()
+    _migrate_postgres_ads_campaign()
     db.generate_mapping(create_tables=True)
     _migrate_agendo_en_iso_to_call()
     _migrate_agendo_en_default_chat_when_agendado()

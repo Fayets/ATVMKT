@@ -10,6 +10,7 @@ from src.services.anthropic_service import invalidate_claude_status_cache
 
 _CALENDLY_CREDENTIAL_KEYS = frozenset({"api_key", "signing_key"})
 _GOOGLE_CALENDAR_CREDENTIAL_KEYS = frozenset({"service_account_json", "calendar_id"})
+_META_ADS_CREDENTIAL_KEYS = frozenset({"access_token", "ad_account_id"})
 
 
 def _sanitize_calendly_credentials(creds: dict) -> dict:
@@ -27,6 +28,14 @@ def _sanitize_google_calendar_credentials(creds: dict) -> dict:
         else:
             out[key] = str(raw).strip() if raw is not None else ""
     return out
+
+
+def _sanitize_meta_ads_credentials(creds: dict) -> dict:
+    """Solo persiste access token y Ad Account ID de Meta Ads."""
+    return {
+        k: str(creds.get(k) or "").strip() if creds.get(k) is not None else ""
+        for k in _META_ADS_CREDENTIAL_KEYS
+    }
 
 
 class ConexionesServices:
@@ -72,6 +81,10 @@ class ConexionesServices:
             for key in _GOOGLE_CALENDAR_CREDENTIAL_KEYS:
                 if not str(merged.get(key) or "").strip() and str(previous.get(key) or "").strip():
                     merged[key] = previous[key]
+        elif pl == "meta_ads":
+            for key in _META_ADS_CREDENTIAL_KEYS:
+                if not str(merged.get(key) or "").strip() and str(previous.get(key) or "").strip():
+                    merged[key] = previous[key]
         elif pl == "manychat":
             for key in ("api_key", "webhook_token", "bio_keyword"):
                 if not str(merged.get(key) or "").strip() and str(previous.get(key) or "").strip():
@@ -101,6 +114,8 @@ class ConexionesServices:
                 incoming_credentials = _sanitize_calendly_credentials(incoming_credentials)
             elif platform.lower() == "google_calendar":
                 incoming_credentials = _sanitize_google_calendar_credentials(incoming_credentials)
+            elif platform.lower() == "meta_ads":
+                incoming_credentials = _sanitize_meta_ads_credentials(incoming_credentials)
             if existing:
                 previous_credentials = existing.credentials if isinstance(existing.credentials, dict) else {}
                 incoming_credentials = self._merge_previous_credentials(

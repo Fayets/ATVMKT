@@ -1011,7 +1011,7 @@ export function LeadsPage() {
 
       <AgendaPointPickerModal
         open={Boolean(agendaModalLead || funnelModalLead)}
-        modalTitle={funnelModalLead ? '1er ingreso embudo' : 'Punto de agenda'}
+        modalTitle={funnelModalLead ? 'Punto de agenda base' : 'Punto de agenda'}
         onClose={() => {
           setAgendaModalLead(null)
           setFunnelModalLead(null)

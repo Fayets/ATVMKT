@@ -10,6 +10,8 @@ type Props = {
   setterOptions: string[]
   loading: boolean
   onAssign: (lead: PendingAgendaLead) => void
+  /** Abre el picker del punto de agenda base (columna `via`). */
+  onAssignBase: (lead: PendingAgendaLead) => void
   onSetterChange: (leadId: number, setter: string) => Promise<void>
 }
 
@@ -81,6 +83,7 @@ export function PendingAgendaTable({
   setterOptions,
   loading,
   onAssign,
+  onAssignBase,
   onSetterChange,
 }: Props) {
   if (loading && items.length === 0) {
@@ -103,6 +106,7 @@ export function PendingAgendaTable({
         <div>IG</div>
         <div>Call</div>
         <div>Setter</div>
+        <div>Punto de agenda base</div>
         <div>Punto de agenda</div>
       </div>
       {items.map((row, index) => (
@@ -121,6 +125,16 @@ export function PendingAgendaTable({
             setterOptions={setterOptions}
             onSetterChange={onSetterChange}
           />
+          <div className="neo-agenda__action">
+            <button
+              type="button"
+              className="neo-panel__btn neo-panel__btn--ghost neo-agenda__assign-btn"
+              onClick={() => onAssignBase(row)}
+              title={row.entry_channel?.trim() || 'Sin asignar'}
+            >
+              {row.entry_channel?.trim() ? 'Cambiar' : 'Asignar'}
+            </button>
+          </div>
           <div className="neo-agenda__action">
             <button
               type="button"

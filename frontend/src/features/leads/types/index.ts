@@ -230,7 +230,7 @@ export function buildColumns(
     },
     // entry_funnel (keyword) no se muestra en esta vista
     { key: 'agenda_point', label: 'Pto agenda', width: 160, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
-    { key: 'entry_channel', label: '1er ingreso embudo', width: 180, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
+    { key: 'entry_channel', label: 'Punto de agenda base', width: 180, type: 'badge', editable: false, options: [''], colors: {}, defaultVisible: true },
     { key: 'ctas_responded', label: 'CTAs resp.', width: 90, type: 'number', editable: true, defaultVisible: true },
     // Fechas
     { key: 'first_contact_at', label: '1er contacto', width: 120, type: 'date', editable: true, defaultVisible: true },

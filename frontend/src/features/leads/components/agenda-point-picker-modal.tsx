@@ -27,7 +27,7 @@ type YtItem = {
 type Props = {
   open: boolean
   onClose: () => void
-  /** Título del modal (ej. «Punto de agenda» o «1er ingreso embudo»). */
+  /** Título del modal (ej. «Punto de agenda» o «Punto de agenda base»). */
   modalTitle?: string
   /** True si el lead ya tiene un valor guardado (mostrar opción de quitar). */
   hasAssignedPuntoAgenda: boolean
