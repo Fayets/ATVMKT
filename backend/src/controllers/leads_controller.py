@@ -42,13 +42,15 @@ _YOUTUBE_AGENDA_PREFIX = "youtube:"
 
 
 def _normalize_channel_anchor_value(user_id_int: int, raw: str | None) -> str:
-    """Valor canónico para `punto_agenda` o `via`: bio, reel id, story:<id>, youtube:<id>, texto libre."""
+    """Valor canónico para `punto_agenda` o `via`: bio, ads, reel id, story:<id>, youtube:<id>, texto libre."""
     s = (str(raw) if raw is not None else "").strip()
     if not s:
         return ""
     low = s.casefold()
     if low == "bio":
         return "bio"
+    if low == "ads":
+        return "ads"
     if low.startswith(_STORY_AGENDA_PREFIX):
         rest = s[len(_STORY_AGENDA_PREFIX) :].strip()
         try:

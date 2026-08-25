@@ -217,6 +217,16 @@ export function AgendaPointPickerModal({
     }
   }
 
+  const pickAds = async () => {
+    setSaving(true)
+    try {
+      await onSavePuntoAgenda('ads')
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const pickReel = async (r: ReelItem) => {
     const id = String(r.id)
     setSaving(true)
@@ -305,7 +315,7 @@ export function AgendaPointPickerModal({
       {step === 'menu' && (
         <div className="space-y-4">
           <p className="text-[12px] text-[var(--text3)]">Elegí a qué pieza enlaza este lead.</p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <button
               type="button"
               disabled={saving}
@@ -344,6 +354,15 @@ export function AgendaPointPickerModal({
             >
               <div className="text-[13px] font-semibold text-[var(--text)]">Bio</div>
               <div className="mt-1 text-[11px] text-[var(--text3)]">Guarda &quot;bio&quot; como referencia</div>
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void pickAds()}
+              className="rounded-xl border border-[var(--border2)] bg-[var(--bg3)] px-4 py-6 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-50"
+            >
+              <div className="text-[13px] font-semibold text-[var(--text)]">Ads</div>
+              <div className="mt-1 text-[11px] text-[var(--text3)]">Vino de un anuncio pago</div>
             </button>
           </div>
           {hasAssignedPuntoAgenda && (

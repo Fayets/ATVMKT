@@ -53,7 +53,7 @@ def _fecha_corta(d: date | None) -> str:
 def _resolver_pieza(token: str, base_url: str, cache: dict[str, Any]) -> dict[str, Any] | None:
     """Token canónico de `via` / `punto_agenda` → pieza con label y miniatura.
 
-    Formatos: '' | 'bio' | '<id>' (reel) | 'story:<id>' | 'youtube:<id>' | texto libre.
+    Formatos: '' | 'bio' | 'ads' | '<id>' (reel) | 'story:<id>' | 'youtube:<id>' | texto libre.
     """
     t = (token or "").strip()
     if not t:
@@ -68,6 +68,8 @@ def _resolver_pieza(token: str, base_url: str, cache: dict[str, Any]) -> dict[st
 
     if low == "bio":
         pieza = {"tipo": "bio", "label": "BIO", "thumb": "", "fecha": ""}
+    elif low == "ads":
+        pieza = {"tipo": "ads", "label": "ADS", "thumb": "", "fecha": ""}
     elif low.startswith("story:"):
         sid = t.split(":", 1)[1].strip()
         seq = StorySequence.get(id=int(sid)) if sid.isdigit() else None

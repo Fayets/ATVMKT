@@ -55,6 +55,7 @@ function formatAgendaPointBadgeText(
   const k = String(raw || '').trim()
   if (!k) return ''
   if (k.toLowerCase() === 'bio') return '[BIO]'
+  if (k.toLowerCase() === 'ads') return '[ADS]'
   const yt = /^youtube:(\d+)$/i.exec(k)
   if (yt) {
     const id = yt[1]
