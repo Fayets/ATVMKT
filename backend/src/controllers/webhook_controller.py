@@ -1,5 +1,9 @@
+import asyncio
 import re
+import subprocess
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, HTTPException, Request
 from pony.orm import db_session
 
@@ -8,6 +12,31 @@ from src.lead_display_utils import compute_dias_para_agendar
 from src.models import ApiConnection, Lead, ReelContent
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"], redirect_slashes=False)
+
+AR_TZ = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+async def _notificar_agenda_whatsapp(nombre: str, hora: str, closer: str) -> None:
+    mensaje = (
+        f"📅 *Nueva agenda*\n"
+        f"👤 {nombre}\n"
+        f"🕐 {hora} AR\n"
+        f"📞 Closer: {closer}\n"
+        f"@5493804206496 @5491138904474 @5491162791965"
+    )
+    subprocess.Popen(
+        [
+            "openclaw",
+            "message",
+            "send",
+            "--channel",
+            "whatsapp",
+            "--target",
+            "120363405702147911@g.us",
+            "--message",
+            mensaje,
+        ]
+    )
 
 
 def _norm_kw(s: str) -> str:
@@ -466,6 +495,10 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
     form_completed_at = _calendly_webhook_received_at(flat, inner_payload)
     form_fields = _extract_calendly_form_fields(flat, inner_payload)
 
+    notify_nombre = ""
+    notify_call: datetime | None = None
+    notify_closer = "Sin asignar"
+
     with db_session:
         calendly_conns = [
             c
@@ -521,6 +554,14 @@ async def calendly_webhook(request: Request) -> dict[str, str]:
                 notas="\n".join(notas_parts),
             )
             _apply_calendly_form_fields(row, form_fields)
+
+        notify_nombre = str(row.nombre or "").strip() or "Sin nombre"
+        notify_call = row.call
+        notify_closer = str(row.closer or "").strip() or "Sin asignar"
+
+    if notify_call is not None:
+        hora = notify_call.replace(tzinfo=ZoneInfo("UTC")).astimezone(AR_TZ).strftime("%H:%M")
+        asyncio.create_task(_notificar_agenda_whatsapp(notify_nombre, hora, notify_closer))
 
     return {"status": "ok"}
 
