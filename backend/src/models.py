@@ -359,6 +359,8 @@ class AdsCampaign(db.Entity):
     campaign_id = Required(str)
     nombre = Optional(str, default="")
     estado = Optional(str, default="")
+    objective = Optional(str, default="")
+    thumbnail_url = Optional(str, default="")
     spend = Required(float, default=0)
     impressions = Required(int, default=0)
     clicks = Required(int, default=0)

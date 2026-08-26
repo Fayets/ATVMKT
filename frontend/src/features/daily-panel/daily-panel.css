@@ -359,6 +359,45 @@
   min-width: min(100%, 860px);
 }
 
+.neo-agenda__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.neo-agenda__search {
+  width: min(100%, 320px);
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--neo-border-dim);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--neo-text);
+  font-family: var(--neo-mono);
+  font-size: 12px;
+  outline: none;
+}
+
+.neo-agenda__search::placeholder {
+  color: var(--neo-text3);
+}
+
+.neo-agenda__search:focus {
+  border-color: var(--neo-accent);
+  box-shadow: 0 0 0 2px var(--neo-accent-dim);
+}
+
+.neo-agenda__search-meta {
+  font-family: var(--neo-mono);
+  font-size: 11px;
+  color: var(--neo-text3);
+}
+
+.neo-agenda__empty-search {
+  padding: 1.5rem 1rem;
+}
+
 .neo-agenda__head,
 .neo-agenda__row {
   display: grid;

@@ -136,9 +136,9 @@ const PLATFORMS: ConnectionPlatform[] = [
       steps: [
         'Entrá a Meta for Developers y creá (o usá) una app con Marketing API',
         'Generá un Access Token con permisos ads_read (y ads_management si hace falta)',
-        'Copiá el Ad Account ID desde Ads Manager (formato act_XXXXXXXXXX)',
-        'Pegá ambos campos acá y guardá la conexión',
-        'En Meta Ads usá «Sincronizar» para traer campañas del mes',
+        'Copiá el Ad Account ID completo desde Ads Manager (formato act_XXXXXXXXXX; verificá que no falte ningún dígito)',
+        'Pegá ambos campos acá, guardá y usá «Probar conexión»',
+        'Si está OK, sincronizá desde Dashboard ads o desde esta card',
       ],
     },
   },

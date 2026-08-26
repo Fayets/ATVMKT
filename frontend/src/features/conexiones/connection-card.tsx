@@ -457,6 +457,73 @@ function ConnectionCardInner({
     }
   }, [apiBase, platform.key])
 
+  const testMetaAdsConnection = useCallback(async () => {
+    if (platform.key !== 'meta_ads') return
+    setSyncing(true)
+    setSyncStatus('Probando conexión Meta Ads…')
+    try {
+      const res = await fetch(`${resolveBackendBase(apiBase)}/meta-ads/verify`, {
+        headers: backendAuthHeaders(),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean
+        detail?: string | { msg?: string }[]
+        ad_account_id?: string
+        steps?: { step: string; ok: boolean; detail: string }[]
+      }
+      if (!res.ok) {
+        const d = data.detail
+        const msg =
+          typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : 'Error al probar conexión'
+        setSyncStatus(`Error: ${msg}`)
+        return
+      }
+      const lines = (data.steps ?? []).map((s) => `${s.ok ? '✓' : '✗'} ${s.step}: ${s.detail}`)
+      const header = data.ok
+        ? 'Conexión OK — podés sincronizar campañas.'
+        : 'La conexión no puede leer campañas todavía.'
+      setSyncStatus([header, ...lines].join('\n'))
+    } catch (e) {
+      setSyncStatus(e instanceof Error ? e.message : 'Error al probar conexión')
+    } finally {
+      setSyncing(false)
+    }
+  }, [apiBase, platform.key])
+
+  const syncMetaAds = useCallback(async () => {
+    if (platform.key !== 'meta_ads') return
+    setSyncing(true)
+    setSyncStatus('Sincronizando campañas…')
+    try {
+      const res = await fetch(`${resolveBackendBase(apiBase)}/meta-ads/sync`, {
+        method: 'POST',
+        headers: backendAuthHeaders(),
+      })
+      const data = (await res.json().catch(() => ({}))) as {
+        detail?: string | { msg?: string }[]
+        campaigns?: number
+        created?: number
+        updated?: number
+      }
+      if (!res.ok) {
+        const d = data.detail
+        const msg =
+          typeof d === 'string' ? d : Array.isArray(d) ? JSON.stringify(d) : 'Error al sincronizar'
+        setSyncStatus(`Error: ${msg}`)
+        return
+      }
+      const n = Number(data.campaigns) || 0
+      setSyncStatus(
+        `Listo: ${n} campaña${n === 1 ? '' : 's'} (${data.created ?? 0} nuevas, ${data.updated ?? 0} actualizadas).`,
+      )
+      await onSyncComplete?.()
+    } catch (e) {
+      setSyncStatus(e instanceof Error ? e.message : 'Error al sincronizar')
+    } finally {
+      setSyncing(false)
+    }
+  }, [apiBase, onSyncComplete, platform.key])
+
   const instagramTestBlock =
     platform.key === 'instagram' && !isSetup ? (
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-4">
@@ -474,6 +541,41 @@ function ConnectionCardInner({
         {syncStatus ? (
           <p className="mt-3 whitespace-pre-line text-[12px] leading-snug text-[var(--text2)]">{syncStatus}</p>
         ) : null}
+      </div>
+    ) : null
+
+  const metaAdsTestBlock =
+    platform.key === 'meta_ads' && !isSetup ? (
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg3)] p-4">
+        <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">
+          Meta Ads — acceso a campañas
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={() => void testMetaAdsConnection()}
+            className="rounded-lg border border-[var(--border2)] bg-[var(--bg4)] px-5 py-2 text-[11px] font-semibold uppercase text-[var(--text)] disabled:opacity-50"
+          >
+            {syncing ? 'Probando…' : 'Probar conexión'}
+          </button>
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={() => void syncMetaAds()}
+            className="rounded-lg bg-[var(--accent)] px-5 py-2 text-[11px] font-semibold uppercase text-white disabled:opacity-50"
+          >
+            {syncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+          </button>
+        </div>
+        {syncStatus ? (
+          <p className="mt-3 whitespace-pre-line text-[12px] leading-snug text-[var(--text2)]">{syncStatus}</p>
+        ) : (
+          <p className="mt-3 text-[11px] leading-snug text-[var(--text3)]">
+            El token necesita permiso <span className="text-[var(--text2)]">ads_read</span> (o ads_management)
+            y el usuario tiene que ser admin de la ad account.
+          </p>
+        )}
       </div>
     ) : null
 
@@ -753,6 +855,7 @@ function ConnectionCardInner({
             {gcalSyncBlock}
             {ghlSyncBlock}
             {instagramTestBlock}
+            {metaAdsTestBlock}
             {webhookBlock}
           </div>
         )}
@@ -826,6 +929,7 @@ function ConnectionCardInner({
           {gcalSyncBlock}
           {ghlSyncBlock}
           {instagramTestBlock}
+          {metaAdsTestBlock}
           {webhookBlock}
         </div>
       )}

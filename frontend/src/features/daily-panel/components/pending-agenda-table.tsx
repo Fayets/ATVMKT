@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type ChangeEvent } from 'react'
+import { useMemo, useState, type ChangeEvent } from 'react'
 import { formatIsoDateDdMmYyyy } from '@/shared/lib/format-utils'
 import type { PendingAgendaLead } from '../types'
 
@@ -86,6 +86,20 @@ export function PendingAgendaTable({
   onAssignBase,
   onSetterChange,
 }: Props) {
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredItems = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return items
+    return items.filter((row) => {
+      const name = (row.client_name || '').toLowerCase()
+      const ig = (row.ig_handle || '').replace(/^@/, '').toLowerCase()
+      const setter = (row.setter || '').toLowerCase()
+      const base = (row.entry_channel || '').toLowerCase()
+      return name.includes(q) || ig.includes(q) || setter.includes(q) || base.includes(q)
+    })
+  }, [items, searchQuery])
+
   if (loading && items.length === 0) {
     return <div className="neo-panel__loading">Cargando agendas pendientes</div>
   }
@@ -100,6 +114,27 @@ export function PendingAgendaTable({
 
   return (
     <div className="neo-agenda">
+      <div className="neo-agenda__toolbar">
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Buscar por lead, IG o setter…"
+          className="neo-agenda__search"
+          aria-label="Buscar agendas pendientes"
+        />
+        {searchQuery.trim() ? (
+          <span className="neo-agenda__search-meta">
+            {filteredItems.length} de {items.length}
+          </span>
+        ) : null}
+      </div>
+      {filteredItems.length === 0 ? (
+        <div className="neo-panel__empty neo-agenda__empty-search">
+          <p>No hay resultados para &quot;{searchQuery.trim()}&quot;.</p>
+        </div>
+      ) : (
+        <>
       <div className="neo-agenda__head">
         <div className="neo-agenda__num">#</div>
         <div>Lead</div>
@@ -109,7 +144,7 @@ export function PendingAgendaTable({
         <div>Punto de agenda base</div>
         <div>Punto de agenda</div>
       </div>
-      {items.map((row, index) => (
+      {filteredItems.map((row, index) => (
         <div key={row.id} className="neo-agenda__row">
           <div className="neo-agenda__num">{index + 1}</div>
           <div className="neo-agenda__lead" title={row.client_name || 'Sin nombre'}>
@@ -146,6 +181,8 @@ export function PendingAgendaTable({
           </div>
         </div>
       ))}
+        </>
+      )}
     </div>
   )
 }

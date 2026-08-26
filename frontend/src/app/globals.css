@@ -68,6 +68,10 @@
   --text3: #71717a;
   --topbar-bg: rgba(255, 255, 255, 0.88);
   --nav-hover: rgba(0, 0, 0, 0.05);
+  /* El ámbar/verde del tema oscuro quedan ilegibles sobre blanco (1,9:1 y 2,8:1).
+     Mismo hue, un escalón más oscuro, para que el semáforo se lea en ambos temas. */
+  --amber: #B45309;
+  --green: #15803D;
 }
 
 @layer base {

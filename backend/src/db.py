@@ -1410,6 +1410,8 @@ def _migrate_postgres_ads_campaign() -> None:
                     campaign_id TEXT NOT NULL,
                     nombre TEXT NOT NULL DEFAULT '',
                     estado TEXT NOT NULL DEFAULT '',
+                    objective TEXT NOT NULL DEFAULT '',
+                    thumbnail_url TEXT NOT NULL DEFAULT '',
                     spend FLOAT NOT NULL DEFAULT 0,
                     impressions INTEGER NOT NULL DEFAULT 0,
                     clicks INTEGER NOT NULL DEFAULT 0,
@@ -1422,6 +1424,12 @@ def _migrate_postgres_ads_campaign() -> None:
                     created_at TIMESTAMP NOT NULL DEFAULT NOW()
                 )
                 """
+            )
+            cur.execute(
+                "ALTER TABLE ads_campaign ADD COLUMN IF NOT EXISTS objective TEXT NOT NULL DEFAULT ''"
+            )
+            cur.execute(
+                "ALTER TABLE ads_campaign ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT ''"
             )
             cur.execute(
                 """
