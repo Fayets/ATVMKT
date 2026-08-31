@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 import httpx
@@ -219,6 +219,10 @@ def _fetch_scheduled_events(
             if min_start and max_start:
                 params["min_start_time"] = min_start
                 params["max_start_time"] = max_start
+            else:
+                now = datetime.now(timezone.utc)
+                params["min_start_time"] = (now - timedelta(days=30)).isoformat()
+                params["max_start_time"] = (now + timedelta(days=14)).isoformat()
             data = _calendly_get(client, headers, path="/scheduled_events", params=params)
 
         collection = data.get("collection") or []
@@ -382,6 +386,11 @@ def _apply_invitee_to_lead(
     display_name = name.strip() or (email.split("@")[0] if email else "Invitado Calendly")
     row = _find_lead_by_email(user_id, email) if email else None
     fields = form_fields or {}
+
+    if row is not None and row.call is not None and call_at is not None:
+        existing_call = row.call.replace(tzinfo=timezone.utc) if row.call.tzinfo is None else row.call
+        if abs((existing_call - call_at).total_seconds()) < 60:
+            return "skipped"
 
     if row is not None:
         if display_name:
