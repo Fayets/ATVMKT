@@ -10,13 +10,13 @@ from datetime import date, datetime, time as dt_time
 
 from decouple import config
 
-SECRET = (config("SECRET", default="atvmkt") or "atvmkt").encode()
-ADMIN_PANEL_PASSWORD = (config("ADMIN_PANEL_PASSWORD", default="francoatv500k") or "").strip()
+SECRET = (config("SECRET", default="") or "").encode()
+ADMIN_PANEL_PASSWORD = (config("ADMIN_PANEL_PASSWORD", default="") or "").strip()
 TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7  # 7 días
 
 
 def verify_admin_password(password: str) -> bool:
-    if not ADMIN_PANEL_PASSWORD:
+    if not ADMIN_PANEL_PASSWORD or not SECRET:
         return False
     candidate = (password or "").strip()
     return hmac.compare_digest(candidate, ADMIN_PANEL_PASSWORD)
@@ -34,7 +34,7 @@ def create_admin_panel_token(user_id: int) -> str:
 
 
 def verify_admin_panel_token(token: str, user_id: int) -> bool:
-    if not token or not token.strip():
+    if not token or not token.strip() or not SECRET:
         return False
     try:
         decoded = base64.urlsafe_b64decode(token.strip().encode()).decode()

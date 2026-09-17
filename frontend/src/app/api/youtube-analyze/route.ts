@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 // POST /api/youtube-analyze — Analyze YouTube video with AI
 export async function POST(request: Request) {
-  const uid = requireNumericUserId(request)
+  const uid = await requireNumericUserId(request)
   if (uid instanceof NextResponse) return uid
 
   const body = await request.json()

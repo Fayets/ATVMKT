@@ -9,28 +9,18 @@ from src.schemas import (
     OfferedProgramsListResponse,
 )
 from src.services.programs_services import ProgramsServices
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/programs", tags=["programs"], redirect_slashes=False)
 
 _service = ProgramsServices()
 
 
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
-
-
 def _parse_uid(user_id: str) -> int:
     try:
         return int(user_id.strip())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail="X-User-Id debe ser numérico.") from e
+        raise HTTPException(status_code=400, detail="user_id inválido.") from e
 
 
 @router.get("", response_model=OfferedProgramsListResponse)

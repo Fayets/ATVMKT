@@ -15,6 +15,7 @@ from pony.orm import db_session
 
 from src.controllers.leads_controller import _lead_month_ar
 from src.models import AdsCampaign, ApiConnection, Lead
+from src.auth_deps import require_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -50,22 +51,11 @@ _MAX_PAGES = 50
 _HTTP_TIMEOUT = 60.0
 
 
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
-
-
 def _uid_int(user_id: str) -> int:
     try:
         return int(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="X-User-Id debe ser numérico.")
+        raise HTTPException(status_code=400, detail="user_id inválido.")
 
 
 def _parse_month(month: str | None) -> tuple[int, int]:

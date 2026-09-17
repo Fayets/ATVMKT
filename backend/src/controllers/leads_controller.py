@@ -32,6 +32,7 @@ from src.services.call_report_service import (
     is_fathom_link,
     normalize_fathom_url,
 )
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/leads", tags=["leads"], redirect_slashes=False)
 
@@ -157,17 +158,6 @@ def _lead_sort_ts(row: LeadEntity) -> float:
     if dt.tzinfo is not None:
         dt = dt.replace(tzinfo=None)
     return float(dt.replace(tzinfo=timezone.utc).timestamp())
-
-
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
 
 
 def _dt_iso(dt: datetime | None) -> str | None:

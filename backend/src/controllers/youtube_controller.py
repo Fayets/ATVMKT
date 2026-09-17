@@ -14,6 +14,7 @@ from pony.orm import ObjectNotFound, db_session
 from src.db import db
 from src.schemas import YoutubeVideoPatchRequest
 from src.models import ApiConnection, Lead, YoutubeContent
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/youtube", tags=["youtube"], redirect_slashes=False)
 
@@ -23,22 +24,11 @@ _VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos"
 _DURATION_RE = re.compile(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?")
 
 
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
-
-
 def _uid_int(user_id: str) -> int:
     try:
         return int(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="X-User-Id debe ser numérico.")
+        raise HTTPException(status_code=400, detail="user_id inválido.")
 
 
 def parse_iso8601_duration(s: str | None) -> int | None:

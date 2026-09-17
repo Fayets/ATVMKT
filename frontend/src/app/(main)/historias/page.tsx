@@ -436,7 +436,7 @@ export default function HistoriasPage() {
       const reader = new FileReader()
       const dataUrl = await new Promise<string>((resolve) => { reader.onload = () => resolve(reader.result as string); reader.readAsDataURL(file) })
       const base64 = dataUrl.split(',')[1]
-      const res = await fetch('/api/analyze-image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg' }) })
+      const res = await fetch('/api/analyze-image', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ imageBase64: base64, mediaType: file.type || 'image/jpeg' }) })
       const data = await res.json()
       if (data.success) {
         const seqPositions: number[] = data.sequencePositions || []

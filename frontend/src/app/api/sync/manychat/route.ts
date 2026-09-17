@@ -6,7 +6,7 @@ const MANYCHAT_API = 'https://api.manychat.com'
 // GET /api/sync/manychat?action=tags — Fetch tags from ManyChat
 // GET /api/sync/manychat?action=tag_contacts&tag_id=123 — Fetch contacts with a tag
 export async function GET(request: Request) {
-  const uid = requireNumericUserId(request)
+  const uid = await requireNumericUserId(request)
   if (uid instanceof NextResponse) return uid
   void uid
 

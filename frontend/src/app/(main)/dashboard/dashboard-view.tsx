@@ -5,7 +5,7 @@ import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
-import { apiFetch } from '@/lib/api'
+import { apiFetch, backendAuthHeaders } from '@/lib/api'
 import { Line, Doughnut, Bar } from '@/shared/components/charts'
 import { calcFunnel, type LeadRow } from '@/features/leads/services/leads-analytics'
 import type { DashContentRow, DashData } from './dashboard-data-types'
@@ -159,8 +159,8 @@ function addToMonthDayBucket(
   buckets[pd - 1] += amount
 }
 
-function dashUserHeaders(userId: string): RequestInit {
-  return { headers: { 'X-User-Id': userId } }
+function dashUserHeaders(_userId: string): RequestInit {
+  return { headers: backendAuthHeaders() }
 }
 
 async function fetchReelsAsContent(monthKey: string, userId: string): Promise<DashContentRow[]> {
@@ -494,7 +494,7 @@ async function fetchBioMetricsLeads(
 ): Promise<number> {
   try {
     const res = await fetch(`${apiBase}/api/bio/metrics?month=${encodeURIComponent(monthKey)}`, {
-      headers: { 'X-User-Id': userId },
+      headers: backendAuthHeaders(),
     })
     if (!res.ok) return 0
     const payload = (await res.json().catch(() => ({}))) as { total_leads?: number }
@@ -773,7 +773,7 @@ export default function DashboardPage() {
     const loadBioMetrics = async () => {
       try {
         const res = await fetch(`${apiBase}/api/bio/metrics?month=${encodeURIComponent(month)}`, {
-          headers: { 'X-User-Id': userId },
+          headers: backendAuthHeaders(),
         })
         const txt = await res.text()
         const payload = (() => {

@@ -1,12 +1,18 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from typing import Annotated
+
+import secrets
 
 import bcrypt
 from decouple import config
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
 from pony.orm import db_session
 
+from src.auth_deps import (
+    create_access_token,
+    get_current_user_id,
+    get_current_username,
+)
 from src.models import AuthUser
 from src.schemas import (
     AuthChangePasswordRequest,
@@ -18,23 +24,30 @@ from src.schemas import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-JWT_SECRET = config("JWT_SECRET", default="change-this-secret")
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_MINUTES = config("JWT_EXPIRE_MINUTES", cast=int, default=60 * 24)
-REGISTER_ADMIN_KEY = config("REGISTER_ADMIN_KEY", default="change-this-register-key")
+# Re-export para los controllers que ya lo importaban desde acá.
+__all__ = ["router", "get_current_user_id", "get_current_username"]
 
 
-def _create_access_token(username: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(minutes=JWT_EXPIRE_MINUTES)
-    payload = {"sub": username, "exp": expire}
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+def require_register_key(
+    x_register_key: Annotated[str | None, Header(alias="X-Register-Key")] = None,
+) -> None:
+    """Alta de usuarios: solo con la llave del servidor. Sin llave configurada, nadie se registra."""
+    expected = str(config("REGISTER_ADMIN_KEY", default="") or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="REGISTER_ADMIN_KEY no configurado en el servidor.",
+        )
+    provided = str(x_register_key or "").strip()
+    if not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No autorizado.")
 
 
 @router.post("/register", response_model=AuthTokenResponse)
 def register_user(
     body: AuthRegisterRequest,
+    _: Annotated[None, Depends(require_register_key)],
 ):
     username = body.username.strip()
     password = body.password
@@ -50,7 +63,7 @@ def register_user(
         user = AuthUser(username=username, password_hash=password_hash, updated_at=datetime.utcnow())
         uid = user.id
 
-    return AuthTokenResponse(access_token=_create_access_token(username), user_id=uid)
+    return AuthTokenResponse(access_token=create_access_token(username, uid), user_id=uid)
 
 
 @router.post("/login", response_model=AuthTokenResponse)
@@ -71,31 +84,15 @@ def login_user(body: AuthLoginRequest):
 
         uid = user.id
 
-    return AuthTokenResponse(access_token=_create_access_token(username), user_id=uid)
-
-
-def get_current_username(token: str = Depends(oauth2_scheme)) -> str:
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        username = payload.get("sub")
-        if not username:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-        return username
-    except JWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-
-def get_current_user_id(username: str = Depends(get_current_username)) -> int:
-    with db_session:
-        user = AuthUser.get(username=username)
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-        return user.id
+    return AuthTokenResponse(access_token=create_access_token(username, uid), user_id=uid)
 
 
 @router.get("/me", response_model=AuthMeResponse)
-def me(username: str = Depends(get_current_username)):
-    return AuthMeResponse(username=username)
+def me(
+    username: Annotated[str, Depends(get_current_username)],
+    user_id: Annotated[int, Depends(get_current_user_id)],
+):
+    return AuthMeResponse(username=username, user_id=user_id)
 
 
 @router.post("/change-password", response_model=AuthChangePasswordResponse)

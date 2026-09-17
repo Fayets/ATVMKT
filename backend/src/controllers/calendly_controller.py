@@ -22,6 +22,7 @@ from src.controllers.webhook_controller import (
 )
 from src.lead_display_utils import compute_dias_para_agendar
 from src.models import ApiConnection, Lead
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/calendly", tags=["calendly"], redirect_slashes=False)
 
@@ -43,22 +44,11 @@ class CalendlyRateLimitError(Exception):
     pass
 
 
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
-
-
 def _uid_int(user_id: str) -> int:
     try:
         return int(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="X-User-Id debe ser numérico.")
+        raise HTTPException(status_code=400, detail="user_id inválido.")
 
 
 def _rows_for_user(user_id: int) -> list[Lead]:

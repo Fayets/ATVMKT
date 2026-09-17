@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { backendAuthHeaders } from '@/lib/api'
 import { useMonthContext } from '@/shared/components/app-providers'
 import { MonthSelector } from '@/shared/components/month-selector'
 import { Modal } from '@/shared/components/modal'
@@ -366,7 +367,7 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
     if (!userId) return
     setMcLoading(true)
     try {
-      const res = await fetch('/api/sync/manychat?action=tags', { headers: { 'X-User-Id': userId } })
+      const res = await fetch('/api/sync/manychat?action=tags', { headers: backendAuthHeaders() })
       const data = await res.json()
       setMcTags(data.tags || [])
       setShowTagPicker(true)
@@ -382,7 +383,7 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
     // Auto-sync chats count
     setMcSyncing(true)
     try {
-      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tag.id}${item ? `&content_id=${item.id}` : ''}`, { headers: { 'X-User-Id': userId } })
+      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tag.id}${item ? `&content_id=${item.id}` : ''}`, { headers: backendAuthHeaders() })
       const data = await res.json()
       if (data.chats !== undefined) set('chats', String(data.chats))
     } catch { /* ignore */ }
@@ -394,7 +395,7 @@ function ContentFormModal({ open, onClose, item, onSave, title, contentType }: C
     if (!tagId || !userId) return
     setMcSyncing(true)
     try {
-      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tagId}${item ? `&content_id=${item.id}` : ''}`, { headers: { 'X-User-Id': userId } })
+      const res = await fetch(`/api/sync/manychat?action=sync_content_chats&tag_id=${tagId}${item ? `&content_id=${item.id}` : ''}`, { headers: backendAuthHeaders() })
       const data = await res.json()
       if (data.chats !== undefined) set('chats', String(data.chats))
     } catch { /* ignore */ }

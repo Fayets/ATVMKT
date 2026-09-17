@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from fastapi.responses import JSONResponse
 from pony.orm import ObjectNotFound, db_session
 from pydantic import BaseModel, Field
+from src.auth_deps import require_user_id
 
 
 from src.lead_display_utils import compute_dias_para_agendar
@@ -28,21 +29,11 @@ _REQUEST_DELAY_S = 0.2
 class GHLSyncRequest(BaseModel):
     month: str | None = Field(default=None, description="YYYY-MM opcional para filtrar appointments")
 
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
-
 def _uid_int(user_id: str) -> int:
     try:
         return int(user_id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="X-User-Id debe ser numérico.")
+        raise HTTPException(status_code=400, detail="user_id inválido.")
 
 def _month_bounds_iso(month: str) -> tuple[str, str]:
     """Devuelve (start_iso, end_iso) para filtrar por mes."""

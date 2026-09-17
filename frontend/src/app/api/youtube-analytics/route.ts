@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 // POST /api/youtube-analytics — Analytics desde YouTube API (tokens vía backend)
 export async function POST(request: Request) {
-  const uid = requireNumericUserId(request)
+  const uid = await requireNumericUserId(request)
   if (uid instanceof NextResponse) return uid
   void uid
 

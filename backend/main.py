@@ -270,7 +270,17 @@ async def lifespan(_: FastAPI):
     scheduler.shutdown()
 
 
-app = FastAPI(title="ATVMkt Backend", version="0.1.0", lifespan=lifespan)
+# Swagger/OpenAPI expuestos solo si se habilitan a propósito (nunca en producción).
+_docs_enabled = config("ENABLE_DOCS", default=False, cast=bool)
+
+app = FastAPI(
+    title="ATVMkt Backend",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs_enabled else None,
+    redoc_url="/redoc" if _docs_enabled else None,
+    openapi_url="/openapi.json" if _docs_enabled else None,
+)
 # Ruta absoluta desde la ubicación de main.py
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 media_dir = os.path.join(BASE_DIR, "media")

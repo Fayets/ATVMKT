@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 // POST /api/analyze-image — Analyze a screenshot of Instagram stories with Claude Vision
 export async function POST(request: Request) {
-  const authUser = requireNumericUserId(request)
+  const authUser = await requireNumericUserId(request)
   if (authUser instanceof NextResponse) return authUser
 
   const body = await request.json()

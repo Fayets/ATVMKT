@@ -80,7 +80,7 @@ export async function login(username: string, password: string): Promise<AuthRes
 }
 
 export async function signup(): Promise<AuthResult> {
-  return { error: 'Registro deshabilitado. Crear usuarios desde Swagger /auth/register.' }
+  return { error: 'Registro deshabilitado. Los usuarios los crea un admin con la llave del servidor.' }
 }
 
 export async function changePassword(

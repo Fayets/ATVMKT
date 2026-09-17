@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 // POST /api/sync/youtube — Sync YouTube videos via YouTube Data API v3 (sin persistencia en Next)
 export async function POST(request: Request) {
-  const uid = requireNumericUserId(request)
+  const uid = await requireNumericUserId(request)
   if (uid instanceof NextResponse) return uid
   void uid
 

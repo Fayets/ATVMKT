@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 // POST /api/classify-vision — Classify content using Claude Vision on thumbnail images
 export async function POST(request: Request) {
-  const uid = requireNumericUserId(request)
+  const uid = await requireNumericUserId(request)
   if (uid instanceof NextResponse) return uid
 
   const apiKey = process.env.ANTHROPIC_API_KEY

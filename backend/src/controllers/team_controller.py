@@ -18,6 +18,7 @@ from src.services.closer_report_auto_service import (
 )
 from src.services.discord_service import DiscordServices
 from src.team_reports_pdf import build_team_reports_pdf, fecha_iso_a_dd_mm_yyyy
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/team", tags=["team"], redirect_slashes=False)
 discord_service = DiscordServices()
@@ -25,17 +26,6 @@ discord_service = DiscordServices()
 DEFAULT_COMMISSION_PCT = 5.0
 VALID_ROLES = frozenset({"setter", "closer", "cash"})
 SEGUIMIENTO_MEMBER_ROLES = frozenset({"setter", "closer", "cash"})
-
-
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
 
 
 def _notas_str(val: str | None) -> str:
@@ -85,7 +75,7 @@ def _parse_uid(user_id: str) -> int:
     try:
         return int(user_id.strip())
     except ValueError as e:
-        raise HTTPException(status_code=400, detail="X-User-Id debe ser numérico.") from e
+        raise HTTPException(status_code=400, detail="user_id inválido.") from e
 
 
 def _members_for_user(uid: int) -> list[TeamMember]:

@@ -6,6 +6,7 @@ import { MonthSelector } from '@/shared/components/month-selector'
 import { useToast } from '@/shared/components/toast'
 import { useAuthUser } from '@/shared/hooks/use-auth-user'
 import { formatCash } from '@/shared/lib/format-utils'
+import { backendAuthHeaders } from '@/lib/api'
 
 type BioLead = {
   id: string
@@ -117,7 +118,7 @@ export default function BioPage() {
     try {
       const q = month ? `?month=${encodeURIComponent(month)}` : ''
       const res = await fetch(`${apiBase}/api/bio/leads${q}`, {
-        headers: { 'X-User-Id': userId },
+        headers: backendAuthHeaders(),
       })
       const txt = await res.text()
       const data = (() => {
@@ -143,7 +144,7 @@ export default function BioPage() {
     try {
       const qm = month ? `?month=${encodeURIComponent(month)}` : ''
       const res = await fetch(`${apiBase}/api/bio/metrics${qm}`, {
-        headers: { 'X-User-Id': userId },
+        headers: backendAuthHeaders(),
       })
       const txt = await res.text()
       const data = (() => {
@@ -173,7 +174,7 @@ export default function BioPage() {
     if (!ready || !userId) return
     try {
       const res = await fetch(`${apiBase}/api/bio/via-options`, {
-        headers: { 'X-User-Id': userId },
+        headers: backendAuthHeaders(),
       })
       const txt = await res.text()
       const data = (() => {

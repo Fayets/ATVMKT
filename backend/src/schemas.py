@@ -26,6 +26,7 @@ class AuthTokenResponse(BaseModel):
 
 class AuthMeResponse(BaseModel):
     username: str
+    user_id: int
 
 
 class AuthChangePasswordRequest(BaseModel):

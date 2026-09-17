@@ -24,16 +24,9 @@ from src.services.admin_panel_service import (
 )
 from src.services.agent_closer_service import AR_TZ, list_llamadas_dia
 from src.services.programs_services import build_program_norm_price_map
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/admin/panel", tags=["admin-panel"], redirect_slashes=False)
-
-
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if not x_user_id or not str(x_user_id).strip().isdigit():
-        raise HTTPException(status_code=401, detail="Sesión requerida.")
-    return str(x_user_id).strip()
 
 
 def require_admin_panel(

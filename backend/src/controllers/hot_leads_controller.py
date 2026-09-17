@@ -12,21 +12,11 @@ from src.schemas import (
     HotLeadPatchRequest,
     HotLeadsListResponse,
 )
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/hot-leads", tags=["hot-leads"], redirect_slashes=False)
 
 _AR = ZoneInfo("America/Argentina/Buenos_Aires")
-
-
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
 
 
 def _parse_month_query(month: str | None) -> tuple[int, int] | None:

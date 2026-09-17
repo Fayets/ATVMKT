@@ -22,19 +22,9 @@ from src.weekly_reports_export import (
     sanitize_weekly_content,
     weekly_report_filename,
 )
+from src.auth_deps import require_user_id
 
 router = APIRouter(prefix="/api/weekly-reports", tags=["weekly-reports"], redirect_slashes=False)
-
-
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
 
 
 def _parse_uid(user_id: str) -> int:

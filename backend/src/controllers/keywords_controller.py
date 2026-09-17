@@ -1,3 +1,4 @@
+from src.auth_deps import require_user_id
 """Vista Keyword: leads con nombre, IG, reel vinculado por keyword y la keyword."""
 
 from typing import Annotated
@@ -20,17 +21,6 @@ from src.schemas import (
 )
 
 router = APIRouter(prefix="/api/keywords", tags=["keywords"], redirect_slashes=False)
-
-
-def require_user_id(
-    x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
-) -> str:
-    if x_user_id is None or not x_user_id.strip():
-        raise HTTPException(
-            status_code=401,
-            detail="Se requiere el header X-User-Id con el id del usuario autenticado.",
-        )
-    return x_user_id.strip()
 
 
 def _norm_key(s: str) -> str:
