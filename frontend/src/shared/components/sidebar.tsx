@@ -50,7 +50,7 @@ const dataGroups: NavGroup[] = [
     title: 'Trackeo de contenido', icon: '📊',
     items: [
       { label: 'Reels', href: '/reels', children: [{ label: 'Métricas', href: '/metrica-reels' }] },
-      { label: 'Historias', href: '/historias' },
+      { label: 'Historias', href: '/historias', children: [{ label: 'Ranking', href: '/historias/ranking' }] },
       { label: 'YouTube', href: '/youtube' },
       { label: 'BIO', href: '/bio' },
       { label: 'Lead por reel', href: '/keywords', children: [{ label: 'Métricas', href: '/metrica-keywords' }] },
